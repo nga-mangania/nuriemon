@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { FileUpload } from "./components/FileUpload";
 import { ImagePreview } from "./components/ImagePreview";
+import { BackgroundRemover } from "./components/BackgroundRemover";
 import { SavedImages } from "./components/SavedImages";
 import { initializeStorage } from "./services/imageStorage";
 import styles from "./App.module.scss";
@@ -36,6 +37,12 @@ function App() {
           onImageSaved={handleImageSaved}
         />
         <ImagePreview imageData={selectedImage} fileName={selectedFileName} />
+        <BackgroundRemover
+          imageData={selectedImage}
+          fileName={selectedFileName}
+          onProcessed={handleImageSelect}
+          onSaved={handleImageSaved}
+        />
         <SavedImages 
           onImageLoad={handleImageSelect}
           refreshTrigger={refreshTrigger}

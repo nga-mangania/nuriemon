@@ -1,0 +1,57 @@
+@use 'sass:color';
+@use '../styles/variables' as vars;
+
+.backgroundRemover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: vars.$spacing-md;
+  padding: vars.$spacing-lg;
+  background-color: white;
+  border-radius: vars.$border-radius;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-top: vars.$spacing-lg;
+}
+
+.removeButton {
+  padding: vars.$spacing-md vars.$spacing-xl;
+  background-color: vars.$secondary-color;
+  color: white;
+  border: none;
+  border-radius: vars.$border-radius;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: vars.$transition-base;
+
+  &:hover:not(:disabled) {
+    background-color: color.adjust(vars.$secondary-color, $lightness: -10%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(vars.$secondary-color, 0.3);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  &:disabled {
+    background-color: color.adjust(vars.$secondary-color, $lightness: 20%);
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+}
+
+.processingText {
+  margin: 0;
+  color: vars.$primary-color;
+  font-size: 0.9rem;
+  text-align: center;
+  font-style: italic;
+}
+
+.errorText {
+  margin: 0;
+  color: #e74c3c;
+  font-size: 0.9rem;
+  text-align: center;
+}
