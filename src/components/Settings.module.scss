@@ -1,0 +1,148 @@
+@use 'sass:color';
+@use '../styles/variables' as vars;
+
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background-color: white;
+  border-radius: vars.$border-radius * 2;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  padding: vars.$spacing-xl;
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.title {
+  margin: 0 0 vars.$spacing-lg 0;
+  color: vars.$text-color;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.section {
+  margin-bottom: vars.$spacing-xl;
+}
+
+.sectionTitle {
+  margin: 0 0 vars.$spacing-md 0;
+  color: vars.$text-color;
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: vars.$spacing-sm;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: vars.$spacing-sm;
+  padding: vars.$spacing-sm;
+  border-radius: vars.$border-radius;
+  cursor: pointer;
+  transition: vars.$transition-base;
+
+  &:hover {
+    background-color: vars.$background-color;
+  }
+
+  input[type="radio"] {
+    cursor: pointer;
+  }
+
+  span {
+    flex: 1;
+  }
+}
+
+.customPath {
+  font-size: 0.85rem;
+  color: color.adjust(vars.$text-color, $lightness: 30%);
+  margin-left: vars.$spacing-md;
+  font-style: italic;
+}
+
+.selectButton {
+  margin-top: vars.$spacing-sm;
+  padding: vars.$spacing-sm vars.$spacing-md;
+  background-color: vars.$background-color;
+  color: vars.$text-color;
+  border: 1px solid vars.$border-color;
+  border-radius: vars.$border-radius;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: vars.$transition-base;
+
+  &:hover {
+    background-color: color.adjust(vars.$background-color, $lightness: -5%);
+  }
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: vars.$spacing-sm;
+  cursor: pointer;
+
+  input[type="checkbox"] {
+    cursor: pointer;
+  }
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: vars.$spacing-md;
+  margin-top: vars.$spacing-xl;
+  padding-top: vars.$spacing-lg;
+  border-top: 1px solid vars.$border-color;
+}
+
+.cancelButton,
+.saveButton {
+  padding: vars.$spacing-sm vars.$spacing-lg;
+  border: none;
+  border-radius: vars.$border-radius;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: vars.$transition-base;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.cancelButton {
+  background-color: vars.$background-color;
+  color: vars.$text-color;
+
+  &:hover:not(:disabled) {
+    background-color: color.adjust(vars.$background-color, $lightness: -5%);
+  }
+}
+
+.saveButton {
+  background-color: vars.$primary-color;
+  color: white;
+
+  &:hover:not(:disabled) {
+    background-color: color.adjust(vars.$primary-color, $lightness: -10%);
+  }
+}

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { saveImage } from '../services/imageStorage';
+import { loadSettings } from '../services/settings';
 import styles from './FileUpload.module.scss';
 
 interface FileUploadProps {
@@ -13,6 +14,14 @@ export function FileUpload({ onImageSelect, onImageSaved }: FileUploadProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [autoSave, setAutoSave] = useState(true);
+
+  // 設定を読み込む
+  useEffect(() => {
+    loadSettings().then(settings => {
+      setAutoSave(settings.autoSave);
+    });
+  }, []);
 
   const handleFileSelect = async () => {
     setIsLoading(true);
@@ -54,19 +63,21 @@ export function FileUpload({ onImageSelect, onImageSaved }: FileUploadProps) {
         setSelectedFileName(fileName);
         onImageSelect(dataUrl, fileName);
         
-        // 自動的に保存
-        try {
-          setIsSaving(true);
-          const metadata = await saveImage(dataUrl, fileName, 'original');
-          console.log('画像を保存しました:', metadata);
-          if (onImageSaved) {
-            onImageSaved(metadata);
+        // 自動保存が有効な場合のみ保存
+        if (autoSave) {
+          try {
+            setIsSaving(true);
+            const metadata = await saveImage(dataUrl, fileName, 'original');
+            console.log('画像を保存しました:', metadata);
+            if (onImageSaved) {
+              onImageSaved(metadata);
+            }
+          } catch (saveError) {
+            console.error('画像保存エラー:', saveError);
+            alert('画像の保存に失敗しました');
+          } finally {
+            setIsSaving(false);
           }
-        } catch (saveError) {
-          console.error('画像保存エラー:', saveError);
-          alert('画像の保存に失敗しました');
-        } finally {
-          setIsSaving(false);
         }
       }
     } catch (error) {

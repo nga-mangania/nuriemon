@@ -2,6 +2,8 @@ use std::process::{Command, Stdio};
 use std::io::{Write, BufRead, BufReader};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
+use std::fs;
+use std::path::Path;
 
 // Python処理の結果
 #[derive(Serialize, Deserialize)]
@@ -78,13 +80,62 @@ async fn process_image(image_data: String) -> Result<ProcessResult, String> {
     Err("Failed to get result from Python process".to_string())
 }
 
+// カスタムディレクトリへのファイル操作コマンド
+#[tauri::command]
+async fn ensure_directory(path: String) -> Result<(), String> {
+    let dir_path = Path::new(&path);
+    
+    if !dir_path.exists() {
+        fs::create_dir_all(&dir_path)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn write_file_absolute(path: String, contents: Vec<u8>) -> Result<(), String> {
+    let file_path = Path::new(&path);
+    
+    // 親ディレクトリが存在しない場合は作成
+    if let Some(parent) = file_path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create parent directory: {}", e))?;
+        }
+    }
+    
+    fs::write(&file_path, contents)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn read_file_absolute(path: String) -> Result<Vec<u8>, String> {
+    fs::read(&path)
+        .map_err(|e| format!("Failed to read file: {}", e))
+}
+
+#[tauri::command]
+async fn file_exists_absolute(path: String) -> Result<bool, String> {
+    Ok(Path::new(&path).exists())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![greet, process_image])
+        .invoke_handler(tauri::generate_handler![
+            greet, 
+            process_image,
+            ensure_directory,
+            write_file_absolute,
+            read_file_absolute,
+            file_exists_absolute
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

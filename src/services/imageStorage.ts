@@ -1,5 +1,7 @@
 import { BaseDirectory, exists, mkdir, readFile, writeFile, remove } from '@tauri-apps/plugin-fs';
-import { join, appDataDir } from '@tauri-apps/api/path';
+import { join } from '@tauri-apps/api/path';
+import { loadSettings, getSaveDirectory } from './settings';
+import { ensureDirectory, writeFileAbsolute, readFileAbsolute, fileExistsAbsolute } from './customFileOperations';
 
 // 画像のメタデータ型
 export interface ImageMetadata {
@@ -22,35 +24,128 @@ const ORIGINALS_DIR = 'originals';
 const PROCESSED_DIR = 'processed';
 
 /**
+ * 保存場所に対応するベースディレクトリを取得
+ */
+function getBaseDirectory(saveLocation: string): BaseDirectory {
+  switch (saveLocation) {
+    case 'pictures':
+      return BaseDirectory.Picture;
+    case 'downloads':
+      return BaseDirectory.Download;
+    case 'documents':
+      return BaseDirectory.Document;
+    case 'appData':
+    default:
+      return BaseDirectory.AppData;
+  }
+}
+
+/**
  * アプリケーションのデータディレクトリを初期化
  */
 export async function initializeStorage(): Promise<void> {
   try {
+    const settings = await loadSettings();
+    const saveDir = await getSaveDirectory(settings);
+    console.log('initializeStorage: 保存先ディレクトリ', saveDir);
+    console.log('initializeStorage: 保存場所タイプ', settings.saveLocation);
+    
     // imagesディレクトリが存在しない場合は作成
-    const imagesPath = await join(await appDataDir(), IMAGES_DIR);
-    if (!await exists(imagesPath)) {
-      await mkdir(imagesPath, { recursive: true });
+    const imagesPath = await join(saveDir, IMAGES_DIR);
+    console.log('initializeStorage: imagesパス', imagesPath);
+    
+    try {
+      // カスタムディレクトリの場合は特別な処理
+      if (settings.saveLocation === 'custom' && settings.customPath) {
+        // カスタムパスの場合は絶対パスとして扱う
+        if (!await fileExistsAbsolute(imagesPath)) {
+          console.log('initializeStorage: カスタムimagesディレクトリを作成');
+          await ensureDirectory(imagesPath);
+        }
+      } else {
+        // 標準ディレクトリの場合
+        const baseDir = getBaseDirectory(settings.saveLocation);
+        if (!await exists(imagesPath, { baseDir })) {
+          console.log('initializeStorage: 標準imagesディレクトリを作成');
+          await mkdir(imagesPath, { baseDir, recursive: true });
+        }
+      }
+    } catch (error) {
+      console.log('initializeStorage: exists/mkdirエラー、別の方法を試行', error);
+      // カスタムディレクトリの場合は、ベースディレクトリを使わない絶対パス操作を試行
+      try {
+        await mkdir(imagesPath, { recursive: true });
+      } catch (mkdirError) {
+        console.error('initializeStorage: ディレクトリ作成失敗', mkdirError);
+        throw mkdirError;
+      }
     }
 
     // サブディレクトリを作成
     const originalsPath = await join(imagesPath, ORIGINALS_DIR);
     const processedPath = await join(imagesPath, PROCESSED_DIR);
     
-    if (!await exists(originalsPath)) {
-      await mkdir(originalsPath, { recursive: true });
-    }
-    
-    if (!await exists(processedPath)) {
-      await mkdir(processedPath, { recursive: true });
+    if (settings.saveLocation === 'custom' && settings.customPath) {
+      // カスタムディレクトリの場合
+      if (!await fileExistsAbsolute(originalsPath)) {
+        console.log('initializeStorage: カスタムoriginalsディレクトリを作成', originalsPath);
+        await ensureDirectory(originalsPath);
+      }
+      if (!await fileExistsAbsolute(processedPath)) {
+        console.log('initializeStorage: カスタムprocessedディレクトリを作成', processedPath);
+        await ensureDirectory(processedPath);
+      }
+    } else {
+      // 標準ディレクトリの場合
+      const baseDir = getBaseDirectory(settings.saveLocation);
+      try {
+        if (!await exists(originalsPath, { baseDir })) {
+          console.log('initializeStorage: 標準originalsディレクトリを作成', originalsPath);
+          await mkdir(originalsPath, { baseDir, recursive: true });
+        }
+      } catch (error) {
+        console.log('initializeStorage: originals exists/mkdirエラー', error);
+        await mkdir(originalsPath, { baseDir, recursive: true });
+      }
+      
+      try {
+        if (!await exists(processedPath, { baseDir })) {
+          console.log('initializeStorage: 標準processedディレクトリを作成', processedPath);
+          await mkdir(processedPath, { baseDir, recursive: true });
+        }
+      } catch (error) {
+        console.log('initializeStorage: processed exists/mkdirエラー', error);
+        await mkdir(processedPath, { baseDir, recursive: true });
+      }
     }
 
     // メタデータファイルが存在しない場合は初期化
-    const metadataPath = await join(await appDataDir(), METADATA_FILE);
-    if (!await exists(metadataPath)) {
+    const metadataPath = await join(saveDir, METADATA_FILE);
+    try {
+      if (settings.saveLocation === 'custom' && settings.customPath) {
+        // カスタムパスの場合
+        if (!await fileExistsAbsolute(metadataPath)) {
+          console.log('initializeStorage: カスタムメタデータファイルを作成', metadataPath);
+          await writeFileAbsolute(metadataPath, new TextEncoder().encode('[]'));
+        }
+      } else {
+        // 標準ディレクトリの場合
+        const baseDir = getBaseDirectory(settings.saveLocation);
+        if (!await exists(metadataPath, { baseDir })) {
+          console.log('initializeStorage: 標準メタデータファイルを作成', metadataPath);
+          await writeFile(metadataPath, new TextEncoder().encode('[]'), { baseDir });
+        }
+      }
+    } catch (error) {
+      console.log('initializeStorage: metadata exists/writeエラー', error);
       await writeFile(metadataPath, new TextEncoder().encode('[]'));
     }
   } catch (error) {
     console.error('ストレージ初期化エラー:', error);
+    console.error('エラー詳細:', {
+      message: error instanceof Error ? error.message : '不明なエラー',
+      stack: error instanceof Error ? error.stack : undefined
+    });
     throw error;
   }
 }
@@ -80,6 +175,8 @@ export async function saveImage(
   type: 'original' | 'processed' = 'original'
 ): Promise<ImageMetadata> {
   try {
+    console.log('saveImage: 開始', { originalFileName, type });
+    
     await initializeStorage();
 
     // ユニークなファイル名を生成
@@ -87,13 +184,33 @@ export async function saveImage(
     const extension = originalFileName.split('.').pop() || 'png';
     const savedFileName = `${timestamp}-${Math.random().toString(36).substr(2, 9)}.${extension}`;
 
+    // 設定を読み込み
+    const settings = await loadSettings();
+    
     // 保存パスを決定
+    const saveDir = await getSaveDirectory(settings);
+    console.log('saveImage: 保存先ディレクトリ', saveDir);
+    console.log('saveImage: 保存場所タイプ', settings.saveLocation);
+    
     const subDir = type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
-    const imagePath = await join(await appDataDir(), IMAGES_DIR, subDir, savedFileName);
+    const imagePath = await join(saveDir, IMAGES_DIR, subDir, savedFileName);
+    console.log('saveImage: 完全な保存パス', imagePath);
 
     // 画像データをバイナリに変換して保存
     const imageBytes = base64ToUint8Array(imageData);
-    await writeFile(imagePath, imageBytes);
+    console.log('saveImage: 画像サイズ', imageBytes.length, 'bytes');
+    
+    // カスタムディレクトリの場合は特別な処理
+    if (settings.saveLocation === 'custom' && settings.customPath) {
+      console.log('saveImage: カスタムディレクトリに保存');
+      await writeFileAbsolute(imagePath, imageBytes);
+    } else {
+      console.log('saveImage: 標準ディレクトリに保存');
+      const baseDir = getBaseDirectory(settings.saveLocation);
+      await writeFile(imagePath, imageBytes, { baseDir });
+    }
+    
+    console.log('saveImage: ファイル書き込み完了');
 
     // メタデータを作成
     const metadata: ImageMetadata = {
@@ -125,6 +242,10 @@ export async function saveImage(
     return metadata;
   } catch (error) {
     console.error('画像保存エラー:', error);
+    console.error('エラー詳細:', {
+      message: error instanceof Error ? error.message : '不明なエラー',
+      stack: error instanceof Error ? error.stack : undefined
+    });
     throw error;
   }
 }
@@ -133,14 +254,24 @@ export async function saveImage(
  * メタデータを保存
  */
 async function saveMetadata(newMetadata: ImageMetadata): Promise<void> {
-  const metadataPath = await join(await appDataDir(), METADATA_FILE);
+  const settings = await loadSettings();
+  const metadataPath = await join(await getSaveDirectory(settings), METADATA_FILE);
   
   // 既存のメタデータを読み込み
   let metadataList: ImageMetadata[] = [];
   try {
-    const data = await readFile(metadataPath);
-    const jsonStr = new TextDecoder().decode(data);
-    metadataList = JSON.parse(jsonStr);
+    if (settings.saveLocation === 'custom' && settings.customPath) {
+      if (await fileExistsAbsolute(metadataPath)) {
+        const data = await readFileAbsolute(metadataPath);
+        const jsonStr = new TextDecoder().decode(data);
+        metadataList = JSON.parse(jsonStr);
+      }
+    } else {
+      const baseDir = getBaseDirectory(settings.saveLocation);
+      const data = await readFile(metadataPath, { baseDir });
+      const jsonStr = new TextDecoder().decode(data);
+      metadataList = JSON.parse(jsonStr);
+    }
   } catch (error) {
     console.warn('メタデータ読み込みエラー:', error);
   }
@@ -150,7 +281,12 @@ async function saveMetadata(newMetadata: ImageMetadata): Promise<void> {
 
   // 保存
   const jsonData = JSON.stringify(metadataList, null, 2);
-  await writeFile(metadataPath, new TextEncoder().encode(jsonData));
+  if (settings.saveLocation === 'custom' && settings.customPath) {
+    await writeFileAbsolute(metadataPath, new TextEncoder().encode(jsonData));
+  } else {
+    const baseDir = getBaseDirectory(settings.saveLocation);
+    await writeFile(metadataPath, new TextEncoder().encode(jsonData), { baseDir });
+  }
 }
 
 /**
@@ -158,8 +294,21 @@ async function saveMetadata(newMetadata: ImageMetadata): Promise<void> {
  */
 export async function getAllMetadata(): Promise<ImageMetadata[]> {
   try {
-    const metadataPath = await join(await appDataDir(), METADATA_FILE);
-    const data = await readFile(metadataPath);
+    const settings = await loadSettings();
+    const metadataPath = await join(await getSaveDirectory(settings), METADATA_FILE);
+    
+    let data: Uint8Array;
+    if (settings.saveLocation === 'custom' && settings.customPath) {
+      if (await fileExistsAbsolute(metadataPath)) {
+        data = await readFileAbsolute(metadataPath);
+      } else {
+        return [];
+      }
+    } else {
+      const baseDir = getBaseDirectory(settings.saveLocation);
+      data = await readFile(metadataPath, { baseDir });
+    }
+    
     const jsonStr = new TextDecoder().decode(data);
     return JSON.parse(jsonStr);
   } catch (error) {
@@ -173,10 +322,17 @@ export async function getAllMetadata(): Promise<ImageMetadata[]> {
  */
 export async function loadImage(metadata: ImageMetadata): Promise<string> {
   try {
+    const settings = await loadSettings();
     const subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
-    const imagePath = await join(await appDataDir(), IMAGES_DIR, subDir, metadata.savedFileName);
+    const imagePath = await join(await getSaveDirectory(settings), IMAGES_DIR, subDir, metadata.savedFileName);
     
-    const imageData = await readFile(imagePath);
+    let imageData: Uint8Array;
+    if (settings.saveLocation === 'custom' && settings.customPath) {
+      imageData = await readFileAbsolute(imagePath);
+    } else {
+      const baseDir = getBaseDirectory(settings.saveLocation);
+      imageData = await readFile(imagePath, { baseDir });
+    }
     
     // MIMEタイプを推測
     const extension = metadata.savedFileName.split('.').pop()?.toLowerCase();
@@ -205,18 +361,33 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
  */
 export async function deleteImage(metadata: ImageMetadata): Promise<void> {
   try {
+    const settings = await loadSettings();
+    
     // 画像ファイルを削除
     const subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
-    const imagePath = await join(await appDataDir(), IMAGES_DIR, subDir, metadata.savedFileName);
-    await remove(imagePath);
+    const imagePath = await join(await getSaveDirectory(settings), IMAGES_DIR, subDir, metadata.savedFileName);
+    
+    if (settings.saveLocation === 'custom' && settings.customPath) {
+      // カスタムディレクトリの場合、Rust側で削除を実装する必要がある
+      // 現在はスキップ
+      console.warn('カスタムディレクトリからの削除は未実装です');
+    } else {
+      const baseDir = getBaseDirectory(settings.saveLocation);
+      await remove(imagePath, { baseDir });
+    }
 
     // メタデータから削除
-    const metadataPath = await join(await appDataDir(), METADATA_FILE);
+    const metadataPath = await join(await getSaveDirectory(settings), METADATA_FILE);
     const allMetadata = await getAllMetadata();
     const updatedMetadata = allMetadata.filter(m => m.id !== metadata.id);
     
     const jsonData = JSON.stringify(updatedMetadata, null, 2);
-    await writeFile(metadataPath, new TextEncoder().encode(jsonData));
+    if (settings.saveLocation === 'custom' && settings.customPath) {
+      await writeFileAbsolute(metadataPath, new TextEncoder().encode(jsonData));
+    } else {
+      const baseDir = getBaseDirectory(settings.saveLocation);
+      await writeFile(metadataPath, new TextEncoder().encode(jsonData), { baseDir });
+    }
   } catch (error) {
     console.error('画像削除エラー:', error);
     throw error;

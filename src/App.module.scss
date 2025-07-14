@@ -11,6 +11,10 @@
   background-color: white;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   padding: vars.$spacing-md;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
 }
 
 .title {
@@ -42,4 +46,21 @@
   display: flex;
   flex-direction: column;
   gap: vars.$spacing-lg;
+}
+
+.settingsButton {
+  position: absolute;
+  right: vars.$spacing-md;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: vars.$transition-base;
+  padding: vars.$spacing-sm;
+  
+  &:hover {
+    opacity: 1;
+    transform: rotate(90deg);
+  }
 }

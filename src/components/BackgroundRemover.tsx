@@ -6,7 +6,7 @@ import styles from './BackgroundRemover.module.scss';
 interface BackgroundRemoverProps {
   imageData: string | null;
   fileName: string | null;
-  onProcessed?: (processedImage: string) => void;
+  onProcessed?: (processedImage: string, fileName: string) => void;
   onSaved?: () => void;
 }
 
@@ -37,12 +37,12 @@ export function BackgroundRemover({ imageData, fileName, onProcessed, onSaved }:
 
       if (result.success && result.image) {
         // 処理済み画像を表示
+        const processedFileName = fileName.replace(/\.[^/.]+$/, '') + '-nobg.png';
         if (onProcessed) {
-          onProcessed(result.image);
+          onProcessed(result.image, processedFileName);
         }
 
         // 処理済み画像を保存
-        const processedFileName = fileName.replace(/\.[^/.]+$/, '') + '-nobg.png';
         await saveImage(result.image, processedFileName, 'processed');
         
         if (onSaved) {
