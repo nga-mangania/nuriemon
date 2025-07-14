@@ -1,0 +1,104 @@
+@use 'sass:color';
+@use '../styles/variables' as vars;
+
+.savedImages {
+  background-color: white;
+  border-radius: vars.$border-radius;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: vars.$spacing-lg;
+  margin-top: vars.$spacing-lg;
+}
+
+.title {
+  margin: 0 0 vars.$spacing-md 0;
+  color: vars.$text-color;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.loadingText,
+.emptyText {
+  color: color.adjust(vars.$text-color, $lightness: 30%);
+  text-align: center;
+  padding: vars.$spacing-xl;
+  margin: 0;
+}
+
+.imageList {
+  display: flex;
+  flex-direction: column;
+  gap: vars.$spacing-sm;
+}
+
+.imageItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: vars.$spacing-md;
+  background-color: vars.$background-color;
+  border-radius: vars.$border-radius;
+  transition: vars.$transition-base;
+
+  &:hover {
+    background-color: color.adjust(vars.$background-color, $lightness: -5%);
+  }
+}
+
+.imageInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.fileName {
+  margin: 0 0 vars.$spacing-xs 0;
+  font-weight: 500;
+  color: vars.$text-color;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: color.adjust(vars.$text-color, $lightness: 30%);
+}
+
+.actions {
+  display: flex;
+  gap: vars.$spacing-sm;
+  flex-shrink: 0;
+}
+
+.loadButton,
+.deleteButton {
+  padding: vars.$spacing-xs vars.$spacing-md;
+  border: none;
+  border-radius: vars.$border-radius;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: vars.$transition-base;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.loadButton {
+  background-color: vars.$primary-color;
+  color: white;
+
+  &:hover:not(:disabled) {
+    background-color: color.adjust(vars.$primary-color, $lightness: -10%);
+  }
+}
+
+.deleteButton {
+  background-color: #e74c3c;
+  color: white;
+
+  &:hover {
+    background-color: color.adjust(#e74c3c, $lightness: -10%);
+  }
+}

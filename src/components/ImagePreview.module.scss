@@ -1,23 +1,24 @@
-@import '../styles/variables';
+@use 'sass:color';
+@use '../styles/variables' as vars;
 
 .preview {
   background-color: white;
-  border-radius: $border-radius;
+  border-radius: vars.$border-radius;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  padding: $spacing-lg;
-  margin-top: $spacing-lg;
+  padding: vars.$spacing-lg;
+  margin-top: vars.$spacing-lg;
 }
 
 .title {
-  margin: 0 0 $spacing-sm 0;
-  color: $text-color;
+  margin: 0 0 vars.$spacing-sm 0;
+  color: vars.$text-color;
   font-size: 1.2rem;
   font-weight: 600;
 }
 
 .fileName {
-  margin: 0 0 $spacing-md 0;
-  color: lighten($text-color, 20%);
+  margin: 0 0 vars.$spacing-md 0;
+  color: color.adjust(vars.$text-color, $lightness: 20%);
   font-size: 0.9rem;
 }
 
@@ -26,15 +27,15 @@
   justify-content: center;
   align-items: center;
   min-height: 300px;
-  background-color: $background-color;
-  border-radius: $border-radius;
-  padding: $spacing-md;
+  background-color: vars.$background-color;
+  border-radius: vars.$border-radius;
+  padding: vars.$spacing-md;
 }
 
 .canvas {
   max-width: 100%;
   height: auto;
-  border-radius: $border-radius;
+  border-radius: vars.$border-radius;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
@@ -44,11 +45,11 @@
   align-items: center;
   min-height: 300px;
   background-color: white;
-  border-radius: $border-radius;
+  border-radius: vars.$border-radius;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   
   p {
-    color: lighten($text-color, 30%);
+    color: color.adjust(vars.$text-color, $lightness: 30%);
     font-size: 1.1rem;
   }
 }
