@@ -1,0 +1,30 @@
+@import './styles/variables';
+
+.container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: $background-color;
+}
+
+.header {
+  background-color: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: $spacing-md;
+}
+
+.title {
+  color: $primary-color;
+  font-size: 2rem;
+  font-weight: bold;
+  text-align: center;
+  margin: 0;
+}
+
+.main {
+  flex: 1;
+  padding: $spacing-lg;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}

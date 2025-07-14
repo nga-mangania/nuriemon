@@ -36,3 +36,5 @@ python-sidecar/build/
 # Local data
 local-storage/
 app-data/
+
+REQUIREMENTS.md

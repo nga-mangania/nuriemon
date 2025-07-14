@@ -29,4 +29,10 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+  // CSS Modules設定
+  css: {
+    modules: {
+      localsConvention: 'camelCase',
+    },
+  },
 }));
