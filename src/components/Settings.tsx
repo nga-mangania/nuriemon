@@ -37,8 +37,6 @@ export function Settings({ isOpen, onClose, onSave }: SettingsProps) {
     });
 
     if (selected && typeof selected === 'string') {
-      console.log('Settings: カスタムパスが選択されました', selected);
-      
       // ディレクトリへのアクセス権限を追加
       try {
         await addDirectoryScope(selected);

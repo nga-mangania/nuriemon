@@ -68,7 +68,6 @@ export function FileUpload({ onImageSelect, onImageSaved }: FileUploadProps) {
           try {
             setIsSaving(true);
             const metadata = await saveImage(dataUrl, fileName, 'original');
-            console.log('画像を保存しました:', metadata);
             if (onImageSaved) {
               onImageSaved(metadata);
             }

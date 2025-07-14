@@ -47,31 +47,25 @@ export async function initializeStorage(): Promise<void> {
   try {
     const settings = await loadSettings();
     const saveDir = await getSaveDirectory(settings);
-    console.log('initializeStorage: 保存先ディレクトリ', saveDir);
-    console.log('initializeStorage: 保存場所タイプ', settings.saveLocation);
     
     // imagesディレクトリが存在しない場合は作成
     const imagesPath = await join(saveDir, IMAGES_DIR);
-    console.log('initializeStorage: imagesパス', imagesPath);
     
     try {
       // カスタムディレクトリの場合は特別な処理
       if (settings.saveLocation === 'custom' && settings.customPath) {
         // カスタムパスの場合は絶対パスとして扱う
         if (!await fileExistsAbsolute(imagesPath)) {
-          console.log('initializeStorage: カスタムimagesディレクトリを作成');
           await ensureDirectory(imagesPath);
         }
       } else {
         // 標準ディレクトリの場合
         const baseDir = getBaseDirectory(settings.saveLocation);
         if (!await exists(imagesPath, { baseDir })) {
-          console.log('initializeStorage: 標準imagesディレクトリを作成');
           await mkdir(imagesPath, { baseDir, recursive: true });
         }
       }
     } catch (error) {
-      console.log('initializeStorage: exists/mkdirエラー、別の方法を試行', error);
       // カスタムディレクトリの場合は、ベースディレクトリを使わない絶対パス操作を試行
       try {
         await mkdir(imagesPath, { recursive: true });
@@ -88,11 +82,9 @@ export async function initializeStorage(): Promise<void> {
     if (settings.saveLocation === 'custom' && settings.customPath) {
       // カスタムディレクトリの場合
       if (!await fileExistsAbsolute(originalsPath)) {
-        console.log('initializeStorage: カスタムoriginalsディレクトリを作成', originalsPath);
         await ensureDirectory(originalsPath);
       }
       if (!await fileExistsAbsolute(processedPath)) {
-        console.log('initializeStorage: カスタムprocessedディレクトリを作成', processedPath);
         await ensureDirectory(processedPath);
       }
     } else {
@@ -100,21 +92,17 @@ export async function initializeStorage(): Promise<void> {
       const baseDir = getBaseDirectory(settings.saveLocation);
       try {
         if (!await exists(originalsPath, { baseDir })) {
-          console.log('initializeStorage: 標準originalsディレクトリを作成', originalsPath);
           await mkdir(originalsPath, { baseDir, recursive: true });
         }
       } catch (error) {
-        console.log('initializeStorage: originals exists/mkdirエラー', error);
         await mkdir(originalsPath, { baseDir, recursive: true });
       }
       
       try {
         if (!await exists(processedPath, { baseDir })) {
-          console.log('initializeStorage: 標準processedディレクトリを作成', processedPath);
           await mkdir(processedPath, { baseDir, recursive: true });
         }
       } catch (error) {
-        console.log('initializeStorage: processed exists/mkdirエラー', error);
         await mkdir(processedPath, { baseDir, recursive: true });
       }
     }
@@ -125,19 +113,16 @@ export async function initializeStorage(): Promise<void> {
       if (settings.saveLocation === 'custom' && settings.customPath) {
         // カスタムパスの場合
         if (!await fileExistsAbsolute(metadataPath)) {
-          console.log('initializeStorage: カスタムメタデータファイルを作成', metadataPath);
           await writeFileAbsolute(metadataPath, new TextEncoder().encode('[]'));
         }
       } else {
         // 標準ディレクトリの場合
         const baseDir = getBaseDirectory(settings.saveLocation);
         if (!await exists(metadataPath, { baseDir })) {
-          console.log('initializeStorage: 標準メタデータファイルを作成', metadataPath);
           await writeFile(metadataPath, new TextEncoder().encode('[]'), { baseDir });
         }
       }
     } catch (error) {
-      console.log('initializeStorage: metadata exists/writeエラー', error);
       await writeFile(metadataPath, new TextEncoder().encode('[]'));
     }
   } catch (error) {
@@ -175,8 +160,6 @@ export async function saveImage(
   type: 'original' | 'processed' = 'original'
 ): Promise<ImageMetadata> {
   try {
-    console.log('saveImage: 開始', { originalFileName, type });
-    
     await initializeStorage();
 
     // ユニークなファイル名を生成
@@ -189,28 +172,20 @@ export async function saveImage(
     
     // 保存パスを決定
     const saveDir = await getSaveDirectory(settings);
-    console.log('saveImage: 保存先ディレクトリ', saveDir);
-    console.log('saveImage: 保存場所タイプ', settings.saveLocation);
     
     const subDir = type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
     const imagePath = await join(saveDir, IMAGES_DIR, subDir, savedFileName);
-    console.log('saveImage: 完全な保存パス', imagePath);
 
     // 画像データをバイナリに変換して保存
     const imageBytes = base64ToUint8Array(imageData);
-    console.log('saveImage: 画像サイズ', imageBytes.length, 'bytes');
     
     // カスタムディレクトリの場合は特別な処理
     if (settings.saveLocation === 'custom' && settings.customPath) {
-      console.log('saveImage: カスタムディレクトリに保存');
       await writeFileAbsolute(imagePath, imageBytes);
     } else {
-      console.log('saveImage: 標準ディレクトリに保存');
       const baseDir = getBaseDirectory(settings.saveLocation);
       await writeFile(imagePath, imageBytes, { baseDir });
     }
-    
-    console.log('saveImage: ファイル書き込み完了');
 
     // メタデータを作成
     const metadata: ImageMetadata = {

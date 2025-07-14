@@ -53,7 +53,6 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
  */
 export async function getSaveDirectory(settings?: AppSettings): Promise<string> {
   const currentSettings = settings || await loadSettings();
-  console.log('getSaveDirectory: 現在の設定', currentSettings);
   
   let directory: string;
   
@@ -76,7 +75,6 @@ export async function getSaveDirectory(settings?: AppSettings): Promise<string> 
       break;
   }
   
-  console.log('getSaveDirectory: 選択されたディレクトリ', directory);
   return directory;
 }
 
