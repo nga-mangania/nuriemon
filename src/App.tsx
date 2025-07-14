@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { FileUpload } from "./components/FileUpload";
 import { ImagePreview } from "./components/ImagePreview";
 import { BackgroundRemover } from "./components/BackgroundRemover";
-import { SavedImages } from "./components/SavedImages";
+import { ImageGallery } from "./components/ImageGallery";
 import { initializeStorage } from "./services/imageStorage";
 import styles from "./App.module.scss";
 
@@ -32,21 +32,25 @@ function App() {
         <h1 className={styles.title}>ぬりえもん</h1>
       </header>
       <main className={styles.main}>
-        <FileUpload 
-          onImageSelect={handleImageSelect}
-          onImageSaved={handleImageSaved}
-        />
-        <ImagePreview imageData={selectedImage} fileName={selectedFileName} />
-        <BackgroundRemover
-          imageData={selectedImage}
-          fileName={selectedFileName}
-          onProcessed={handleImageSelect}
-          onSaved={handleImageSaved}
-        />
-        <SavedImages 
-          onImageLoad={handleImageSelect}
-          refreshTrigger={refreshTrigger}
-        />
+        <div className={styles.leftColumn}>
+          <FileUpload 
+            onImageSelect={handleImageSelect}
+            onImageSaved={handleImageSaved}
+          />
+          <ImagePreview imageData={selectedImage} fileName={selectedFileName} />
+          <BackgroundRemover
+            imageData={selectedImage}
+            fileName={selectedFileName}
+            onProcessed={handleImageSelect}
+            onSaved={handleImageSaved}
+          />
+        </div>
+        <div className={styles.rightColumn}>
+          <ImageGallery 
+            onImageSelect={handleImageSelect}
+            refreshTrigger={refreshTrigger}
+          />
+        </div>
       </main>
     </div>
   );

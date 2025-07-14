@@ -1,0 +1,161 @@
+@use 'sass:color';
+@use '../styles/variables' as vars;
+
+.gallery {
+  background-color: white;
+  border-radius: vars.$border-radius;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: vars.$spacing-lg;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: vars.$spacing-lg;
+  flex-wrap: wrap;
+  gap: vars.$spacing-md;
+}
+
+.title {
+  margin: 0;
+  color: vars.$text-color;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.filters {
+  display: flex;
+  gap: vars.$spacing-sm;
+  flex-wrap: wrap;
+}
+
+.filterButton {
+  padding: vars.$spacing-xs vars.$spacing-md;
+  background-color: vars.$background-color;
+  color: vars.$text-color;
+  border: 1px solid vars.$border-color;
+  border-radius: vars.$border-radius;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: vars.$transition-base;
+
+  &:hover {
+    background-color: color.adjust(vars.$background-color, $lightness: -5%);
+  }
+
+  &.active {
+    background-color: vars.$primary-color;
+    color: white;
+    border-color: vars.$primary-color;
+  }
+}
+
+.loadingText,
+.emptyText {
+  color: color.adjust(vars.$text-color, $lightness: 30%);
+  text-align: center;
+  padding: vars.$spacing-xl * 2;
+  margin: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: vars.$spacing-md;
+}
+
+.imageCard {
+  position: relative;
+  background-color: vars.$background-color;
+  border-radius: vars.$border-radius;
+  overflow: hidden;
+  cursor: pointer;
+  transition: vars.$transition-base;
+  border: 2px solid transparent;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  &.selected {
+    border-color: vars.$primary-color;
+  }
+}
+
+.thumbnailLoading {
+  width: 100%;
+  aspect-ratio: 1;
+  background-color: color.adjust(vars.$background-color, $lightness: -5%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: color.adjust(vars.$text-color, $lightness: 30%);
+  font-size: 0.9rem;
+}
+
+.thumbnail {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+
+.imageInfo {
+  padding: vars.$spacing-sm vars.$spacing-md;
+}
+
+.fileName {
+  margin: 0 0 vars.$spacing-xs 0;
+  font-weight: 500;
+  color: vars.$text-color;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.9rem;
+}
+
+.meta {
+  margin: 0;
+  font-size: 0.8rem;
+  color: color.adjust(vars.$text-color, $lightness: 30%);
+  display: flex;
+  align-items: center;
+  gap: vars.$spacing-xs;
+}
+
+.badge {
+  background-color: vars.$secondary-color;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.deleteButton {
+  position: absolute;
+  top: vars.$spacing-xs;
+  right: vars.$spacing-xs;
+  width: 28px;
+  height: 28px;
+  background-color: rgba(231, 76, 60, 0.9);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: vars.$transition-base;
+
+  .imageCard:hover & {
+    opacity: 1;
+  }
+
+  &:hover {
+    background-color: #e74c3c;
+    transform: scale(1.1);
+  }
+}

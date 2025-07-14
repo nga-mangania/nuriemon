@@ -24,7 +24,22 @@
 .main {
   flex: 1;
   padding: vars.$spacing-lg;
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: vars.$spacing-lg;
+  align-items: start;
+
+  @media (max-width: vars.$breakpoint-md) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.leftColumn,
+.rightColumn {
+  display: flex;
+  flex-direction: column;
+  gap: vars.$spacing-lg;
 }
