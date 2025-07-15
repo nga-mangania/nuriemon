@@ -3,6 +3,7 @@ import AnimationView from './AnimationView';
 import MovementSettings from './MovementSettings';
 import { getAllMetadata, loadImage, ImageMetadata } from '../services/imageStorage';
 import { getAllMovementSettings } from '../services/movementStorage';
+import { loadSettings } from '../services/settings';
 import styles from './AnimationPage.module.scss';
 
 interface AnimationSettings {
@@ -24,10 +25,17 @@ const AnimationPage: React.FC = () => {
   const [animatedImages, setAnimatedImages] = useState<any[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+  const [groundPosition, setGroundPosition] = useState(80);
+  const [bgmUrl, setBgmUrl] = useState<string | null>(null);
+  const [soundEffectUrl, setSoundEffectUrl] = useState<string | null>(null);
+  const bgmRef = React.useRef<HTMLAudioElement>(null);
+  const soundEffectRef = React.useRef<HTMLAudioElement>(null);
 
   // 画像一覧を読み込む
   useEffect(() => {
     loadImages();
+    loadGroundPosition();
+    loadAudioFiles();
   }, []);
 
   const loadImages = async () => {
@@ -52,6 +60,39 @@ const AnimationPage: React.FC = () => {
       setThumbnails(newThumbnails);
     } catch (error) {
       console.error('画像の読み込みに失敗しました:', error);
+    }
+  };
+
+  // 地面位置の設定を読み込む
+  const loadGroundPosition = async () => {
+    try {
+      const settings = await loadSettings();
+      if (settings?.groundPosition !== undefined) {
+        setGroundPosition(settings.groundPosition);
+      }
+    } catch (error) {
+      console.error('地面位置の読み込みエラー:', error);
+    }
+  };
+
+  // 音声ファイルを読み込む
+  const loadAudioFiles = async () => {
+    try {
+      const metadata = await getAllMetadata();
+      const bgmFile = metadata.find(m => m.type === 'bgm');
+      const soundEffectFile = metadata.find(m => m.type === 'soundEffect');
+      
+      if (bgmFile) {
+        const bgmData = await loadImage(bgmFile);
+        setBgmUrl(bgmData);
+      }
+      
+      if (soundEffectFile) {
+        const soundData = await loadImage(soundEffectFile);
+        setSoundEffectUrl(soundData);
+      }
+    } catch (error) {
+      console.error('音声ファイルの読み込みエラー:', error);
     }
   };
 
@@ -107,12 +148,28 @@ const AnimationPage: React.FC = () => {
     const validImages = animatedImagesData.filter(img => img !== null);
     setAnimatedImages(validImages);
     setIsPlaying(true);
+    
+    // BGMを再生
+    if (bgmRef.current && bgmUrl) {
+      bgmRef.current.play().catch(e => console.error('BGM再生エラー:', e));
+    }
+    
+    // 効果音を再生（アニメーション開始時）
+    if (soundEffectRef.current && soundEffectUrl) {
+      soundEffectRef.current.play().catch(e => console.error('効果音再生エラー:', e));
+    }
   };
 
   // アニメーションを停止
   const stopAnimation = () => {
     setIsPlaying(false);
     setAnimatedImages([]);
+    
+    // BGMを停止
+    if (bgmRef.current) {
+      bgmRef.current.pause();
+      bgmRef.current.currentTime = 0;
+    }
   };
 
   // 全選択/全解除
@@ -126,6 +183,13 @@ const AnimationPage: React.FC = () => {
 
   return (
     <div className={`${styles.animationPage} ${isPlaying ? styles.fullscreen : ''}`}>
+      {/* 音声要素（非表示） */}
+      {bgmUrl && (
+        <audio ref={bgmRef} src={bgmUrl} loop style={{ display: 'none' }} />
+      )}
+      {soundEffectUrl && (
+        <audio ref={soundEffectRef} src={soundEffectUrl} style={{ display: 'none' }} />
+      )}
       {!isPlaying ? (
         <>
           <div className={styles.imageSelector}>
@@ -181,7 +245,7 @@ const AnimationPage: React.FC = () => {
         <>
           <AnimationView
             images={animatedImages}
-            groundPosition={80}
+            groundPosition={groundPosition}
             onImageClick={(imageId) => console.log('画像クリック:', imageId)}
           />
           <div className={styles.controlPanel}>

@@ -15,6 +15,7 @@ pub struct ImageMetadata {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub storage_location: String, // 保存先のパス
+    pub file_path: Option<String>, // ファイルの完全パス
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -102,14 +103,28 @@ impl Database {
             [],
         )?;
 
+        // filePathカラムを追加（既存のテーブルに）
+        match self.conn.execute(
+            "ALTER TABLE images ADD COLUMN file_path TEXT",
+            [],
+        ) {
+            Ok(_) => {},
+            Err(e) => {
+                // カラムが既に存在する場合はエラーを無視
+                if !e.to_string().contains("duplicate column name") {
+                    return Err(e);
+                }
+            }
+        }
+
         Ok(())
     }
 
     // 画像メタデータの保存
     pub fn save_image_metadata(&self, metadata: &ImageMetadata) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO images (id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO images (id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location, file_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 metadata.id,
                 metadata.original_file_name,
@@ -120,6 +135,7 @@ impl Database {
                 metadata.width,
                 metadata.height,
                 metadata.storage_location,
+                metadata.file_path,
             ],
         )?;
         Ok(())
@@ -128,7 +144,7 @@ impl Database {
     // 画像メタデータの取得（全件）
     pub fn get_all_images(&self) -> Result<Vec<ImageMetadata>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location 
+            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location, file_path 
              FROM images 
              ORDER BY created_at DESC"
         )?;
@@ -144,6 +160,7 @@ impl Database {
                 width: row.get(6)?,
                 height: row.get(7)?,
                 storage_location: row.get(8)?,
+                file_path: row.get(9)?,
             })
         })?;
 
@@ -158,7 +175,7 @@ impl Database {
     #[allow(dead_code)]
     pub fn get_image_by_id(&self, id: &str) -> Result<Option<ImageMetadata>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location 
+            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location, file_path 
              FROM images 
              WHERE id = ?1"
         )?;
@@ -174,6 +191,7 @@ impl Database {
                 width: row.get(6)?,
                 height: row.get(7)?,
                 storage_location: row.get(8)?,
+                file_path: row.get(9)?,
             })
         })?;
 

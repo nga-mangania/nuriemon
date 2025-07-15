@@ -48,10 +48,7 @@ function getBaseDirectory(saveLocation: string): BaseDirectory {
  * 背景ファイルを保存
  */
 export async function saveBackgroundFile(dataUrl: string, fileName: string): Promise<ImageMetadata> {
-  const db = DatabaseService.getInstance();
-  await db.init();
-
-  const id = `bg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const id = await DatabaseService.generateId();
   const savedFileName = `background-${id}-${fileName}`;
   const saveDir = await getSaveDirectory();
   const baseDir = getBaseDirectory(saveDir);
@@ -73,29 +70,31 @@ export async function saveBackgroundFile(dataUrl: string, fileName: string): Pro
   await writeFileAbsolute(filePath, binaryData);
   
   // メタデータを作成
-  const metadata: DbImageMetadata = {
+  const timestamp = await DatabaseService.getCurrentTimestamp();
+  const dbMetadata: any = {
     id,
-    originalFileName: fileName,
-    savedFileName,
-    imageType: 'background',
-    createdAt: new Date().toISOString(),
+    original_file_name: fileName,
+    saved_file_name: savedFileName,
+    image_type: 'background',
+    created_at: timestamp,
     size: binaryData.length,
-    storageLocation: saveDir
+    storage_location: saveDir,
+    file_path: filePath
   };
   
   // データベースに保存
-  await db.saveImage(metadata);
+  await DatabaseService.saveImageMetadata(dbMetadata);
   
   // 既存の型に変換して返す
   return {
-    id: metadata.id,
-    originalFileName: metadata.originalFileName,
-    savedFileName: metadata.savedFileName,
+    id: dbMetadata.id,
+    originalFileName: dbMetadata.original_file_name,
+    savedFileName: dbMetadata.saved_file_name,
     type: 'original',
-    createdAt: metadata.createdAt,
-    size: metadata.size,
-    width: metadata.width,
-    height: metadata.height
+    createdAt: dbMetadata.created_at,
+    size: dbMetadata.size,
+    width: dbMetadata.width,
+    height: dbMetadata.height
   };
 }
 
@@ -103,10 +102,7 @@ export async function saveBackgroundFile(dataUrl: string, fileName: string): Pro
  * 音声ファイルを保存
  */
 export async function saveAudioFile(dataUrl: string, fileName: string, type: 'bgm' | 'soundEffect'): Promise<ImageMetadata> {
-  const db = DatabaseService.getInstance();
-  await db.init();
-
-  const id = `audio-${type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const id = await DatabaseService.generateId();
   const savedFileName = `${type}-${id}-${fileName}`;
   const saveDir = await getSaveDirectory();
   const baseDir = getBaseDirectory(saveDir);
@@ -128,27 +124,29 @@ export async function saveAudioFile(dataUrl: string, fileName: string, type: 'bg
   await writeFileAbsolute(filePath, binaryData);
   
   // メタデータを作成
-  const metadata: DbImageMetadata = {
+  const timestamp = await DatabaseService.getCurrentTimestamp();
+  const dbMetadata: any = {
     id,
-    originalFileName: fileName,
-    savedFileName,
-    imageType: type,
-    createdAt: new Date().toISOString(),
+    original_file_name: fileName,
+    saved_file_name: savedFileName,
+    image_type: type,
+    created_at: timestamp,
     size: binaryData.length,
-    storageLocation: saveDir
+    storage_location: saveDir,
+    file_path: filePath
   };
   
   // データベースに保存
-  await db.saveImage(metadata);
+  await DatabaseService.saveImageMetadata(dbMetadata);
   
   // 既存の型に変換して返す
   return {
-    id: metadata.id,
-    originalFileName: metadata.originalFileName,
-    savedFileName: metadata.savedFileName,
+    id: dbMetadata.id,
+    originalFileName: dbMetadata.original_file_name,
+    savedFileName: dbMetadata.saved_file_name,
     type: 'original',
-    createdAt: metadata.createdAt,
-    size: metadata.size
+    createdAt: dbMetadata.created_at,
+    size: dbMetadata.size
   };
 }
 
@@ -364,7 +362,7 @@ export async function saveImage(
     }
 
     // データベースにメタデータを保存
-    const dbMetadata: DbImageMetadata = {
+    const dbMetadata: any = {
       id: await DatabaseService.generateId(),
       original_file_name: originalFileName,
       saved_file_name: savedFileName,
@@ -374,6 +372,7 @@ export async function saveImage(
       width,
       height,
       storage_location: saveDir,
+      file_path: imagePath
     };
 
     await DatabaseService.saveImageMetadata(dbMetadata);
@@ -436,10 +435,16 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
     const dbMetadataList = await DatabaseService.getAllImages();
     const dbMetadata = dbMetadataList.find(m => m.id === metadata.id);
     
-    const storageLocation = dbMetadata?.storage_location || await getSaveDirectory(settings);
-    
-    const subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
-    const imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
+    // file_pathがある場合はそれを使用
+    let imagePath: string;
+    if ((dbMetadata as any)?.file_path) {
+      imagePath = (dbMetadata as any).file_path;
+    } else {
+      // 互換性のため従来のパス構築も残す
+      const storageLocation = dbMetadata?.storage_location || await getSaveDirectory(settings);
+      const subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
+      imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
+    }
     
     let imageData: Uint8Array;
     if (settings.saveLocation === 'custom' && settings.customPath) {

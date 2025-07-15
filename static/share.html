@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nuriemon - 共有ビューア</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background-color: #2a2a2a;
+            padding: 1rem;
+            text-align: center;
+            border-bottom: 1px solid #3a3a3a;
+        }
+        
+        .header h1 {
+            font-size: 1.5rem;
+            color: #ffffff;
+        }
+        
+        .container {
+            flex: 1;
+            padding: 2rem;
+            overflow-y: auto;
+        }
+        
+        .animation-view {
+            position: relative;
+            width: 100%;
+            height: 600px;
+            background-color: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 2rem;
+        }
+        
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .gallery-item {
+            background-color: #2a2a2a;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.2s;
+        }
+        
+        .gallery-item:hover {
+            transform: translateY(-4px);
+        }
+        
+        .gallery-item img {
+            width: 100%;
+            height: 200px;
+            object-fit: contain;
+            background-color: #1a1a1a;
+        }
+        
+        .gallery-item-info {
+            padding: 0.5rem;
+            font-size: 0.875rem;
+            color: #aaa;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+        
+        .error {
+            text-align: center;
+            padding: 2rem;
+            color: #ff4444;
+        }
+        
+        .tab-container {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid #3a3a3a;
+        }
+        
+        .tab {
+            padding: 0.5rem 1rem;
+            background: none;
+            border: none;
+            color: #aaa;
+            cursor: pointer;
+            position: relative;
+            transition: color 0.2s;
+        }
+        
+        .tab:hover {
+            color: #fff;
+        }
+        
+        .tab.active {
+            color: #fff;
+        }
+        
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background-color: #4a9eff;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>nuriemon 共有ビューア</h1>
+    </div>
+    
+    <div class="container">
+        <div class="tab-container">
+            <button class="tab active" data-tab="animation">アニメーション</button>
+            <button class="tab" data-tab="gallery">ギャラリー</button>
+        </div>
+        
+        <div id="content">
+            <div class="loading">読み込み中...</div>
+        </div>
+    </div>
+    
+    <script>
+        let images = [];
+        let settings = {};
+        let currentTab = 'animation';
+        
+        // タブ切り替え
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                e.target.classList.add('active');
+                currentTab = e.target.dataset.tab;
+                renderContent();
+            });
+        });
+        
+        // データ読み込み
+        async function loadData() {
+            try {
+                const [imagesRes, settingsRes] = await Promise.all([
+                    fetch('/api/images'),
+                    fetch('/api/settings')
+                ]);
+                
+                const imagesData = await imagesRes.json();
+                const settingsData = await settingsRes.json();
+                
+                if (imagesData.success) {
+                    images = imagesData.data || [];
+                }
+                
+                if (settingsData.success) {
+                    settings = settingsData.data || {};
+                }
+                
+                renderContent();
+            } catch (error) {
+                document.getElementById('content').innerHTML = 
+                    '<div class="error">データの読み込みに失敗しました</div>';
+            }
+        }
+        
+        // コンテンツ描画
+        function renderContent() {
+            const content = document.getElementById('content');
+            
+            if (currentTab === 'animation') {
+                content.innerHTML = `
+                    <div class="animation-view" id="animationCanvas">
+                        <canvas id="canvas" style="width: 100%; height: 100%;"></canvas>
+                    </div>
+                `;
+                startAnimation();
+            } else {
+                content.innerHTML = `
+                    <div class="gallery">
+                        ${images.map(img => `
+                            <div class="gallery-item">
+                                <img src="/api/image/${img.id}" alt="${img.originalFileName}">
+                                <div class="gallery-item-info">
+                                    <div>${img.originalFileName}</div>
+                                    <div>${new Date(img.createdAt).toLocaleDateString('ja-JP')}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+        }
+        
+        // 簡易アニメーション
+        function startAnimation() {
+            const canvas = document.getElementById('canvas');
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            const container = document.getElementById('animationCanvas');
+            
+            // Canvas サイズ設定
+            function resizeCanvas() {
+                canvas.width = container.offsetWidth;
+                canvas.height = container.offsetHeight;
+            }
+            
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            // アニメーション対象の画像
+            const animatedImages = images.filter(img => img.type === 'processed').slice(0, 5);
+            const sprites = [];
+            
+            // スプライト初期化
+            animatedImages.forEach((imgData, index) => {
+                const img = new Image();
+                img.onload = () => {
+                    sprites.push({
+                        image: img,
+                        x: Math.random() * canvas.width,
+                        y: canvas.height * 0.8,
+                        vx: (Math.random() - 0.5) * 2,
+                        vy: 0,
+                        width: 100,
+                        height: 100
+                    });
+                };
+                img.src = `/api/image/${imgData.id}`;
+            });
+            
+            // アニメーションループ
+            function animate() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // 背景
+                ctx.fillStyle = '#87CEEB';
+                ctx.fillRect(0, 0, canvas.width, canvas.height * 0.8);
+                
+                // 地面
+                ctx.fillStyle = '#228B22';
+                ctx.fillRect(0, canvas.height * 0.8, canvas.width, canvas.height * 0.2);
+                
+                // スプライト描画
+                sprites.forEach(sprite => {
+                    // 移動
+                    sprite.x += sprite.vx;
+                    
+                    // 画面端で反転
+                    if (sprite.x <= 0 || sprite.x >= canvas.width - sprite.width) {
+                        sprite.vx *= -1;
+                    }
+                    
+                    // 描画
+                    ctx.drawImage(
+                        sprite.image,
+                        sprite.x,
+                        sprite.y - sprite.height,
+                        sprite.width,
+                        sprite.height
+                    );
+                });
+                
+                requestAnimationFrame(animate);
+            }
+            
+            animate();
+        }
+        
+        // 初期化
+        loadData();
+    </script>
+</body>
+</html>

@@ -8,6 +8,7 @@ import AnimationPage from "./components/AnimationPage";
 import { UploadPage } from "./components/UploadPage";
 import { GalleryPage } from "./components/GalleryPage";
 import { initializeStorage } from "./services/imageStorage";
+import { startAutoDeleteService } from "./services/autoDelete";
 import styles from "./App.module.scss";
 
 function App() {
@@ -17,9 +18,10 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'upload' | 'edit' | 'gallery' | 'animation'>('upload');
 
-  // ストレージを初期化
+  // ストレージを初期化と自動削除サービスを開始
   useEffect(() => {
     initializeStorage().catch(console.error);
+    startAutoDeleteService();
   }, []);
 
   const handleImageSelect = (imageData: string, fileName: string) => {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
+import { invoke } from '@tauri-apps/api/core';
 import { saveImage, saveBackgroundFile } from '../services/imageStorage';
 import { loadSettings, saveSettings } from '../services/settings';
 import { saveMovementSettings } from '../services/movementStorage';
@@ -16,7 +17,6 @@ export function UploadPage() {
   const [currentBackground, setCurrentBackground] = useState<{url: string, type: string} | null>(null);
   const [uploadingBackground, setUploadingBackground] = useState(false);
   const [backgroundProgress, setBackgroundProgress] = useState(0);
-  const backgroundInputRef = useRef<HTMLInputElement>(null);
 
   // 地面の位置設定
   const [groundPosition, setGroundPosition] = useState(50);
@@ -38,7 +38,6 @@ export function UploadPage() {
     speed: 0.5,
     size: 'medium'
   });
-  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // 設定を読み込み
   useEffect(() => {
@@ -114,7 +113,9 @@ export function UploadPage() {
       clearInterval(progressInterval);
       setBackgroundProgress(100);
       
+      const currentSettings = await loadSettings();
       await saveSettings({
+        ...currentSettings,
         backgroundUrl: backgroundFile.data,
         backgroundType: backgroundFile.type
       });
@@ -138,7 +139,9 @@ export function UploadPage() {
 
   const handleRemoveBackground = async () => {
     if (confirm('背景を削除しますか？')) {
+      const currentSettings = await loadSettings();
       await saveSettings({
+        ...currentSettings,
         backgroundUrl: null,
         backgroundType: null
       });
@@ -149,15 +152,13 @@ export function UploadPage() {
 
   const clearBackgroundSelection = () => {
     setBackgroundFile(null);
-    if (backgroundInputRef.current) {
-      backgroundInputRef.current.value = '';
-    }
   };
 
   // STEP 02: 地面の位置設定
   const handleGroundPositionChange = async (position: number) => {
     setGroundPosition(position);
-    await saveSettings({ groundPosition: position });
+    const currentSettings = await loadSettings();
+    await saveSettings({ ...currentSettings, groundPosition: position });
   };
 
   // STEP 03: 音楽の設定
@@ -173,7 +174,8 @@ export function UploadPage() {
   const handleDeletionTimeChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newTime = e.target.value;
     setDeletionTime(newTime);
-    await saveSettings({ deletionTime: newTime });
+    const currentSettings = await loadSettings();
+    await saveSettings({ ...currentSettings, deletionTime: newTime });
   };
 
   // STEP 05: お絵かきアップロード
@@ -226,7 +228,22 @@ export function UploadPage() {
     }, 200);
 
     try {
+      // まず元画像を保存
       const metadata = await saveImage(image.data, image.name, 'original');
+      
+      // 背景除去処理を実行
+      setUploadProgress(50);
+      const result = await invoke<{ success: boolean; image?: string; error?: string }>('process_image', {
+        imageData: image.data
+      });
+      
+      if (result.success && result.image) {
+        // 処理済み画像を保存
+        const processedFileName = image.name.replace(/\.[^/.]+$/, '') + '-nobg.png';
+        await saveImage(result.image, processedFileName, 'processed');
+        setUploadProgress(90);
+      }
+      
       clearInterval(progressInterval);
       setUploadProgress(100);
       
@@ -234,11 +251,13 @@ export function UploadPage() {
       await saveMovementSettings(metadata.id, movementSettings);
       
       // 最後の動き設定も保存（次回のデフォルト値として）
+      const currentSettings = await loadSettings();
       await saveSettings({
+        ...currentSettings,
         lastMovementSettings: movementSettings
       });
       
-      alert('画像は正常にアップロードされました');
+      alert('画像は正常にアップロードされ、背景が除去されました');
       clearImageSelection();
     } catch (error) {
       clearInterval(progressInterval);
@@ -252,9 +271,6 @@ export function UploadPage() {
 
   const clearImageSelection = () => {
     setImage(null);
-    if (imageInputRef.current) {
-      imageInputRef.current.value = '';
-    }
   };
 
   return (
@@ -267,16 +283,12 @@ export function UploadPage() {
           <div className={styles.uploadBox}>
             <h3>背景</h3>
             <div className={styles.uploadControls}>
-              <label className={styles.fileInputLabel}>
+              <button
+                className={styles.fileInputLabel}
+                onClick={handleBackgroundSelect}
+              >
                 背景を選択
-                <input
-                  type="file"
-                  accept="image/*,video/*"
-                  onChange={handleBackgroundSelect}
-                  ref={backgroundInputRef}
-                  style={{ display: 'none' }}
-                />
-              </label>
+              </button>
               <button
                 onClick={handleBackgroundUpload}
                 disabled={!backgroundFile || uploadingBackground}
@@ -395,22 +407,18 @@ export function UploadPage() {
           <div className={styles.uploadBox}>
             <h3>画像</h3>
             <div className={styles.uploadControls}>
-              <label className={styles.fileInputLabel}>
+              <button
+                className={styles.fileInputLabel}
+                onClick={handleImageSelect}
+              >
                 ファイルを選択
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageSelect}
-                  ref={imageInputRef}
-                  style={{ display: 'none' }}
-                />
-              </label>
+              </button>
               <button
                 onClick={handleImageUpload}
                 disabled={!image || uploadingImage}
                 className={styles.uploadButton}
               >
-                {uploadingImage ? 'アップロード中...' : 'アップロード'}
+                {uploadingImage ? 'アップロード中...' : 'アップロード（背景除去）'}
               </button>
             </div>
             
@@ -437,6 +445,7 @@ export function UploadPage() {
           <div className={styles.note}>
             <p>対応ファイル：jpg、png(10MB以下)</p>
             <p>※画面を動く速さを0にするとその場に留まります。</p>
+            <p>※アップロード時に自動的に背景が除去されます。</p>
           </div>
         </div>
 

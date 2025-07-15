@@ -14,8 +14,6 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
   const [soundEffectFile, setSoundEffectFile] = useState<{name: string, data: string} | null>(null);
   const [uploadingBgm, setUploadingBgm] = useState(false);
   const [uploadingSoundEffect, setUploadingSoundEffect] = useState(false);
-  const bgmInputRef = useRef<HTMLInputElement>(null);
-  const soundEffectInputRef = useRef<HTMLInputElement>(null);
 
   const handleBgmSelect = async () => {
     try {
@@ -125,17 +123,11 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
   const clearBgmSelection = () => {
     setBgmFile(null);
     if (onBgmChange) onBgmChange(null);
-    if (bgmInputRef.current) {
-      bgmInputRef.current.value = '';
-    }
   };
 
   const clearSoundEffectSelection = () => {
     setSoundEffectFile(null);
     if (onSoundEffectChange) onSoundEffectChange(null);
-    if (soundEffectInputRef.current) {
-      soundEffectInputRef.current.value = '';
-    }
   };
 
   return (
@@ -143,16 +135,12 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
       <div className={styles.audioSection}>
         <h3>BGM</h3>
         <div className={styles.uploadControls}>
-          <label className={styles.fileInputLabel}>
+          <button
+            className={styles.fileInputLabel}
+            onClick={handleBgmSelect}
+          >
             BGMを選択
-            <input
-              type="file"
-              accept="audio/*"
-              onChange={handleBgmSelect}
-              ref={bgmInputRef}
-              style={{ display: 'none' }}
-            />
-          </label>
+          </button>
           <button
             onClick={handleBgmUpload}
             disabled={!bgmFile || uploadingBgm}
@@ -184,16 +172,12 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
       <div className={styles.audioSection}>
         <h3>効果音</h3>
         <div className={styles.uploadControls}>
-          <label className={styles.fileInputLabel}>
+          <button
+            className={styles.fileInputLabel}
+            onClick={handleSoundEffectSelect}
+          >
             効果音を選択
-            <input
-              type="file"
-              accept="audio/*"
-              onChange={handleSoundEffectSelect}
-              ref={soundEffectInputRef}
-              style={{ display: 'none' }}
-            />
-          </label>
+          </button>
           <button
             onClick={handleSoundEffectUpload}
             disabled={!soundEffectFile || uploadingSoundEffect}
