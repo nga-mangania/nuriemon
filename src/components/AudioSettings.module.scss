@@ -1,0 +1,117 @@
+@use 'sass:color';
+
+// 既存のoekaki-screenの変数に合わせる
+$primary-color: #272343;
+$secondary-color: #8EB8CD;
+$base-color: #fffffe;
+$text-color: #2d334a;
+$button-color: #ec4899;
+$delete-color: #847879;
+$confirm-color: #ffd803;
+$border-radius: 4px;
+$bg-color: #eaf0f2;
+
+.audioSettings {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.audioSection {
+  h3 {
+    color: $text-color;
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+  }
+}
+
+.uploadControls {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  
+  @media screen and (max-width: 768px) {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+}
+
+.fileInputLabel {
+  display: inline-block;
+  background-color: $confirm-color;
+  color: $text-color;
+  padding: 0.5rem 1rem;
+  border-radius: $border-radius;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  line-height: 1.5;
+  text-decoration: none;
+  font-weight: bold;
+
+  &:hover {
+    background-color: color.adjust($confirm-color, $lightness: -10%);
+  }
+}
+
+.uploadButton {
+  background-color: $button-color;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: $border-radius;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  line-height: 1.5;
+  font-weight: bold;
+
+  &:hover {
+    background-color: color.adjust($button-color, $lightness: -10%);
+  }
+
+  &:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+  }
+}
+
+.fileInfo {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: #f0f0f0;
+  border-radius: $border-radius;
+  font-size: 0.9em;
+  color: $text-color;
+  margin-bottom: 1rem;
+
+  .fileIcon {
+    margin-right: 0.5rem;
+    font-size: 1.2em;
+  }
+
+  .fileName {
+    flex-grow: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .fileClear {
+    background: none;
+    border: none;
+    color: $text-color;
+    cursor: pointer;
+    padding: 0;
+    font-size: 1.2em;
+    margin-left: 0.5rem;
+    
+    &:hover {
+      color: $delete-color;
+    }
+  }
+}
+
+.audioPreview {
+  width: 100%;
+  max-width: 100%;
+}

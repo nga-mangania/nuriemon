@@ -19,6 +19,7 @@ interface ProcessResult {
 export function BackgroundRemover({ imageData, fileName, onProcessed, onSaved }: BackgroundRemoverProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [processProgress, setProcessProgress] = useState(0);
 
   const handleRemoveBackground = async () => {
     if (!imageData || !fileName) {
@@ -28,6 +29,18 @@ export function BackgroundRemover({ imageData, fileName, onProcessed, onSaved }:
 
     setIsProcessing(true);
     setError(null);
+    setProcessProgress(0);
+
+    // プログレスをシミュレート
+    const progressInterval = setInterval(() => {
+      setProcessProgress(prev => {
+        if (prev >= 90) {
+          clearInterval(progressInterval);
+          return 90;
+        }
+        return prev + 10;
+      });
+    }, 300);
 
     try {
       // Rustコマンドを呼び出してPython処理を実行
@@ -36,6 +49,9 @@ export function BackgroundRemover({ imageData, fileName, onProcessed, onSaved }:
       });
 
       if (result.success && result.image) {
+        clearInterval(progressInterval);
+        setProcessProgress(100);
+        
         // 処理済み画像を表示
         const processedFileName = fileName.replace(/\.[^/.]+$/, '') + '-nobg.png';
         if (onProcessed) {
@@ -48,36 +64,53 @@ export function BackgroundRemover({ imageData, fileName, onProcessed, onSaved }:
         if (onSaved) {
           onSaved();
         }
+        
+        alert('背景除去が完了しました');
       } else {
+        clearInterval(progressInterval);
         setError(result.error || '画像処理に失敗しました');
       }
     } catch (error) {
+      clearInterval(progressInterval);
       console.error('背景除去エラー:', error);
       setError('背景除去処理中にエラーが発生しました');
     } finally {
       setIsProcessing(false);
+      setProcessProgress(0);
     }
   };
 
   return (
     <div className={styles.backgroundRemover}>
-      <button
-        className={styles.removeButton}
-        onClick={handleRemoveBackground}
-        disabled={!imageData || isProcessing}
-      >
-        {isProcessing ? '処理中...' : '背景を除去'}
-      </button>
+      <p className={styles.step}>STEP 02</p>
+      <h2 className={styles.title}>背景除去</h2>
       
-      {isProcessing && (
-        <p className={styles.processingText}>
-          背景除去処理を実行中です。しばらくお待ちください...
-        </p>
-      )}
+      <div className={styles.removeSection}>
+        <button
+          className={styles.removeButton}
+          onClick={handleRemoveBackground}
+          disabled={!imageData || isProcessing}
+        >
+          {isProcessing ? '処理中...' : '背景を除去'}
+        </button>
+        
+        {isProcessing && (
+          <div className={styles.progressBarContainer}>
+            <div className={styles.progressBar} style={{ width: `${processProgress}%` }}>
+              <span className={styles.progressText}>{Math.round(processProgress)}%</span>
+            </div>
+          </div>
+        )}
+        
+        {error && (
+          <p className={styles.errorText}>{error}</p>
+        )}
+      </div>
       
-      {error && (
-        <p className={styles.errorText}>{error}</p>
-      )}
+      <div className={styles.note}>
+        <p>画像から背景を自動的に除去します</p>
+        <p>※処理には少し時間がかかる場合があります</p>
+      </div>
     </div>
   );
 }

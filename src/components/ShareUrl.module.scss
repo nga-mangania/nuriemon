@@ -1,0 +1,139 @@
+@use 'sass:color';
+
+// 既存のoekaki-screenの変数に合わせる
+$primary-color: #272343;
+$secondary-color: #8EB8CD;
+$base-color: #fffffe;
+$text-color: #2d334a;
+$button-color: #ec4899;
+$delete-color: #847879;
+$confirm-color: #ffd803;
+$border-radius: 4px;
+$bg-color: #eaf0f2;
+
+.shareUrlContainer {
+  position: relative;
+  width: 100%;
+}
+
+.generateButton {
+  background-color: $button-color;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: $border-radius;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  line-height: 1.5;
+  font-weight: bold;
+  width: 100%;
+
+  &:hover:not(:disabled) {
+    background-color: color.adjust($button-color, $lightness: -10%);
+  }
+
+  &:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+  }
+}
+
+.shareUrlDisplay {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  position: relative;
+}
+
+.shareUrlInput {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: $border-radius;
+  color: $text-color;
+  font-size: 0.9rem;
+  
+  @media screen and (max-width: 768px) {
+    font-size: 0.8rem;
+  }
+}
+
+.shareUrlActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.copyButton,
+.deleteButton {
+  background-color: transparent;
+  border: none;
+  padding: 0.5rem;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: color 0.3s ease;
+  
+  @media screen and (max-width: 768px) {
+    font-size: 1rem;
+  }
+}
+
+.copyButton {
+  color: $button-color;
+  
+  &:hover {
+    color: color.adjust($button-color, $lightness: -10%);
+  }
+}
+
+.deleteButton {
+  color: $delete-color;
+  
+  &:hover {
+    color: color.adjust($delete-color, $lightness: -10%);
+  }
+}
+
+.copiedTooltip {
+  position: absolute;
+  top: -30px;
+  right: 50px;
+  background-color: $text-color;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: $border-radius;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  animation: fadeInOut 2s ease;
+}
+
+@keyframes fadeInOut {
+  0% {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+}
+
+.tooltip {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background-color: $bg-color;
+  border-radius: $border-radius;
+  font-size: 0.85rem;
+  color: $text-color;
+  
+  p {
+    margin: 0;
+  }
+}

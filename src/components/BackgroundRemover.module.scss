@@ -1,56 +1,113 @@
 @use 'sass:color';
 @use '../styles/variables' as vars;
 
+// 既存のoekaki-screenの変数に合わせる
+$primary-color: #272343;
+$secondary-color: #8EB8CD;
+$base-color: #fffffe;
+$text-color: #2d334a;
+$button-color: #ec4899;
+$delete-color: #847879;
+$confirm-color: #ffd803;
+$border-radius: 4px;
+$bg-color: #eaf0f2;
+
 .backgroundRemover {
+  background-color: white;
+  border-radius: $border-radius;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.1);
+}
+
+.step {
+  font-weight: 600;
+  font-size: 1.2em;
+  line-height: 1;
+  margin-bottom: 10px;
+  color: $secondary-color;
+}
+
+.title {
+  color: $text-color;
+  margin-bottom: 1rem;
+  font-size: 1.4rem;
+  margin-top: 0;
+}
+
+.removeSection {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: vars.$spacing-md;
-  padding: vars.$spacing-lg;
-  background-color: white;
-  border-radius: vars.$border-radius;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  gap: 1rem;
+  margin-bottom: 1rem;
 }
 
 .removeButton {
-  padding: vars.$spacing-md vars.$spacing-xl;
-  background-color: vars.$secondary-color;
+  display: inline-block;
+  background-color: $button-color;
   color: white;
-  border: none;
-  border-radius: vars.$border-radius;
-  font-size: 1rem;
-  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: $border-radius;
   cursor: pointer;
-  transition: vars.$transition-base;
+  transition: background-color 0.3s ease;
+  line-height: 1.5;
+  font-weight: bold;
+  border: none;
+  font-size: 1rem;
+  width: fit-content;
 
   &:hover:not(:disabled) {
-    background-color: color.adjust(vars.$secondary-color, $lightness: -10%);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(vars.$secondary-color, 0.3);
-  }
-
-  &:active:not(:disabled) {
-    transform: translateY(0);
+    background-color: color.adjust($button-color, $lightness: -10%);
   }
 
   &:disabled {
-    background-color: color.adjust(vars.$secondary-color, $lightness: 20%);
+    background-color: #ccc;
     cursor: not-allowed;
-    opacity: 0.7;
   }
 }
 
-.processingText {
-  margin: 0;
-  color: vars.$primary-color;
-  font-size: 0.9rem;
-  text-align: center;
-  font-style: italic;
+.progressBarContainer {
+  width: 100%;
+  background-color: #e0e0e0;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.progressBar {
+  height: 20px;
+  background-color: $button-color;
+  transition: width 0.5s ease-in-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.progressText {
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
 }
 
 .errorText {
   margin: 0;
-  color: #e74c3c;
+  color: $delete-color;
   font-size: 0.9rem;
-  text-align: center;
+}
+
+.note {
+  padding: 10px;
+  font-size: 0.9em;
+  line-height: 1.5;
+  background-color: $bg-color;
+  border-radius: $border-radius;
+  margin-top: 20px;
+  
+  p {
+    margin-bottom: 0.3rem;
+    color: $text-color;
+    
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
 }

@@ -2,8 +2,9 @@ import { BaseDirectory, exists, mkdir, readFile, writeFile, remove } from '@taur
 import { join } from '@tauri-apps/api/path';
 import { loadSettings, getSaveDirectory } from './settings';
 import { ensureDirectory, writeFileAbsolute, readFileAbsolute, fileExistsAbsolute } from './customFileOperations';
+import { DatabaseService, ImageMetadata as DbImageMetadata, migrateFromJSON } from './database';
 
-// 画像のメタデータ型
+// 既存の型定義（後方互換性のため維持）
 export interface ImageMetadata {
   id: string;
   originalFileName: string;
@@ -15,13 +16,16 @@ export interface ImageMetadata {
   height?: number;
 }
 
-// メタデータファイル名
+// メタデータファイル名（移行チェック用）
 const METADATA_FILE = 'metadata.json';
 
 // ディレクトリ名
 const IMAGES_DIR = 'images';
 const ORIGINALS_DIR = 'originals';
 const PROCESSED_DIR = 'processed';
+
+// 移行フラグ（一度だけ移行を実行）
+let migrationChecked = false;
 
 /**
  * 保存場所に対応するベースディレクトリを取得
@@ -38,6 +42,114 @@ function getBaseDirectory(saveLocation: string): BaseDirectory {
     default:
       return BaseDirectory.AppData;
   }
+}
+
+/**
+ * 背景ファイルを保存
+ */
+export async function saveBackgroundFile(dataUrl: string, fileName: string): Promise<ImageMetadata> {
+  const db = DatabaseService.getInstance();
+  await db.init();
+
+  const id = `bg-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const savedFileName = `background-${id}-${fileName}`;
+  const saveDir = await getSaveDirectory();
+  const baseDir = getBaseDirectory(saveDir);
+  
+  // ディレクトリパスを構築
+  const dirPath = await join(await getSaveDirectory(), 'nuriemon', IMAGES_DIR, 'backgrounds');
+  
+  // ディレクトリを作成
+  await ensureDirectory(dirPath);
+  
+  // ファイルパスを構築
+  const filePath = await join(dirPath, savedFileName);
+  
+  // Base64データをバイナリに変換
+  const base64Data = dataUrl.split(',')[1];
+  const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+  
+  // ファイルを保存
+  await writeFileAbsolute(filePath, binaryData);
+  
+  // メタデータを作成
+  const metadata: DbImageMetadata = {
+    id,
+    originalFileName: fileName,
+    savedFileName,
+    imageType: 'background',
+    createdAt: new Date().toISOString(),
+    size: binaryData.length,
+    storageLocation: saveDir
+  };
+  
+  // データベースに保存
+  await db.saveImage(metadata);
+  
+  // 既存の型に変換して返す
+  return {
+    id: metadata.id,
+    originalFileName: metadata.originalFileName,
+    savedFileName: metadata.savedFileName,
+    type: 'original',
+    createdAt: metadata.createdAt,
+    size: metadata.size,
+    width: metadata.width,
+    height: metadata.height
+  };
+}
+
+/**
+ * 音声ファイルを保存
+ */
+export async function saveAudioFile(dataUrl: string, fileName: string, type: 'bgm' | 'soundEffect'): Promise<ImageMetadata> {
+  const db = DatabaseService.getInstance();
+  await db.init();
+
+  const id = `audio-${type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const savedFileName = `${type}-${id}-${fileName}`;
+  const saveDir = await getSaveDirectory();
+  const baseDir = getBaseDirectory(saveDir);
+  
+  // ディレクトリパスを構築
+  const dirPath = await join(await getSaveDirectory(), 'nuriemon', 'audio');
+  
+  // ディレクトリを作成
+  await ensureDirectory(dirPath);
+  
+  // ファイルパスを構築
+  const filePath = await join(dirPath, savedFileName);
+  
+  // Base64データをバイナリに変換
+  const base64Data = dataUrl.split(',')[1];
+  const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+  
+  // ファイルを保存
+  await writeFileAbsolute(filePath, binaryData);
+  
+  // メタデータを作成
+  const metadata: DbImageMetadata = {
+    id,
+    originalFileName: fileName,
+    savedFileName,
+    imageType: type,
+    createdAt: new Date().toISOString(),
+    size: binaryData.length,
+    storageLocation: saveDir
+  };
+  
+  // データベースに保存
+  await db.saveImage(metadata);
+  
+  // 既存の型に変換して返す
+  return {
+    id: metadata.id,
+    originalFileName: metadata.originalFileName,
+    savedFileName: metadata.savedFileName,
+    type: 'original',
+    createdAt: metadata.createdAt,
+    size: metadata.size
+  };
 }
 
 /**
@@ -107,23 +219,10 @@ export async function initializeStorage(): Promise<void> {
       }
     }
 
-    // メタデータファイルが存在しない場合は初期化
-    const metadataPath = await join(saveDir, METADATA_FILE);
-    try {
-      if (settings.saveLocation === 'custom' && settings.customPath) {
-        // カスタムパスの場合
-        if (!await fileExistsAbsolute(metadataPath)) {
-          await writeFileAbsolute(metadataPath, new TextEncoder().encode('[]'));
-        }
-      } else {
-        // 標準ディレクトリの場合
-        const baseDir = getBaseDirectory(settings.saveLocation);
-        if (!await exists(metadataPath, { baseDir })) {
-          await writeFile(metadataPath, new TextEncoder().encode('[]'), { baseDir });
-        }
-      }
-    } catch (error) {
-      await writeFile(metadataPath, new TextEncoder().encode('[]'));
+    // 既存のJSONデータをSQLiteに移行（初回のみ）
+    if (!migrationChecked) {
+      await checkAndMigrateData();
+      migrationChecked = true;
     }
   } catch (error) {
     console.error('ストレージ初期化エラー:', error);
@@ -132,6 +231,67 @@ export async function initializeStorage(): Promise<void> {
       stack: error instanceof Error ? error.stack : undefined
     });
     throw error;
+  }
+}
+
+/**
+ * 既存のJSONデータをSQLiteに移行
+ */
+async function checkAndMigrateData(): Promise<void> {
+  try {
+    const settings = await loadSettings();
+    const metadataPath = await join(await getSaveDirectory(settings), METADATA_FILE);
+    
+    let jsonExists = false;
+    if (settings.saveLocation === 'custom' && settings.customPath) {
+      jsonExists = await fileExistsAbsolute(metadataPath);
+    } else {
+      const baseDir = getBaseDirectory(settings.saveLocation);
+      try {
+        jsonExists = await exists(metadataPath, { baseDir });
+      } catch {
+        jsonExists = false;
+      }
+    }
+
+    if (!jsonExists) {
+      return; // 移行する必要なし
+    }
+
+    // JSONデータを読み込み
+    let data: Uint8Array;
+    if (settings.saveLocation === 'custom' && settings.customPath) {
+      data = await readFileAbsolute(metadataPath);
+    } else {
+      const baseDir = getBaseDirectory(settings.saveLocation);
+      data = await readFile(metadataPath, { baseDir });
+    }
+    
+    const jsonStr = new TextDecoder().decode(data);
+    const metadataList = JSON.parse(jsonStr);
+
+    if (Array.isArray(metadataList) && metadataList.length > 0) {
+      console.log('既存のJSONデータをSQLiteに移行中...');
+      
+      // 保存場所を含めてデータを更新
+      const storageLocation = await getSaveDirectory(settings);
+      const updatedList = metadataList.map(item => ({
+        ...item,
+        storage_location: storageLocation
+      }));
+      
+      await migrateFromJSON(updatedList);
+      console.log(`${metadataList.length}件のデータを移行しました`);
+      
+      // 移行完了後、JSONファイルをリネーム（バックアップとして保持）
+      // const backupPath = await join(await getSaveDirectory(settings), `${METADATA_FILE}.backup`);
+      
+      // TODO: ファイルのリネーム機能を実装
+      console.log('JSONファイルはバックアップとして保持されます');
+    }
+  } catch (error) {
+    console.error('データ移行エラー:', error);
+    // 移行エラーがあっても処理を続行
   }
 }
 
@@ -187,17 +347,9 @@ export async function saveImage(
       await writeFile(imagePath, imageBytes, { baseDir });
     }
 
-    // メタデータを作成
-    const metadata: ImageMetadata = {
-      id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      originalFileName,
-      savedFileName,
-      type,
-      createdAt: new Date().toISOString(),
-      size: imageBytes.length,
-    };
-
     // 画像のサイズを取得（Canvas使用）
+    let width: number | undefined;
+    let height: number | undefined;
     try {
       const img = new Image();
       await new Promise((resolve, reject) => {
@@ -205,14 +357,38 @@ export async function saveImage(
         img.onerror = reject;
         img.src = imageData;
       });
-      metadata.width = img.width;
-      metadata.height = img.height;
+      width = img.width;
+      height = img.height;
     } catch (error) {
       console.warn('画像サイズの取得に失敗:', error);
     }
 
-    // メタデータを保存
-    await saveMetadata(metadata);
+    // データベースにメタデータを保存
+    const dbMetadata: DbImageMetadata = {
+      id: await DatabaseService.generateId(),
+      original_file_name: originalFileName,
+      saved_file_name: savedFileName,
+      image_type: type,
+      created_at: await DatabaseService.getCurrentTimestamp(),
+      size: imageBytes.length,
+      width,
+      height,
+      storage_location: saveDir,
+    };
+
+    await DatabaseService.saveImageMetadata(dbMetadata);
+
+    // 既存の形式に変換して返す（後方互換性のため）
+    const metadata: ImageMetadata = {
+      id: dbMetadata.id,
+      originalFileName: dbMetadata.original_file_name,
+      savedFileName: dbMetadata.saved_file_name,
+      type: dbMetadata.image_type as 'original' | 'processed',
+      createdAt: dbMetadata.created_at,
+      size: dbMetadata.size,
+      width: dbMetadata.width,
+      height: dbMetadata.height,
+    };
 
     return metadata;
   } catch (error) {
@@ -226,66 +402,23 @@ export async function saveImage(
 }
 
 /**
- * メタデータを保存
- */
-async function saveMetadata(newMetadata: ImageMetadata): Promise<void> {
-  const settings = await loadSettings();
-  const metadataPath = await join(await getSaveDirectory(settings), METADATA_FILE);
-  
-  // 既存のメタデータを読み込み
-  let metadataList: ImageMetadata[] = [];
-  try {
-    if (settings.saveLocation === 'custom' && settings.customPath) {
-      if (await fileExistsAbsolute(metadataPath)) {
-        const data = await readFileAbsolute(metadataPath);
-        const jsonStr = new TextDecoder().decode(data);
-        metadataList = JSON.parse(jsonStr);
-      }
-    } else {
-      const baseDir = getBaseDirectory(settings.saveLocation);
-      const data = await readFile(metadataPath, { baseDir });
-      const jsonStr = new TextDecoder().decode(data);
-      metadataList = JSON.parse(jsonStr);
-    }
-  } catch (error) {
-    console.warn('メタデータ読み込みエラー:', error);
-  }
-
-  // 新しいメタデータを追加
-  metadataList.push(newMetadata);
-
-  // 保存
-  const jsonData = JSON.stringify(metadataList, null, 2);
-  if (settings.saveLocation === 'custom' && settings.customPath) {
-    await writeFileAbsolute(metadataPath, new TextEncoder().encode(jsonData));
-  } else {
-    const baseDir = getBaseDirectory(settings.saveLocation);
-    await writeFile(metadataPath, new TextEncoder().encode(jsonData), { baseDir });
-  }
-}
-
-/**
  * すべてのメタデータを取得
  */
 export async function getAllMetadata(): Promise<ImageMetadata[]> {
   try {
-    const settings = await loadSettings();
-    const metadataPath = await join(await getSaveDirectory(settings), METADATA_FILE);
+    const dbMetadataList = await DatabaseService.getAllImages();
     
-    let data: Uint8Array;
-    if (settings.saveLocation === 'custom' && settings.customPath) {
-      if (await fileExistsAbsolute(metadataPath)) {
-        data = await readFileAbsolute(metadataPath);
-      } else {
-        return [];
-      }
-    } else {
-      const baseDir = getBaseDirectory(settings.saveLocation);
-      data = await readFile(metadataPath, { baseDir });
-    }
-    
-    const jsonStr = new TextDecoder().decode(data);
-    return JSON.parse(jsonStr);
+    // 既存の形式に変換（後方互換性のため）
+    return dbMetadataList.map(dbMeta => ({
+      id: dbMeta.id,
+      originalFileName: dbMeta.original_file_name,
+      savedFileName: dbMeta.saved_file_name,
+      type: dbMeta.image_type as 'original' | 'processed',
+      createdAt: dbMeta.created_at,
+      size: dbMeta.size,
+      width: dbMeta.width,
+      height: dbMeta.height,
+    }));
   } catch (error) {
     console.error('メタデータ取得エラー:', error);
     return [];
@@ -298,8 +431,15 @@ export async function getAllMetadata(): Promise<ImageMetadata[]> {
 export async function loadImage(metadata: ImageMetadata): Promise<string> {
   try {
     const settings = await loadSettings();
+    
+    // SQLiteから最新の保存場所を取得
+    const dbMetadataList = await DatabaseService.getAllImages();
+    const dbMetadata = dbMetadataList.find(m => m.id === metadata.id);
+    
+    const storageLocation = dbMetadata?.storage_location || await getSaveDirectory(settings);
+    
     const subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
-    const imagePath = await join(await getSaveDirectory(settings), IMAGES_DIR, subDir, metadata.savedFileName);
+    const imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
     
     let imageData: Uint8Array;
     if (settings.saveLocation === 'custom' && settings.customPath) {
@@ -338,9 +478,15 @@ export async function deleteImage(metadata: ImageMetadata): Promise<void> {
   try {
     const settings = await loadSettings();
     
+    // SQLiteから保存場所を取得
+    const dbMetadataList = await DatabaseService.getAllImages();
+    const dbMetadata = dbMetadataList.find(m => m.id === metadata.id);
+    
+    const storageLocation = dbMetadata?.storage_location || await getSaveDirectory(settings);
+    
     // 画像ファイルを削除
     const subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
-    const imagePath = await join(await getSaveDirectory(settings), IMAGES_DIR, subDir, metadata.savedFileName);
+    const imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
     
     if (settings.saveLocation === 'custom' && settings.customPath) {
       // カスタムディレクトリの場合、Rust側で削除を実装する必要がある
@@ -351,18 +497,8 @@ export async function deleteImage(metadata: ImageMetadata): Promise<void> {
       await remove(imagePath, { baseDir });
     }
 
-    // メタデータから削除
-    const metadataPath = await join(await getSaveDirectory(settings), METADATA_FILE);
-    const allMetadata = await getAllMetadata();
-    const updatedMetadata = allMetadata.filter(m => m.id !== metadata.id);
-    
-    const jsonData = JSON.stringify(updatedMetadata, null, 2);
-    if (settings.saveLocation === 'custom' && settings.customPath) {
-      await writeFileAbsolute(metadataPath, new TextEncoder().encode(jsonData));
-    } else {
-      const baseDir = getBaseDirectory(settings.saveLocation);
-      await writeFile(metadataPath, new TextEncoder().encode(jsonData), { baseDir });
-    }
+    // データベースから削除
+    await DatabaseService.deleteImage(metadata.id);
   } catch (error) {
     console.error('画像削除エラー:', error);
     throw error;

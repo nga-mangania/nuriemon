@@ -1,0 +1,116 @@
+@use 'sass:color';
+
+// 既存のoekaki-screenの変数に合わせる
+$primary-color: #272343;
+$secondary-color: #8EB8CD;
+$base-color: #fffffe;
+$text-color: #2d334a;
+$button-color: #ec4899;
+$delete-color: #847879;
+$confirm-color: #ffd803;
+$border-radius: 4px;
+
+.settingsContainer {
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  
+  h3 {
+    margin: 0 0 10px 0;
+    color: $text-color;
+    font-size: 1rem;
+    font-weight: normal;
+  }
+}
+
+.randomButton {
+  background-color: $confirm-color;
+  color: $text-color;
+  border: none;
+  padding: 6px 12px;
+  border-radius: $border-radius;
+  cursor: pointer;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+  transition: background-color 0.3s ease;
+  font-weight: bold;
+
+  &:hover {
+    background-color: color.adjust($confirm-color, $lightness: -10%);
+  }
+}
+
+.settingGroup {
+  margin-bottom: 10px;
+
+  label {
+    display: block;
+    margin-bottom: 3px;
+    color: $text-color;
+    font-size: 0.9rem;
+  }
+
+  select {
+    width: 150px;
+    padding: 5px;
+    border: 1px solid #ddd;
+    border-radius: $border-radius;
+    font-size: 0.9rem;
+    background: white;
+    cursor: pointer;
+
+    &:focus {
+      outline: none;
+      border-color: $secondary-color;
+    }
+  }
+}
+
+.speedSliderContainer {
+  margin: 5px 0;
+}
+
+.speedSlider {
+  width: 150px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #ddd;
+  outline: none;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  border-radius: 2px;
+
+  &:hover {
+    opacity: 1;
+  }
+
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: $button-color;
+    cursor: pointer;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  &::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: $button-color;
+    cursor: pointer;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+}
+
+.speedLabels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: $text-color;
+  margin-top: 3px;
+  width: 150px;
+}

@@ -1,7 +1,7 @@
 /**
  * ディレクトリへのアクセス権限を追加
  */
-export async function addDirectoryScope(directory: string): Promise<void> {
+export async function addDirectoryScope(_directory: string): Promise<void> {
   try {
     // Tauri v2では、fs pluginのスコープはRust側で管理される
     // 現在のところ、動的なスコープ追加はプラグインAPIを通じて行う必要がある
