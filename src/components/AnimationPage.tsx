@@ -42,7 +42,10 @@ const AnimationPage: React.FC = () => {
     try {
       const metadata = await getAllMetadata();
       // 処理済み画像のみフィルタリング
-      const processedImages = metadata.filter(img => img.type === 'processed');
+      const processedImages = metadata.filter(img => {
+        const imageType = (img as any).image_type || img.type;
+        return imageType === 'processed';
+      });
       setImages(processedImages);
       
       // 各画像のサムネイルを事前に読み込む
@@ -79,17 +82,25 @@ const AnimationPage: React.FC = () => {
   const loadAudioFiles = async () => {
     try {
       const metadata = await getAllMetadata();
-      const bgmFile = metadata.find(m => m.type === 'bgm');
-      const soundEffectFile = metadata.find(m => m.type === 'soundEffect');
+      const bgmFile = metadata.find(m => (m as any).type === 'bgm' || (m as any).image_type === 'bgm');
+      const soundEffectFile = metadata.find(m => (m as any).type === 'soundEffect' || (m as any).image_type === 'soundEffect');
       
       if (bgmFile) {
-        const bgmData = await loadImage(bgmFile);
-        setBgmUrl(bgmData);
+        try {
+          const bgmData = await loadImage(bgmFile);
+          setBgmUrl(bgmData);
+        } catch (e) {
+          console.error('BGMファイル読み込みエラー:', bgmFile, e);
+        }
       }
       
       if (soundEffectFile) {
-        const soundData = await loadImage(soundEffectFile);
-        setSoundEffectUrl(soundData);
+        try {
+          const soundData = await loadImage(soundEffectFile);
+          setSoundEffectUrl(soundData);
+        } catch (e) {
+          console.error('効果音ファイル読み込みエラー:', soundEffectFile, e);
+        }
       }
     } catch (error) {
       console.error('音声ファイルの読み込みエラー:', error);

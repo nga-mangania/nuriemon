@@ -1,19 +1,38 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
-import { saveAudioFile } from '../services/imageStorage';
+import { saveAudioFile, getAllMetadata, deleteImage, loadImage } from '../services/imageStorage';
 import styles from './AudioSettings.module.scss';
 
-interface AudioSettingsProps {
-  onBgmChange?: (file: {name: string, data: string} | null) => void;
-  onSoundEffectChange?: (file: {name: string, data: string} | null) => void;
-}
-
-export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSettingsProps) {
-  const [bgmFile, setBgmFile] = useState<{name: string, data: string} | null>(null);
-  const [soundEffectFile, setSoundEffectFile] = useState<{name: string, data: string} | null>(null);
+export function AudioSettings() {
+  const [bgmFile, setBgmFile] = useState<{name: string, data: string, uploaded?: boolean, id?: string} | null>(null);
+  const [soundEffectFile, setSoundEffectFile] = useState<{name: string, data: string, uploaded?: boolean, id?: string} | null>(null);
   const [uploadingBgm, setUploadingBgm] = useState(false);
   const [uploadingSoundEffect, setUploadingSoundEffect] = useState(false);
+
+  // 既存の音声ファイルを読み込み
+  useEffect(() => {
+    const loadExistingAudioFiles = async () => {
+      try {
+        const metadata = await getAllMetadata();
+        const bgm = metadata.find(m => (m as any).image_type === 'bgm');
+        const soundEffect = metadata.find(m => (m as any).image_type === 'soundEffect');
+        
+        if (bgm) {
+          const bgmData = await loadImage(bgm);
+          setBgmFile({ name: bgm.originalFileName, data: bgmData, uploaded: true, id: bgm.id });
+        }
+        if (soundEffect) {
+          const soundData = await loadImage(soundEffect);
+          setSoundEffectFile({ name: soundEffect.originalFileName, data: soundData, uploaded: true, id: soundEffect.id });
+        }
+      } catch (error) {
+        console.error('既存音声ファイルの読み込みエラー:', error);
+      }
+    };
+    
+    loadExistingAudioFiles();
+  }, []);
 
   const handleBgmSelect = async () => {
     try {
@@ -41,7 +60,9 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
         const dataUrl = `data:${mimeType};base64,${base64}`;
         const file = { name: fileName, data: dataUrl };
         setBgmFile(file);
-        if (onBgmChange) onBgmChange(file);
+        
+        // 自動でアップロード
+        await handleBgmUpload(file);
       }
     } catch (error) {
       console.error('BGM選択エラー:', error);
@@ -82,7 +103,9 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
         const dataUrl = `data:${mimeType};base64,${base64}`;
         const file = { name: fileName, data: dataUrl };
         setSoundEffectFile(file);
-        if (onSoundEffectChange) onSoundEffectChange(file);
+        
+        // 自動でアップロード
+        await handleSoundEffectUpload(file);
       }
     } catch (error) {
       console.error('効果音選択エラー:', error);
@@ -90,12 +113,14 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
     }
   };
 
-  const handleBgmUpload = async () => {
-    if (!bgmFile) return;
+  const handleBgmUpload = async (fileToUpload?: {name: string, data: string}) => {
+    const file = fileToUpload || bgmFile;
+    if (!file) return;
     
     setUploadingBgm(true);
     try {
-      await saveAudioFile(bgmFile.data, bgmFile.name, 'bgm');
+      const metadata = await saveAudioFile(file.data, file.name, 'bgm');
+      setBgmFile({ ...file, uploaded: true, id: metadata.id });
       alert('BGMがアップロードされました');
     } catch (error) {
       console.error('BGMアップロードエラー:', error);
@@ -105,12 +130,14 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
     }
   };
 
-  const handleSoundEffectUpload = async () => {
-    if (!soundEffectFile) return;
+  const handleSoundEffectUpload = async (fileToUpload?: {name: string, data: string}) => {
+    const file = fileToUpload || soundEffectFile;
+    if (!file) return;
     
     setUploadingSoundEffect(true);
     try {
-      await saveAudioFile(soundEffectFile.data, soundEffectFile.name, 'soundEffect');
+      const metadata = await saveAudioFile(file.data, file.name, 'soundEffect');
+      setSoundEffectFile({ ...file, uploaded: true, id: metadata.id });
       alert('効果音がアップロードされました');
     } catch (error) {
       console.error('効果音アップロードエラー:', error);
@@ -120,14 +147,38 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
     }
   };
 
-  const clearBgmSelection = () => {
+  const clearBgmSelection = async () => {
+    if (bgmFile?.uploaded && bgmFile?.id) {
+      if (!confirm('BGMを削除しますか？')) {
+        return;
+      }
+      try {
+        await deleteImage({ id: bgmFile.id } as any);
+        alert('BGMを削除しました');
+      } catch (error) {
+        console.error('BGM削除エラー:', error);
+        alert('BGMの削除に失敗しました');
+        return;
+      }
+    }
     setBgmFile(null);
-    if (onBgmChange) onBgmChange(null);
   };
 
-  const clearSoundEffectSelection = () => {
+  const clearSoundEffectSelection = async () => {
+    if (soundEffectFile?.uploaded && soundEffectFile?.id) {
+      if (!confirm('効果音を削除しますか？')) {
+        return;
+      }
+      try {
+        await deleteImage({ id: soundEffectFile.id } as any);
+        alert('効果音を削除しました');
+      } catch (error) {
+        console.error('効果音削除エラー:', error);
+        alert('効果音の削除に失敗しました');
+        return;
+      }
+    }
     setSoundEffectFile(null);
-    if (onSoundEffectChange) onSoundEffectChange(null);
   };
 
   return (
@@ -138,15 +189,9 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
           <button
             className={styles.fileInputLabel}
             onClick={handleBgmSelect}
+            disabled={uploadingBgm}
           >
-            BGMを選択
-          </button>
-          <button
-            onClick={handleBgmUpload}
-            disabled={!bgmFile || uploadingBgm}
-            className={styles.uploadButton}
-          >
-            {uploadingBgm ? 'アップロード中...' : 'アップロード'}
+            {uploadingBgm ? 'アップロード中...' : 'BGMを選択'}
           </button>
         </div>
         
@@ -162,7 +207,7 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
           </div>
         )}
         
-        {bgmFile && (
+        {bgmFile && bgmFile.data && (
           <audio controls className={styles.audioPreview}>
             <source src={bgmFile.data} />
           </audio>
@@ -175,15 +220,9 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
           <button
             className={styles.fileInputLabel}
             onClick={handleSoundEffectSelect}
+            disabled={uploadingSoundEffect}
           >
-            効果音を選択
-          </button>
-          <button
-            onClick={handleSoundEffectUpload}
-            disabled={!soundEffectFile || uploadingSoundEffect}
-            className={styles.uploadButton}
-          >
-            {uploadingSoundEffect ? 'アップロード中...' : 'アップロード'}
+            {uploadingSoundEffect ? 'アップロード中...' : '効果音を選択'}
           </button>
         </div>
         
@@ -199,7 +238,7 @@ export function AudioSettings({ onBgmChange, onSoundEffectChange }: AudioSetting
           </div>
         )}
         
-        {soundEffectFile && (
+        {soundEffectFile && soundEffectFile.data && (
           <audio controls className={styles.audioPreview}>
             <source src={soundEffectFile.data} />
           </audio>

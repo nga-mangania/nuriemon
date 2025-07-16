@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
-import { saveImage, saveBackgroundFile } from '../services/imageStorage';
+import { saveImage, saveBackgroundFile, getAllMetadata } from '../services/imageStorage';
 import { loadSettings, saveSettings } from '../services/settings';
 import { saveMovementSettings } from '../services/movementStorage';
 import { MovementSettings } from './MovementSettings';
@@ -21,9 +21,6 @@ export function UploadPage() {
   // 地面の位置設定
   const [groundPosition, setGroundPosition] = useState(50);
 
-  // 音楽設定
-  const [bgmFile, setBgmFile] = useState<{name: string, data: string} | null>(null);
-  const [soundEffectFile, setSoundEffectFile] = useState<{name: string, data: string} | null>(null);
 
   // 非表示までの時間設定
   const [deletionTime, setDeletionTime] = useState('unlimited');
@@ -51,6 +48,11 @@ export function UploadPage() {
             url: settings.backgroundUrl,
             type: settings.backgroundType || 'image'
           });
+        }
+        
+        // 動き設定を読み込み
+        if (settings.lastMovementSettings) {
+          setMovementSettings(settings.lastMovementSettings);
         }
       }
     };
@@ -84,7 +86,11 @@ export function UploadPage() {
                         extension === 'png' ? 'image/png' : 'image/jpeg';
         
         const dataUrl = `data:${mimeType};base64,${base64}`;
-        setBackgroundFile({ name: fileName, data: dataUrl, type: isVideo ? 'video' : 'image' });
+        const fileInfo = { name: fileName, data: dataUrl, type: isVideo ? 'video' : 'image' };
+        setBackgroundFile(fileInfo);
+        
+        // 自動でアップロード
+        await handleBackgroundUpload(fileInfo);
       }
     } catch (error) {
       console.error('背景ファイル選択エラー:', error);
@@ -92,8 +98,9 @@ export function UploadPage() {
     }
   };
 
-  const handleBackgroundUpload = async () => {
-    if (!backgroundFile) return;
+  const handleBackgroundUpload = async (fileToUpload?: {name: string, data: string, type: string}) => {
+    const file = fileToUpload || backgroundFile;
+    if (!file) return;
     
     setUploadingBackground(true);
     setBackgroundProgress(0);
@@ -109,20 +116,20 @@ export function UploadPage() {
     }, 200);
 
     try {
-      const metadata = await saveBackgroundFile(backgroundFile.data, backgroundFile.name);
+      const metadata = await saveBackgroundFile(file.data, file.name);
       clearInterval(progressInterval);
       setBackgroundProgress(100);
       
       const currentSettings = await loadSettings();
       await saveSettings({
         ...currentSettings,
-        backgroundUrl: backgroundFile.data,
-        backgroundType: backgroundFile.type
+        backgroundUrl: file.data,
+        backgroundType: file.type
       });
       
       setCurrentBackground({
-        url: backgroundFile.data,
-        type: backgroundFile.type
+        url: file.data,
+        type: file.type
       });
       
       alert('背景ファイルは正常にアップロードされました');
@@ -161,14 +168,6 @@ export function UploadPage() {
     await saveSettings({ ...currentSettings, groundPosition: position });
   };
 
-  // STEP 03: 音楽の設定
-  const handleBgmChange = (file: {name: string, data: string} | null) => {
-    setBgmFile(file);
-  };
-
-  const handleSoundEffectChange = (file: {name: string, data: string} | null) => {
-    setSoundEffectFile(file);
-  };
 
   // STEP 04: 非表示までの時間設定
   const handleDeletionTimeChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -203,7 +202,11 @@ export function UploadPage() {
         const mimeType = extension === 'png' ? 'image/png' : 'image/jpeg';
         
         const dataUrl = `data:${mimeType};base64,${base64}`;
-        setImage({ name: fileName, data: dataUrl });
+        const imageInfo = { name: fileName, data: dataUrl };
+        setImage(imageInfo);
+        
+        // 自動でアップロード
+        await handleImageUpload(imageInfo);
       }
     } catch (error) {
       console.error('画像選択エラー:', error);
@@ -211,8 +214,9 @@ export function UploadPage() {
     }
   };
 
-  const handleImageUpload = async () => {
-    if (!image) return;
+  const handleImageUpload = async (imageToUpload?: {name: string, data: string}) => {
+    const img = imageToUpload || image;
+    if (!img) return;
     
     setUploadingImage(true);
     setUploadProgress(0);
@@ -229,17 +233,17 @@ export function UploadPage() {
 
     try {
       // まず元画像を保存
-      const metadata = await saveImage(image.data, image.name, 'original');
+      const metadata = await saveImage(img.data, img.name, 'original');
       
       // 背景除去処理を実行
       setUploadProgress(50);
       const result = await invoke<{ success: boolean; image?: string; error?: string }>('process_image', {
-        imageData: image.data
+        imageData: img.data
       });
       
       if (result.success && result.image) {
         // 処理済み画像を保存
-        const processedFileName = image.name.replace(/\.[^/.]+$/, '') + '-nobg.png';
+        const processedFileName = img.name.replace(/\.[^/.]+$/, '') + '-nobg.png';
         await saveImage(result.image, processedFileName, 'processed');
         setUploadProgress(90);
       }
@@ -286,15 +290,9 @@ export function UploadPage() {
               <button
                 className={styles.fileInputLabel}
                 onClick={handleBackgroundSelect}
+                disabled={uploadingBackground}
               >
-                背景を選択
-              </button>
-              <button
-                onClick={handleBackgroundUpload}
-                disabled={!backgroundFile || uploadingBackground}
-                className={styles.uploadButton}
-              >
-                {uploadingBackground ? 'アップロード中...' : 'アップロード'}
+                {uploadingBackground ? 'アップロード中...' : '背景を選択'}
               </button>
             </div>
             
@@ -307,6 +305,14 @@ export function UploadPage() {
                 <button className={styles.fileClear} onClick={clearBackgroundSelection}>
                   <i className="fa-solid fa-delete-left"></i>
                 </button>
+              </div>
+            )}
+            
+            {uploadingBackground && (
+              <div className={styles.progressBarContainer}>
+                <div className={styles.progressBar} style={{ width: `${backgroundProgress}%` }}>
+                  <span className={styles.progressText}>{Math.round(backgroundProgress)}%</span>
+                </div>
               </div>
             )}
             
@@ -357,10 +363,7 @@ export function UploadPage() {
         <div className={styles.uploadSection}>
           <p className={styles.step}>STEP 03</p>
           <h2>音楽の設定</h2>
-          <AudioSettings
-            onBgmChange={handleBgmChange}
-            onSoundEffectChange={handleSoundEffectChange}
-          />
+          <AudioSettings />
           <div className={styles.note}>
             <p>対応ファイル：mp3、mp4(BGM50MB・効果音1MB以下)</p>
             <p>※効果音は新規画像がスクリーンに登場した時に再生されます。</p>
@@ -410,15 +413,9 @@ export function UploadPage() {
               <button
                 className={styles.fileInputLabel}
                 onClick={handleImageSelect}
+                disabled={uploadingImage}
               >
-                ファイルを選択
-              </button>
-              <button
-                onClick={handleImageUpload}
-                disabled={!image || uploadingImage}
-                className={styles.uploadButton}
-              >
-                {uploadingImage ? 'アップロード中...' : 'アップロード（背景除去）'}
+                {uploadingImage ? 'アップロード中...' : 'ファイルを選択（背景除去）'}
               </button>
             </div>
             

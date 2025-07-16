@@ -412,12 +412,16 @@ export async function getAllMetadata(): Promise<ImageMetadata[]> {
       id: dbMeta.id,
       originalFileName: dbMeta.original_file_name,
       savedFileName: dbMeta.saved_file_name,
-      type: dbMeta.image_type as 'original' | 'processed',
+      type: (dbMeta.image_type === 'original' || dbMeta.image_type === 'processed') 
+        ? dbMeta.image_type as 'original' | 'processed' 
+        : 'original' as 'original' | 'processed',
       createdAt: dbMeta.created_at,
       size: dbMeta.size,
       width: dbMeta.width,
       height: dbMeta.height,
-    }));
+      // image_typeを追加で保持
+      image_type: dbMeta.image_type,
+    } as any));
   } catch (error) {
     console.error('メタデータ取得エラー:', error);
     return [];
@@ -442,8 +446,26 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
     } else {
       // 互換性のため従来のパス構築も残す
       const storageLocation = dbMetadata?.storage_location || await getSaveDirectory(settings);
-      const subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
-      imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
+      
+      // ファイルタイプに応じてディレクトリを決定
+      let subDir: string;
+      const imageType = (dbMetadata as any)?.image_type || metadata.type;
+      if (imageType === 'bgm' || imageType === 'soundEffect') {
+        subDir = 'audio';
+      } else if (imageType === 'background') {
+        subDir = 'backgrounds';
+      } else {
+        subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
+      }
+      
+      // ディレクトリパスを構築
+      if (imageType === 'bgm' || imageType === 'soundEffect') {
+        imagePath = await join(storageLocation, 'nuriemon', subDir, metadata.savedFileName);
+      } else if (imageType === 'background') {
+        imagePath = await join(storageLocation, 'nuriemon', IMAGES_DIR, subDir, metadata.savedFileName);
+      } else {
+        imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
+      }
     }
     
     let imageData: Uint8Array;
@@ -471,7 +493,12 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
     
     return `data:${mimeType};base64,${base64}`;
   } catch (error) {
-    console.error('画像読み込みエラー:', error);
+    console.error('画像読み込みエラー:', {
+      error,
+      metadata,
+      imagePath: (dbMetadata as any)?.file_path || 'パス構築失敗',
+      dbMetadata
+    });
     throw error;
   }
 }

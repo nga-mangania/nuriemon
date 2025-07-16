@@ -53,7 +53,7 @@ const formatSpeed = (speed?: number) => {
 export function GalleryPage() {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'all' | 'edit'>('all');
+  const [activeTab, setActiveTab] = useState<'processed' | 'original' | 'all' | 'delete'>('processed');
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [editingImage, setEditingImage] = useState<GalleryImage | null>(null);
   const [tempSettings, setTempSettings] = useState({
@@ -65,6 +65,21 @@ export function GalleryPage() {
   const [deletionTime, setDeletionTime] = useState('unlimited');
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // タブに応じて画像をフィルタリング
+  const getFilteredImages = () => {
+    switch (activeTab) {
+      case 'processed':
+        return images.filter(img => img.type === 'processed');
+      case 'original':
+        return images.filter(img => img.type === 'original');
+      case 'all':
+      case 'delete':
+        return images;
+      default:
+        return images;
+    }
+  };
+
   // 画像一覧を読み込み
   const loadGalleryImages = async () => {
     setIsLoading(true);
@@ -73,9 +88,11 @@ export function GalleryPage() {
       const settings = await loadSettings();
       
       // 画像のみフィルタリング（音声や背景を除外）
-      const imageMetadata = metadata.filter(m => 
-        m.type === 'original' || m.type === 'processed'
-      );
+      const imageMetadata = metadata.filter(m => {
+        // image_typeプロパティがある場合はそれを使用
+        const imageType = (m as any).image_type || m.type;
+        return imageType === 'original' || imageType === 'processed';
+      });
       
       // 新しい順にソート
       imageMetadata.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -179,10 +196,18 @@ export function GalleryPage() {
 
   // すべて選択/選択解除
   const toggleSelectAll = () => {
-    if (selectedImages.size === images.length) {
-      setSelectedImages(new Set());
+    const filteredImages = getFilteredImages();
+    const filteredIds = new Set(filteredImages.map(img => img.id));
+    const allSelected = filteredImages.every(img => selectedImages.has(img.id));
+    
+    if (allSelected) {
+      // 現在のフィルター内の画像を選択解除
+      const newSelection = new Set(selectedImages);
+      filteredImages.forEach(img => newSelection.delete(img.id));
+      setSelectedImages(newSelection);
     } else {
-      setSelectedImages(new Set(images.map(img => img.id)));
+      // 現在のフィルター内の画像を選択
+      setSelectedImages(new Set([...selectedImages, ...filteredIds]));
     }
   };
 
@@ -280,60 +305,42 @@ export function GalleryPage() {
       {/* タブ */}
       <div className={styles.tabContainer}>
         <button
+          className={`${styles.tabButton} ${activeTab === 'processed' ? styles.active : ''}`}
+          onClick={() => setActiveTab('processed')}
+        >
+          切り抜き後
+        </button>
+        <button
+          className={`${styles.tabButton} ${activeTab === 'original' ? styles.active : ''}`}
+          onClick={() => setActiveTab('original')}
+        >
+          切り抜き前
+        </button>
+        <button
           className={`${styles.tabButton} ${activeTab === 'all' ? styles.active : ''}`}
           onClick={() => setActiveTab('all')}
         >
-          すべて表示
+          全て表示
         </button>
         <button
-          className={`${styles.tabButton} ${activeTab === 'edit' ? styles.active : ''}`}
-          onClick={() => setActiveTab('edit')}
+          className={`${styles.tabButton} ${activeTab === 'delete' ? styles.active : ''}`}
+          onClick={() => setActiveTab('delete')}
         >
-          編集モード
+          削除
         </button>
       </div>
 
       {/* タブコンテンツ */}
       <div className={styles.tabContent}>
-        {activeTab === 'all' ? (
-          // すべて表示タブ
-          <div className={styles.galleryList}>
-            {images.map(image => (
-              <div key={image.id} className={styles.imageTile}>
-                {image.loading ? (
-                  <div className={styles.thumbnailLoading}>
-                    <span>読込中...</span>
-                  </div>
-                ) : (
-                  <img
-                    src={image.thumbnailUrl || ''}
-                    alt={image.originalFileName}
-                  />
-                )}
-                <div className={styles.imageInfo}>
-                  <p><strong>{image.originalFileName}</strong></p>
-                  <p>タイプ: {getTypeName(image.movementType)}</p>
-                  <p>動き: {getMovementName(image.movementPattern)}</p>
-                  <p>速度: {formatSpeed(image.speed)}</p>
-                  <p>サイズ: {getSizeName(image.size)}</p>
-                  <p>アップロード: {new Date(image.createdAt).toLocaleString('ja-JP')}</p>
-                </div>
-                <div className={styles.imageActions}>
-                  <button onClick={() => openEditModal(image)}>編集</button>
-                  <button onClick={() => handleDeleteImage(image)}>削除</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          // 編集モードタブ
+        {activeTab === 'delete' ? (
+          // 削除モード
           <div>
             <div className={styles.editModeHeader}>
               <button
                 className={styles.selectAllButton}
                 onClick={toggleSelectAll}
               >
-                {selectedImages.size === images.length ? '選択解除' : 'すべて選択'}
+                {selectedImages.size === getFilteredImages().length ? '選択解除' : 'すべて選択'}
               </button>
               <p className={styles.selectionInfo}>
                 {selectedImages.size}個選択中
@@ -341,7 +348,7 @@ export function GalleryPage() {
             </div>
             
             <div className={styles.galleryList}>
-              {images.map(image => (
+              {getFilteredImages().map(image => (
                 <div 
                   key={image.id} 
                   className={`${styles.imageTile} ${selectedImages.has(image.id) ? styles.selected : ''}`}
@@ -362,10 +369,47 @@ export function GalleryPage() {
                   )}
                   <div className={styles.imageInfo}>
                     <p><strong>{image.originalFileName}</strong></p>
+                    <p className={styles.imageType}>{image.type === 'original' ? '切り抜き前' : '切り抜き後'}</p>
                   </div>
                 </div>
               ))}
             </div>
+          </div>
+        ) : (
+          // 通常表示
+          <div className={styles.galleryList}>
+            {getFilteredImages().map(image => (
+              <div key={image.id} className={styles.imageTile}>
+                {image.loading ? (
+                  <div className={styles.thumbnailLoading}>
+                    <span>読込中...</span>
+                  </div>
+                ) : (
+                  <img
+                    src={image.thumbnailUrl || ''}
+                    alt={image.originalFileName}
+                  />
+                )}
+                <div className={styles.imageInfo}>
+                  <p><strong>{image.originalFileName}</strong></p>
+                  {image.type === 'processed' && (
+                    <>
+                      <p>タイプ: {getTypeName(image.movementType)}</p>
+                      <p>動き: {getMovementName(image.movementPattern)}</p>
+                      <p>速度: {formatSpeed(image.speed)}</p>
+                      <p>サイズ: {getSizeName(image.size)}</p>
+                    </>
+                  )}
+                  <p>アップロード: {new Date(image.createdAt).toLocaleString('ja-JP')}</p>
+                </div>
+                <div className={styles.imageActions}>
+                  {image.type === 'processed' && (
+                    <button onClick={() => openEditModal(image)}>編集</button>
+                  )}
+                  <button onClick={() => handleDeleteImage(image)}>削除</button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
