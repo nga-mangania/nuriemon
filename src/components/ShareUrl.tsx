@@ -30,7 +30,8 @@ export function ShareUrl({ showTooltip = false }: ShareUrlProps) {
                       Math.random().toString(36).substring(2, 15);
       const newShareUrl = `${window.location.origin}/share/${randomId}`;
       
-      await saveSettings({ shareUrl: newShareUrl, shareId: randomId });
+      const currentSettings = await loadSettings();
+      await saveSettings({ ...currentSettings, shareUrl: newShareUrl, shareId: randomId });
       setShareUrl(newShareUrl);
     } catch (error) {
       console.error('共有URL生成エラー:', error);
@@ -44,7 +45,8 @@ export function ShareUrl({ showTooltip = false }: ShareUrlProps) {
     if (!confirm('共有URLを削除しますか？')) return;
     
     try {
-      await saveSettings({ shareUrl: null, shareId: null });
+      const currentSettings = await loadSettings();
+      await saveSettings({ ...currentSettings, shareUrl: null, shareId: null });
       setShareUrl(null);
     } catch (error) {
       console.error('共有URL削除エラー:', error);

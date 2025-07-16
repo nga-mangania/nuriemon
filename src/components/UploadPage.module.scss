@@ -202,7 +202,7 @@ $bg-color: #eaf0f2;
   background-color: $bg-color;
   border-radius: 4px;
   margin: 0 auto 1rem;
-  text-align: right;
+  text-align: center;
   
   img {
     max-width: 100%;
@@ -219,16 +219,22 @@ $bg-color: #eaf0f2;
 }
 
 .deleteBtn {
-  margin-left: 0;
+  margin-top: 10px;
   color: $delete-color;
-  background-color: transparent;
-  padding: .2rem 0;
-  border: none;
+  background-color: white;
+  padding: 0.5rem 1rem;
+  border: 1px solid $delete-color;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 1.2rem;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
   
   &:hover {
-    color: color.adjust($delete-color, $lightness: -10%);
+    background-color: $delete-color;
+    color: white;
   }
 }
 

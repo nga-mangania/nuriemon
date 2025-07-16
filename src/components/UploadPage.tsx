@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
-import { saveImage, saveBackgroundFile, getAllMetadata } from '../services/imageStorage';
+import { saveImage, saveBackgroundFile, getAllMetadata, loadImage, deleteImage } from '../services/imageStorage';
 import { loadSettings, saveSettings } from '../services/settings';
 import { saveMovementSettings } from '../services/movementStorage';
 import { MovementSettings } from './MovementSettings';
@@ -29,7 +29,12 @@ export function UploadPage() {
   const [image, setImage] = useState<{name: string, data: string} | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [movementSettings, setMovementSettings] = useState({
+  const [movementSettings, setMovementSettings] = useState<{
+    type: 'walk' | 'fly';
+    movement: string;
+    speed: number;
+    size: string;
+  }>({
     type: 'walk',
     movement: 'normal',
     speed: 0.5,
@@ -43,17 +48,26 @@ export function UploadPage() {
       if (settings) {
         setDeletionTime(settings.deletionTime || 'unlimited');
         setGroundPosition(settings.groundPosition || 50);
-        if (settings.backgroundUrl) {
-          setCurrentBackground({
-            url: settings.backgroundUrl,
-            type: settings.backgroundType || 'image'
-          });
-        }
         
         // 動き設定を読み込み
         if (settings.lastMovementSettings) {
           setMovementSettings(settings.lastMovementSettings);
         }
+      }
+      
+      // 背景をデータベースから読み込み
+      try {
+        const metadata = await getAllMetadata();
+        const background = metadata.find(m => (m as any).image_type === 'background');
+        if (background) {
+          const backgroundData = await loadImage(background);
+          setCurrentBackground({
+            url: backgroundData,
+            type: background.originalFileName.match(/\.(mp4|mov)$/i) ? 'video' : 'image'
+          });
+        }
+      } catch (error) {
+        console.error('背景の読み込みエラー:', error);
       }
     };
     loadUserSettings();
@@ -120,13 +134,6 @@ export function UploadPage() {
       clearInterval(progressInterval);
       setBackgroundProgress(100);
       
-      const currentSettings = await loadSettings();
-      await saveSettings({
-        ...currentSettings,
-        backgroundUrl: file.data,
-        backgroundType: file.type
-      });
-      
       setCurrentBackground({
         url: file.data,
         type: file.type
@@ -146,14 +153,20 @@ export function UploadPage() {
 
   const handleRemoveBackground = async () => {
     if (confirm('背景を削除しますか？')) {
-      const currentSettings = await loadSettings();
-      await saveSettings({
-        ...currentSettings,
-        backgroundUrl: null,
-        backgroundType: null
-      });
-      setCurrentBackground(null);
-      alert('背景ファイルを削除しました');
+      try {
+        // データベースから背景を削除
+        const metadata = await getAllMetadata();
+        const background = metadata.find(m => (m as any).image_type === 'background');
+        if (background) {
+          await deleteImage(background);
+        }
+        
+        setCurrentBackground(null);
+        alert('背景ファイルを削除しました');
+      } catch (error) {
+        console.error('背景削除エラー:', error);
+        alert('背景の削除に失敗しました');
+      }
     }
   };
 
@@ -331,8 +344,13 @@ export function UploadPage() {
                 ) : (
                   <video src={currentBackground.url} controls />
                 )}
-                <button onClick={handleRemoveBackground} className={styles.deleteBtn}>
-                  <i className="fas fa-trash-alt"></i>
+                <button 
+                  onClick={handleRemoveBackground} 
+                  className={styles.deleteBtn}
+                  type="button"
+                  title="背景を削除"
+                >
+                  <i className="fas fa-trash-alt"></i> 背景を削除
                 </button>
               </div>
             )}

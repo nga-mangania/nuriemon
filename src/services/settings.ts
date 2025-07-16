@@ -6,6 +6,15 @@ export interface AppSettings {
   saveLocation: 'appData' | 'pictures' | 'downloads' | 'documents' | 'custom';
   customPath?: string;
   autoSave: boolean;
+  // UploadPage settings
+  backgroundUrl?: string | null;
+  backgroundType?: string | null;
+  groundPosition?: number;
+  deletionTime?: string;
+  lastMovementSettings?: any;
+  // ShareUrl settings
+  shareUrl?: string | null;
+  shareId?: string | null;
 }
 
 const SETTINGS_FILE = 'settings.json';
@@ -14,6 +23,13 @@ const SETTINGS_FILE = 'settings.json';
 const defaultSettings: AppSettings = {
   saveLocation: 'appData',
   autoSave: true,
+  backgroundUrl: null,
+  backgroundType: null,
+  groundPosition: 50,
+  deletionTime: 'unlimited',
+  lastMovementSettings: null,
+  shareUrl: null,
+  shareId: null,
 };
 
 // 設定のキャッシュ（パフォーマンス向上のため）

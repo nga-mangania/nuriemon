@@ -14,6 +14,7 @@ interface AnimationSettings {
 }
 
 const AnimationPage: React.FC = () => {
+  const [audioPermissionNeeded, setAudioPermissionNeeded] = useState(false);
   const [images, setImages] = useState<ImageMetadata[]>([]);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [animationSettings, setAnimationSettings] = useState<AnimationSettings>({
@@ -26,6 +27,8 @@ const AnimationPage: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [groundPosition, setGroundPosition] = useState(80);
+  const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
+  const [backgroundType, setBackgroundType] = useState<string>('image');
   const [bgmUrl, setBgmUrl] = useState<string | null>(null);
   const [soundEffectUrl, setSoundEffectUrl] = useState<string | null>(null);
   const bgmRef = React.useRef<HTMLAudioElement>(null);
@@ -35,6 +38,7 @@ const AnimationPage: React.FC = () => {
   useEffect(() => {
     loadImages();
     loadGroundPosition();
+    loadBackground();
     loadAudioFiles();
   }, []);
 
@@ -75,6 +79,21 @@ const AnimationPage: React.FC = () => {
       }
     } catch (error) {
       console.error('地面位置の読み込みエラー:', error);
+    }
+  };
+
+  // 背景設定を読み込む
+  const loadBackground = async () => {
+    try {
+      const metadata = await getAllMetadata();
+      const background = metadata.find(m => (m as any).image_type === 'background');
+      if (background) {
+        const backgroundData = await loadImage(background);
+        setBackgroundUrl(backgroundData);
+        setBackgroundType(background.originalFileName.match(/\.(mp4|mov)$/i) ? 'video' : 'image');
+      }
+    } catch (error) {
+      console.error('背景の読み込みエラー:', error);
     }
   };
 
@@ -162,24 +181,40 @@ const AnimationPage: React.FC = () => {
     
     // BGMを再生
     if (bgmRef.current && bgmUrl) {
-      bgmRef.current.play().catch(e => console.error('BGM再生エラー:', e));
+      bgmRef.current.volume = 0.5; // 音量を調整
+      bgmRef.current.play().catch(e => {
+        console.error('BGM再生エラー:', e);
+        // ユーザー操作が必要な場合の処理
+        if (e.name === 'NotAllowedError') {
+          setAudioPermissionNeeded(true);
+        }
+      });
     }
     
-    // 効果音を再生（アニメーション開始時）
-    if (soundEffectRef.current && soundEffectUrl) {
-      soundEffectRef.current.play().catch(e => console.error('効果音再生エラー:', e));
-    }
+    // 効果音は新しい画像が追加されたときに再生するため、ここでは再生しない
   };
 
   // アニメーションを停止
   const stopAnimation = () => {
     setIsPlaying(false);
     setAnimatedImages([]);
+    setAudioPermissionNeeded(false);
     
     // BGMを停止
     if (bgmRef.current) {
       bgmRef.current.pause();
       bgmRef.current.currentTime = 0;
+    }
+  };
+
+  // 音声再生を再試行
+  const retryAudioPlayback = () => {
+    if (bgmRef.current && bgmUrl) {
+      bgmRef.current.play().then(() => {
+        setAudioPermissionNeeded(false);
+      }).catch(e => {
+        console.error('音声再生再試行エラー:', e);
+      });
     }
   };
 
@@ -196,10 +231,29 @@ const AnimationPage: React.FC = () => {
     <div className={`${styles.animationPage} ${isPlaying ? styles.fullscreen : ''}`}>
       {/* 音声要素（非表示） */}
       {bgmUrl && (
-        <audio ref={bgmRef} src={bgmUrl} loop style={{ display: 'none' }} />
+        <audio 
+          ref={bgmRef} 
+          src={bgmUrl} 
+          loop 
+          preload="auto"
+          style={{ display: 'none' }}
+          onError={(e) => {
+            console.error('BGMロードエラー:', e);
+            setBgmUrl(null);
+          }}
+        />
       )}
       {soundEffectUrl && (
-        <audio ref={soundEffectRef} src={soundEffectUrl} style={{ display: 'none' }} />
+        <audio 
+          ref={soundEffectRef} 
+          src={soundEffectUrl} 
+          preload="auto"
+          style={{ display: 'none' }}
+          onError={(e) => {
+            console.error('効果音ロードエラー:', e);
+            setSoundEffectUrl(null);
+          }}
+        />
       )}
       {!isPlaying ? (
         <>
@@ -257,8 +311,18 @@ const AnimationPage: React.FC = () => {
           <AnimationView
             images={animatedImages}
             groundPosition={groundPosition}
+            backgroundUrl={backgroundUrl}
+            backgroundType={backgroundType}
             onImageClick={(imageId) => console.log('画像クリック:', imageId)}
           />
+          {audioPermissionNeeded && (
+            <div className={styles.audioPermissionBanner}>
+              <p>音声を再生するにはクリックしてください</p>
+              <button onClick={retryAudioPlayback} className={styles.audioButton}>
+                音声を再生
+              </button>
+            </div>
+          )}
           <div className={styles.controlPanel}>
             <MovementSettings
               settings={animationSettings}

@@ -24,12 +24,16 @@ interface AnimationViewProps {
     speed: number;
   }>;
   groundPosition?: number;
+  backgroundUrl?: string | null;
+  backgroundType?: string;
   onImageClick?: (imageId: string) => void;
 }
 
 const AnimationView: React.FC<AnimationViewProps> = ({ 
   images: inputImages, 
   groundPosition = 80,
+  backgroundUrl,
+  backgroundType = 'image',
   onImageClick 
 }) => {
   const [animatedImages, setAnimatedImages] = useState<AnimatedImage[]>([]);
@@ -299,7 +303,33 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   }, [inputImages, initializeImage]);
 
   return (
-    <div className={styles.animationContainer} ref={canvasRef}>
+    <div 
+      className={styles.animationContainer} 
+      ref={canvasRef}
+      style={{
+        backgroundImage: backgroundUrl && backgroundType === 'image' ? `url(${backgroundUrl})` : undefined,
+        background: !backgroundUrl ? 'linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 50%, #E0F6FF 100%)' : undefined
+      }}
+    >
+      {/* 動画背景の場合 */}
+      {backgroundUrl && backgroundType === 'video' && (
+        <video
+          autoPlay
+          loop
+          muted
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            zIndex: 0
+          }}
+        >
+          <source src={backgroundUrl} type={`video/${backgroundUrl.includes('.mov') ? 'quicktime' : 'mp4'}`} />
+        </video>
+      )}
       <div className={styles.imagesWrapper}>
         {animatedImages.map(image => (
           <div
