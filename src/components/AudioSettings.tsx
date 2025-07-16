@@ -14,16 +14,22 @@ export function AudioSettings() {
   useEffect(() => {
     const loadExistingAudioFiles = async () => {
       try {
+        console.log('Loading existing audio files...');
         const metadata = await getAllMetadata();
+        console.log('All metadata in AudioSettings:', metadata);
         const bgm = metadata.find(m => (m as any).image_type === 'bgm');
         const soundEffect = metadata.find(m => (m as any).image_type === 'soundEffect');
+        console.log('Found BGM:', bgm);
+        console.log('Found Sound Effect:', soundEffect);
         
         if (bgm) {
           const bgmData = await loadImage(bgm);
+          console.log('BGM data loaded, setting state');
           setBgmFile({ name: bgm.originalFileName, data: bgmData, uploaded: true, id: bgm.id });
         }
         if (soundEffect) {
           const soundData = await loadImage(soundEffect);
+          console.log('Sound effect data loaded, setting state');
           setSoundEffectFile({ name: soundEffect.originalFileName, data: soundData, uploaded: true, id: soundEffect.id });
         }
       } catch (error) {
@@ -148,12 +154,16 @@ export function AudioSettings() {
   };
 
   const clearBgmSelection = async () => {
+    console.log('clearBgmSelection called, bgmFile:', bgmFile);
     if (bgmFile?.uploaded && bgmFile?.id) {
       if (!confirm('BGMを削除しますか？')) {
+        console.log('User cancelled BGM deletion');
         return;
       }
       try {
+        console.log('Deleting BGM with id:', bgmFile.id);
         await deleteImage({ id: bgmFile.id } as any);
+        console.log('BGM deleted successfully');
         alert('BGMを削除しました');
       } catch (error) {
         console.error('BGM削除エラー:', error);
@@ -165,12 +175,16 @@ export function AudioSettings() {
   };
 
   const clearSoundEffectSelection = async () => {
+    console.log('clearSoundEffectSelection called, soundEffectFile:', soundEffectFile);
     if (soundEffectFile?.uploaded && soundEffectFile?.id) {
       if (!confirm('効果音を削除しますか？')) {
+        console.log('User cancelled sound effect deletion');
         return;
       }
       try {
+        console.log('Deleting sound effect with id:', soundEffectFile.id);
         await deleteImage({ id: soundEffectFile.id } as any);
+        console.log('Sound effect deleted successfully');
         alert('効果音を削除しました');
       } catch (error) {
         console.error('効果音削除エラー:', error);
@@ -201,9 +215,25 @@ export function AudioSettings() {
               <i className="fa-regular fa-file-audio"></i>
             </span>
             <span className={styles.fileName}>{bgmFile.name}</span>
-            <button className={styles.fileClear} onClick={clearBgmSelection}>
-              <i className="fa-solid fa-delete-left"></i>
-            </button>
+            {!bgmFile.uploaded && (
+              <button className={styles.fileClear} onClick={() => setBgmFile(null)}>
+                <i className="fa-solid fa-delete-left"></i>
+              </button>
+            )}
+            {bgmFile.uploaded && (
+              <button 
+                className={styles.deleteBtn}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('BGM delete button clicked');
+                  clearBgmSelection();
+                }}
+                title="BGMを削除"
+              >
+                <i className="fas fa-trash-alt"></i> 削除
+              </button>
+            )}
           </div>
         )}
         
@@ -232,9 +262,25 @@ export function AudioSettings() {
               <i className="fa-regular fa-file-audio"></i>
             </span>
             <span className={styles.fileName}>{soundEffectFile.name}</span>
-            <button className={styles.fileClear} onClick={clearSoundEffectSelection}>
-              <i className="fa-solid fa-delete-left"></i>
-            </button>
+            {!soundEffectFile.uploaded && (
+              <button className={styles.fileClear} onClick={() => setSoundEffectFile(null)}>
+                <i className="fa-solid fa-delete-left"></i>
+              </button>
+            )}
+            {soundEffectFile.uploaded && (
+              <button 
+                className={styles.deleteBtn}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('Sound effect delete button clicked');
+                  clearSoundEffectSelection();
+                }}
+                title="効果音を削除"
+              >
+                <i className="fas fa-trash-alt"></i> 削除
+              </button>
+            )}
           </div>
         )}
         

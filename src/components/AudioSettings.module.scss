@@ -115,3 +115,23 @@ $bg-color: #eaf0f2;
   width: 100%;
   max-width: 100%;
 }
+
+.deleteBtn {
+  margin-left: 10px;
+  padding: 0.4rem 0.8rem;
+  background-color: white;
+  color: #dc3545;
+  border: 1px solid #dc3545;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background-color: #dc3545;
+    color: white;
+  }
+}

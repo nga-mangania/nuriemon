@@ -152,13 +152,18 @@ export function UploadPage() {
   };
 
   const handleRemoveBackground = async () => {
+    console.log('handleRemoveBackground called');
     if (confirm('背景を削除しますか？')) {
       try {
+        console.log('User confirmed deletion');
         // データベースから背景を削除
         const metadata = await getAllMetadata();
+        console.log('All metadata:', metadata);
         const background = metadata.find(m => (m as any).image_type === 'background');
+        console.log('Found background:', background);
         if (background) {
           await deleteImage(background);
+          console.log('Background deleted from DB');
         }
         
         setCurrentBackground(null);
@@ -167,6 +172,8 @@ export function UploadPage() {
         console.error('背景削除エラー:', error);
         alert('背景の削除に失敗しました');
       }
+    } else {
+      console.log('User cancelled deletion');
     }
   };
 
@@ -329,14 +336,6 @@ export function UploadPage() {
               </div>
             )}
             
-            {uploadingBackground && (
-              <div className={styles.progressBarContainer}>
-                <div className={styles.progressBar} style={{ width: `${backgroundProgress}%` }}>
-                  <span className={styles.progressText}>{Math.round(backgroundProgress)}%</span>
-                </div>
-              </div>
-            )}
-            
             {currentBackground && (
               <div className={styles.backgroundPreview}>
                 {currentBackground.type === 'image' ? (
@@ -345,7 +344,12 @@ export function UploadPage() {
                   <video src={currentBackground.url} controls />
                 )}
                 <button 
-                  onClick={handleRemoveBackground} 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Delete button clicked');
+                    handleRemoveBackground();
+                  }} 
                   className={styles.deleteBtn}
                   type="button"
                   title="背景を削除"
