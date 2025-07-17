@@ -54,7 +54,7 @@ export async function saveBackgroundFile(dataUrl: string, fileName: string): Pro
   const baseDir = getBaseDirectory(saveDir);
   
   // ディレクトリパスを構築
-  const dirPath = await join(await getSaveDirectory(), 'nuriemon', IMAGES_DIR, 'backgrounds');
+  const dirPath = await join(await getSaveDirectory(), 'nuriemon', 'images', 'backgrounds');
   
   // ディレクトリを作成
   await ensureDirectory(dirPath);
@@ -337,11 +337,21 @@ export async function saveImage(
     // 画像データをバイナリに変換して保存
     const imageBytes = base64ToUint8Array(imageData);
     
+    // 保存前にディレクトリを確認・作成
+    const dirPath = await join(saveDir, IMAGES_DIR, subDir);
+    
     // カスタムディレクトリの場合は特別な処理
     if (settings.saveLocation === 'custom' && settings.customPath) {
+      await ensureDirectory(dirPath);
       await writeFileAbsolute(imagePath, imageBytes);
     } else {
       const baseDir = getBaseDirectory(settings.saveLocation);
+      // ディレクトリを確実に作成
+      try {
+        await mkdir(dirPath, { baseDir, recursive: true });
+      } catch (error) {
+        // ディレクトリが既に存在する場合のエラーは無視
+      }
       await writeFile(imagePath, imageBytes, { baseDir });
     }
 
@@ -432,20 +442,27 @@ export async function getAllMetadata(): Promise<ImageMetadata[]> {
  * 画像を読み込み
  */
 export async function loadImage(metadata: ImageMetadata): Promise<string> {
+  let dbMetadata: any = null;
+  let imagePath: string = '';
+  
   try {
     const settings = await loadSettings();
     
     // SQLiteから最新の保存場所を取得
     const dbMetadataList = await DatabaseService.getAllImages();
-    const dbMetadata = dbMetadataList.find(m => m.id === metadata.id);
+    dbMetadata = dbMetadataList.find(m => m.id === metadata.id);
     
     // file_pathがある場合はそれを使用
-    let imagePath: string;
     if ((dbMetadata as any)?.file_path) {
       imagePath = (dbMetadata as any).file_path;
     } else {
       // 互換性のため従来のパス構築も残す
       const storageLocation = dbMetadata?.storage_location || await getSaveDirectory(settings);
+      
+      // nullチェック
+      if (!storageLocation || !metadata.savedFileName) {
+        throw new Error(`ファイルパスの構築に必要な情報が不足しています: storageLocation=${storageLocation}, savedFileName=${metadata.savedFileName}`);
+      }
       
       // ファイルタイプに応じてディレクトリを決定
       let subDir: string;
@@ -462,9 +479,30 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
       if (imageType === 'bgm' || imageType === 'soundEffect') {
         imagePath = await join(storageLocation, 'nuriemon', subDir, metadata.savedFileName);
       } else if (imageType === 'background') {
-        imagePath = await join(storageLocation, 'nuriemon', IMAGES_DIR, subDir, metadata.savedFileName);
+        imagePath = await join(storageLocation, 'nuriemon', 'images', subDir, metadata.savedFileName);
       } else {
         imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
+      }
+    }
+    
+    // ファイルの存在確認（デバッグ用）
+    console.log('ファイル読み込み試行:', {
+      imagePath,
+      saveLocation: settings.saveLocation,
+      customPath: settings.customPath,
+      baseDir: settings.saveLocation !== 'custom' ? getBaseDirectory(settings.saveLocation) : undefined,
+      storageLocation: dbMetadata?.storage_location,
+      file_path: (dbMetadata as any)?.file_path,
+      savedFileName: metadata.savedFileName,
+      imageType: (dbMetadata as any)?.image_type || metadata.type
+    });
+    
+    // ファイルの存在確認
+    if (settings.saveLocation === 'custom' && settings.customPath) {
+      const fileExists = await fileExistsAbsolute(imagePath);
+      console.log('カスタムパスのファイル存在確認:', { imagePath, fileExists });
+      if (!fileExists) {
+        throw new Error(`ファイルが見つかりません: ${imagePath}`);
       }
     }
     
@@ -478,10 +516,25 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
     
     // MIMEタイプを推測
     const extension = metadata.savedFileName.split('.').pop()?.toLowerCase();
-    const mimeType = extension === 'png' ? 'image/png' : 
-                    extension === 'gif' ? 'image/gif' : 
-                    extension === 'webp' ? 'image/webp' : 
-                    'image/jpeg';
+    const imageType = (dbMetadata as any)?.image_type || metadata.type;
+    
+    let mimeType: string;
+    if (imageType === 'bgm' || imageType === 'soundEffect') {
+      // 音声ファイルのMIMEタイプ
+      mimeType = extension === 'mp3' ? 'audio/mp3' : 
+                extension === 'mp4' ? 'audio/mp4' :
+                extension === 'wav' ? 'audio/wav' : 
+                'audio/mpeg';
+    } else if (imageType === 'background' && (extension === 'mp4' || extension === 'mov')) {
+      // 動画ファイルのMIMEタイプ
+      mimeType = extension === 'mp4' ? 'video/mp4' : 'video/quicktime';
+    } else {
+      // 画像ファイルのMIMEタイプ
+      mimeType = extension === 'png' ? 'image/png' : 
+                extension === 'gif' ? 'image/gif' : 
+                extension === 'webp' ? 'image/webp' : 
+                'image/jpeg';
+    }
     
     // Base64に変換
     const base64 = btoa(
@@ -496,8 +549,14 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
     console.error('画像読み込みエラー:', {
       error,
       metadata,
-      imagePath: (dbMetadata as any)?.file_path || 'パス構築失敗',
-      dbMetadata
+      imagePath: imagePath || dbMetadata?.file_path || 'パス構築失敗',
+      dbMetadata,
+      savedFileName: metadata.savedFileName,
+      originalFileName: metadata.originalFileName,
+      type: metadata.type,
+      imageType: (dbMetadata as any)?.image_type,
+      file_path: (dbMetadata as any)?.file_path,
+      storage_location: dbMetadata?.storage_location
     });
     throw error;
   }
@@ -514,19 +573,50 @@ export async function deleteImage(metadata: ImageMetadata): Promise<void> {
     const dbMetadataList = await DatabaseService.getAllImages();
     const dbMetadata = dbMetadataList.find(m => m.id === metadata.id);
     
-    const storageLocation = dbMetadata?.storage_location || await getSaveDirectory(settings);
-    
-    // 画像ファイルを削除
-    const subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
-    const imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
-    
-    if (settings.saveLocation === 'custom' && settings.customPath) {
-      // カスタムディレクトリの場合、Rust側で削除を実装する必要がある
-      // 現在はスキップ
-      console.warn('カスタムディレクトリからの削除は未実装です');
+    // file_pathがある場合はそれを使用
+    let imagePath: string;
+    if ((dbMetadata as any)?.file_path) {
+      imagePath = (dbMetadata as any).file_path;
     } else {
-      const baseDir = getBaseDirectory(settings.saveLocation);
-      await remove(imagePath, { baseDir });
+      const storageLocation = dbMetadata?.storage_location || await getSaveDirectory(settings);
+      
+      // nullチェック
+      if (!storageLocation || !metadata.savedFileName) {
+        console.warn(`ファイル削除に必要な情報が不足しています: storageLocation=${storageLocation}, savedFileName=${metadata.savedFileName}`);
+        // データベースからは削除する
+        await DatabaseService.deleteImage(metadata.id);
+        return;
+      }
+      
+      // ファイルタイプに応じてディレクトリを決定
+      const imageType = (dbMetadata as any)?.image_type || metadata.type;
+      let subDir: string;
+      
+      if (imageType === 'bgm' || imageType === 'soundEffect') {
+        subDir = 'audio';
+        imagePath = await join(storageLocation, 'nuriemon', subDir, metadata.savedFileName);
+      } else if (imageType === 'background') {
+        subDir = 'backgrounds';
+        imagePath = await join(storageLocation, 'nuriemon', IMAGES_DIR, subDir, metadata.savedFileName);
+      } else {
+        subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
+        imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
+      }
+    }
+    
+    // ファイルを削除
+    try {
+      if (settings.saveLocation === 'custom' && settings.customPath) {
+        // カスタムディレクトリの場合、Rust側で削除を実装する必要がある
+        // 現在はスキップ
+        console.warn('カスタムディレクトリからの削除は未実装です');
+      } else {
+        const baseDir = getBaseDirectory(settings.saveLocation);
+        await remove(imagePath, { baseDir });
+      }
+    } catch (error) {
+      console.error('ファイル削除エラー:', error);
+      // ファイル削除に失敗してもデータベースからは削除
     }
 
     // データベースから削除

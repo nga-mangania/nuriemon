@@ -40,6 +40,12 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   const animatedImagesRef = useRef<Record<string, AnimatedImage>>({});
   const animationRef = useRef<number>();
   const canvasRef = useRef<HTMLDivElement>(null);
+  
+  // 背景URLの状態を確認
+  useEffect(() => {
+    console.log('AnimationView - 背景URL:', backgroundUrl);
+    console.log('AnimationView - 背景タイプ:', backgroundType);
+  }, [backgroundUrl, backgroundType]);
 
   // 特殊な動きを管理する関数
   const applySpecialMovement = useCallback((image: AnimatedImage, currentTime: number): AnimatedImage => {
@@ -302,14 +308,19 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     }, {} as Record<string, AnimatedImage>);
   }, [inputImages, initializeImage]);
 
+  // デバッグ用のスタイル情報
+  const containerStyle = backgroundUrl && backgroundType === 'image' 
+    ? { backgroundImage: `url(${backgroundUrl})` }
+    : !backgroundUrl 
+      ? { background: 'linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 50%, #E0F6FF 100%)' }
+      : {};
+  
+
   return (
     <div 
       className={styles.animationContainer} 
       ref={canvasRef}
-      style={{
-        backgroundImage: backgroundUrl && backgroundType === 'image' ? `url(${backgroundUrl})` : undefined,
-        background: !backgroundUrl ? 'linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 50%, #E0F6FF 100%)' : undefined
-      }}
+      style={containerStyle}
     >
       {/* 動画背景の場合 */}
       {backgroundUrl && backgroundType === 'video' && (

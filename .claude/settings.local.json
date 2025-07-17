@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run tauri:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": []
+  }
+}

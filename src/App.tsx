@@ -5,6 +5,7 @@ import { UploadPage } from "./components/UploadPage";
 import { GalleryPage } from "./components/GalleryPage";
 import { initializeStorage } from "./services/imageStorage";
 import { startAutoDeleteService } from "./services/autoDelete";
+import { migrateFilePaths } from "./services/migration";
 import styles from "./App.module.scss";
 
 function App() {
@@ -13,8 +14,18 @@ function App() {
 
   // ストレージを初期化と自動削除サービスを開始
   useEffect(() => {
-    initializeStorage().catch(console.error);
-    startAutoDeleteService();
+    const initialize = async () => {
+      try {
+        await initializeStorage();
+        // 既存データのfile_pathマイグレーションを実行
+        await migrateFilePaths();
+        startAutoDeleteService();
+      } catch (error) {
+        console.error('初期化エラー:', error);
+      }
+    };
+    
+    initialize();
   }, []);
 
   const handleSettingsSaved = () => {

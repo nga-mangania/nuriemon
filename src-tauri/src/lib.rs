@@ -157,6 +157,17 @@ async fn delete_image(state: State<'_, AppState>, id: String) -> Result<(), Stri
 }
 
 #[tauri::command]
+async fn update_image_file_path(
+    state: State<'_, AppState>,
+    id: String,
+    file_path: String
+) -> Result<(), String> {
+    let db = state.db.lock().unwrap();
+    db.update_image_file_path(&id, &file_path)
+        .map_err(|e| format!("Failed to update file path: {}", e))
+}
+
+#[tauri::command]
 async fn save_user_settings(
     state: State<'_, AppState>,
     settings: UserSettings
@@ -254,6 +265,7 @@ pub fn run() {
             save_image_metadata,
             get_all_images,
             delete_image,
+            update_image_file_path,
             save_user_settings,
             get_user_settings,
             get_image_counts,

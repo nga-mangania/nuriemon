@@ -207,6 +207,15 @@ impl Database {
         Ok(())
     }
 
+    // 画像のfile_pathを更新
+    pub fn update_image_file_path(&self, id: &str, file_path: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE images SET file_path = ?1 WHERE id = ?2",
+            params![file_path, id]
+        )?;
+        Ok(())
+    }
+
     // ユーザー設定の保存/更新
     pub fn save_user_settings(&self, settings: &UserSettings) -> Result<()> {
         self.conn.execute(

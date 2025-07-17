@@ -10,6 +10,7 @@ export interface ImageMetadata {
   width?: number;
   height?: number;
   storage_location: string;
+  file_path?: string | null;
 }
 
 export interface UserSettings {
@@ -44,6 +45,11 @@ export class DatabaseService {
   // 現在のタイムスタンプ取得
   static async getCurrentTimestamp(): Promise<string> {
     return await invoke<string>('get_current_timestamp');
+  }
+
+  // 画像のfile_pathを更新
+  static async updateImageFilePath(id: string, filePath: string): Promise<void> {
+    await invoke('update_image_file_path', { id, filePath });
   }
 
   // 画像メタデータの保存
