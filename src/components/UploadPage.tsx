@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, confirm as tauriConfirm } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
 import { saveImage, saveBackgroundFile, getAllMetadata, loadImage, deleteImage } from '../services/imageStorage';
@@ -139,7 +139,7 @@ export function UploadPage() {
         type: file.type
       });
       
-      alert('背景ファイルは正常にアップロードされました');
+      // アップロード成功（alertは削除）
       setBackgroundFile(null);
     } catch (error) {
       clearInterval(progressInterval);
@@ -152,28 +152,27 @@ export function UploadPage() {
   };
 
   const handleRemoveBackground = async () => {
-    console.log('handleRemoveBackground called');
-    if (confirm('背景を削除しますか？')) {
+    // Tauriのダイアログを使用
+    const confirmed = await tauriConfirm('背景を削除しますか？', {
+      title: '削除の確認',
+      type: 'warning'
+    });
+    
+    if (confirmed) {
       try {
-        console.log('User confirmed deletion');
         // データベースから背景を削除
         const metadata = await getAllMetadata();
-        console.log('All metadata:', metadata);
         const background = metadata.find(m => (m as any).image_type === 'background');
-        console.log('Found background:', background);
+        
         if (background) {
           await deleteImage(background);
-          console.log('Background deleted from DB');
         }
         
         setCurrentBackground(null);
-        alert('背景ファイルを削除しました');
       } catch (error) {
         console.error('背景削除エラー:', error);
         alert('背景の削除に失敗しました');
       }
-    } else {
-      console.log('User cancelled deletion');
     }
   };
 
@@ -344,11 +343,10 @@ export function UploadPage() {
                   <video src={currentBackground.url} controls />
                 )}
                 <button 
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    console.log('Delete button clicked');
-                    handleRemoveBackground();
+                    await handleRemoveBackground();
                   }} 
                   className={styles.deleteBtn}
                   type="button"

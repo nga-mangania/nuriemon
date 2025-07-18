@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, confirm as tauriConfirm } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { saveAudioFile, getAllMetadata, deleteImage, loadImage } from '../services/imageStorage';
 import styles from './AudioSettings.module.scss';
@@ -127,7 +127,7 @@ export function AudioSettings() {
     try {
       const metadata = await saveAudioFile(file.data, file.name, 'bgm');
       setBgmFile({ ...file, uploaded: true, id: metadata.id });
-      alert('BGMがアップロードされました');
+      // BGMアップロード成功（alertは削除）
     } catch (error) {
       console.error('BGMアップロードエラー:', error);
       alert('BGMのアップロードに失敗しました');
@@ -144,7 +144,7 @@ export function AudioSettings() {
     try {
       const metadata = await saveAudioFile(file.data, file.name, 'soundEffect');
       setSoundEffectFile({ ...file, uploaded: true, id: metadata.id });
-      alert('効果音がアップロードされました');
+      // 効果音アップロード成功（alertは削除）
     } catch (error) {
       console.error('効果音アップロードエラー:', error);
       alert('効果音のアップロードに失敗しました');
@@ -154,17 +154,18 @@ export function AudioSettings() {
   };
 
   const clearBgmSelection = async () => {
-    console.log('clearBgmSelection called, bgmFile:', bgmFile);
     if (bgmFile?.uploaded && bgmFile?.id) {
-      if (!confirm('BGMを削除しますか？')) {
-        console.log('User cancelled BGM deletion');
+      const confirmed = await tauriConfirm('BGMを削除しますか？', {
+        title: '削除の確認',
+        type: 'warning'
+      });
+      
+      if (!confirmed) {
         return;
       }
+      
       try {
-        console.log('Deleting BGM with id:', bgmFile.id);
         await deleteImage({ id: bgmFile.id } as any);
-        console.log('BGM deleted successfully');
-        alert('BGMを削除しました');
       } catch (error) {
         console.error('BGM削除エラー:', error);
         alert('BGMの削除に失敗しました');
@@ -175,17 +176,18 @@ export function AudioSettings() {
   };
 
   const clearSoundEffectSelection = async () => {
-    console.log('clearSoundEffectSelection called, soundEffectFile:', soundEffectFile);
     if (soundEffectFile?.uploaded && soundEffectFile?.id) {
-      if (!confirm('効果音を削除しますか？')) {
-        console.log('User cancelled sound effect deletion');
+      const confirmed = await tauriConfirm('効果音を削除しますか？', {
+        title: '削除の確認',
+        type: 'warning'
+      });
+      
+      if (!confirmed) {
         return;
       }
+      
       try {
-        console.log('Deleting sound effect with id:', soundEffectFile.id);
         await deleteImage({ id: soundEffectFile.id } as any);
-        console.log('Sound effect deleted successfully');
-        alert('効果音を削除しました');
       } catch (error) {
         console.error('効果音削除エラー:', error);
         alert('効果音の削除に失敗しました');
@@ -223,11 +225,10 @@ export function AudioSettings() {
             {bgmFile.uploaded && (
               <button 
                 className={styles.deleteBtn}
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  console.log('BGM delete button clicked');
-                  clearBgmSelection();
+                  await clearBgmSelection();
                 }}
                 title="BGMを削除"
               >
@@ -270,11 +271,10 @@ export function AudioSettings() {
             {soundEffectFile.uploaded && (
               <button 
                 className={styles.deleteBtn}
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  console.log('Sound effect delete button clicked');
-                  clearSoundEffectSelection();
+                  await clearSoundEffectSelection();
                 }}
                 title="効果音を削除"
               >

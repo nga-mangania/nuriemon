@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { confirm as tauriConfirm } from '@tauri-apps/plugin-dialog';
 import { getAllMetadata, loadImage, deleteImage, ImageMetadata } from '../services/imageStorage';
 import { loadSettings } from '../services/settings';
 import { MovementSettings } from './MovementSettings';
@@ -213,7 +214,12 @@ export function GalleryPage() {
 
   // 画像を削除
   const handleDeleteImage = async (image: GalleryImage) => {
-    if (!confirm(`"${image.originalFileName}" を削除しますか？`)) {
+    const confirmed = await tauriConfirm(`"${image.originalFileName}" を削除しますか？`, {
+      title: '削除の確認',
+      type: 'warning'
+    });
+    
+    if (!confirmed) {
       return;
     }
 
@@ -222,6 +228,7 @@ export function GalleryPage() {
       await loadGalleryImages();
     } catch (error) {
       console.error('画像削除エラー:', error);
+      alert('画像の削除に失敗しました');
     }
   };
 
@@ -229,7 +236,12 @@ export function GalleryPage() {
   const handleBulkDelete = async () => {
     if (selectedImages.size === 0) return;
     
-    if (!confirm(`選択した${selectedImages.size}個の画像を削除しますか？`)) {
+    const confirmed = await tauriConfirm(`選択した${selectedImages.size}個の画像を削除しますか？`, {
+      title: '削除の確認',
+      type: 'warning'
+    });
+    
+    if (!confirmed) {
       return;
     }
 
@@ -245,6 +257,7 @@ export function GalleryPage() {
       await loadGalleryImages();
     } catch (error) {
       console.error('一括削除エラー:', error);
+      alert('画像の削除に失敗しました');
     } finally {
       setIsDeleting(false);
     }

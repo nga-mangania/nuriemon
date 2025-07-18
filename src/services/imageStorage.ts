@@ -1,5 +1,6 @@
 import { BaseDirectory, exists, mkdir, readFile, writeFile, remove } from '@tauri-apps/plugin-fs';
 import { join } from '@tauri-apps/api/path';
+import { invoke } from '@tauri-apps/api/core';
 import { loadSettings, getSaveDirectory } from './settings';
 import { ensureDirectory, writeFileAbsolute, readFileAbsolute, fileExistsAbsolute } from './customFileOperations';
 import { DatabaseService, ImageMetadata as DbImageMetadata, migrateFromJSON } from './database';
@@ -563,7 +564,7 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
 }
 
 /**
- * 画像を削除
+ * 画像を削除（ユーザー確認済み）
  */
 export async function deleteImage(metadata: ImageMetadata): Promise<void> {
   try {
@@ -607,19 +608,19 @@ export async function deleteImage(metadata: ImageMetadata): Promise<void> {
     // ファイルを削除
     try {
       if (settings.saveLocation === 'custom' && settings.customPath) {
-        // カスタムディレクトリの場合、Rust側で削除を実装する必要がある
-        // 現在はスキップ
-        console.warn('カスタムディレクトリからの削除は未実装です');
+        // カスタムディレクトリの場合、Rust側のコマンドを使用
+        await invoke('delete_file_absolute', { path: imagePath });
       } else {
         const baseDir = getBaseDirectory(settings.saveLocation);
         await remove(imagePath, { baseDir });
       }
     } catch (error) {
       console.error('ファイル削除エラー:', error);
-      // ファイル削除に失敗してもデータベースからは削除
+      // ファイル削除に失敗した場合はエラーを投げる
+      throw new Error(`ファイルの削除に失敗しました: ${error}`);
     }
 
-    // データベースから削除
+    // ファイル削除に成功した場合のみデータベースから削除
     await DatabaseService.deleteImage(metadata.id);
   } catch (error) {
     console.error('画像削除エラー:', error);

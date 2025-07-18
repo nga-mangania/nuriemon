@@ -131,6 +131,19 @@ async fn file_exists_absolute(path: String) -> Result<bool, String> {
     Ok(Path::new(&path).exists())
 }
 
+#[tauri::command]
+async fn delete_file_absolute(path: String) -> Result<(), String> {
+    let file_path = Path::new(&path);
+    
+    // ファイルが存在する場合のみ削除
+    if file_path.exists() {
+        fs::remove_file(&file_path)
+            .map_err(|e| format!("Failed to delete file: {}", e))?;
+    }
+    
+    Ok(())
+}
+
 // データベース関連のコマンド
 #[tauri::command]
 async fn save_image_metadata(
@@ -262,6 +275,7 @@ pub fn run() {
             write_file_absolute,
             read_file_absolute,
             file_exists_absolute,
+            delete_file_absolute,
             save_image_metadata,
             get_all_images,
             delete_image,
