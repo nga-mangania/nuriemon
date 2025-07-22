@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { saveImage } from '../services/imageStorage';
 import styles from './BackgroundRemover.module.scss';
 
@@ -21,6 +22,16 @@ export function BackgroundRemover({ imageData, fileName, onProcessed, onSaved }:
   const [error, setError] = useState<string | null>(null);
   const [processProgress, setProcessProgress] = useState(0);
 
+  useEffect(() => {
+    const unlistenPromise = listen<{value: number}>('image-processing-progress', (event) => {
+      setProcessProgress(event.payload.value);
+    });
+
+    return () => {
+      unlistenPromise.then(f => f());
+    };
+  }, []);
+
   const handleRemoveBackground = async () => {
     if (!imageData || !fileName) {
       setError('画像を選択してください');
@@ -31,17 +42,6 @@ export function BackgroundRemover({ imageData, fileName, onProcessed, onSaved }:
     setError(null);
     setProcessProgress(0);
 
-    // プログレスをシミュレート
-    const progressInterval = setInterval(() => {
-      setProcessProgress(prev => {
-        if (prev >= 90) {
-          clearInterval(progressInterval);
-          return 90;
-        }
-        return prev + 10;
-      });
-    }, 300);
-
     try {
       // Rustコマンドを呼び出してPython処理を実行
       const result = await invoke<ProcessResult>('process_image', {
@@ -49,7 +49,6 @@ export function BackgroundRemover({ imageData, fileName, onProcessed, onSaved }:
       });
 
       if (result.success && result.image) {
-        clearInterval(progressInterval);
         setProcessProgress(100);
         
         // 処理済み画像を表示
@@ -67,11 +66,9 @@ export function BackgroundRemover({ imageData, fileName, onProcessed, onSaved }:
         
         alert('背景除去が完了しました');
       } else {
-        clearInterval(progressInterval);
         setError(result.error || '画像処理に失敗しました');
       }
     } catch (error) {
-      clearInterval(progressInterval);
       console.error('背景除去エラー:', error);
       setError('背景除去処理中にエラーが発生しました');
     } finally {

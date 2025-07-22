@@ -41,11 +41,6 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   const animationRef = useRef<number>();
   const canvasRef = useRef<HTMLDivElement>(null);
   
-  // 背景URLの状態を確認
-  useEffect(() => {
-    console.log('AnimationView - 背景URL:', backgroundUrl);
-    console.log('AnimationView - 背景タイプ:', backgroundType);
-  }, [backgroundUrl, backgroundType]);
 
   // 特殊な動きを管理する関数
   const applySpecialMovement = useCallback((image: AnimatedImage, currentTime: number): AnimatedImage => {

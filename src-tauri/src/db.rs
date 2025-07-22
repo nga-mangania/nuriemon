@@ -117,6 +117,17 @@ impl Database {
             }
         }
 
+        // アプリケーション設定テーブル
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -139,6 +150,35 @@ impl Database {
             ],
         )?;
         Ok(())
+    }
+
+    // 特定の画像メタデータを取得
+    pub fn get_image(&self, id: &str) -> Result<Option<ImageMetadata>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location, file_path 
+             FROM images 
+             WHERE id = ?1"
+        )?;
+
+        let mut images = stmt.query_map([id], |row| {
+            Ok(ImageMetadata {
+                id: row.get(0)?,
+                original_file_name: row.get(1)?,
+                saved_file_name: row.get(2)?,
+                image_type: row.get(3)?,
+                created_at: row.get(4)?,
+                size: row.get(5)?,
+                width: row.get(6)?,
+                height: row.get(7)?,
+                storage_location: row.get(8)?,
+                file_path: row.get(9)?,
+            })
+        })?;
+
+        match images.next() {
+            Some(image) => Ok(Some(image?)),
+            None => Ok(None),
+        }
     }
 
     // 画像メタデータの取得（全件）
@@ -342,6 +382,50 @@ impl Database {
         for setting in settings {
             result.push(setting?);
         }
+        Ok(result)
+    }
+
+    // アプリケーション設定の保存
+    pub fn save_app_setting(&self, key: &str, value: &str) -> Result<()> {
+        let now = current_timestamp();
+        self.conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?3)",
+            params![key, value, now],
+        )?;
+        Ok(())
+    }
+
+    // アプリケーション設定の取得
+    pub fn get_app_setting(&self, key: &str) -> Result<Option<String>> {
+        match self.conn.query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        ) {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    // 複数のアプリケーション設定を一度に取得
+    pub fn get_app_settings(&self, keys: &[&str]) -> Result<std::collections::HashMap<String, String>> {
+        let mut result = std::collections::HashMap::new();
+        
+        let placeholders = keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let query = format!("SELECT key, value FROM app_settings WHERE key IN ({})", placeholders);
+        
+        let mut stmt = self.conn.prepare(&query)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(keys), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        
+        for row in rows {
+            let (key, value) = row?;
+            result.insert(key, value);
+        }
+        
         Ok(result)
     }
 }

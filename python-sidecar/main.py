@@ -61,14 +61,17 @@ def create_custom_mask(image):
 
 def process_image(base64_image):
     try:
+        print(json.dumps({"type": "progress", "value": 10}), flush=True)
         # Base64をデコード
         image_data = base64.b64decode(base64_image.split(',')[1] if ',' in base64_image else base64_image)
         
+        print(json.dumps({"type": "progress", "value": 20}), flush=True)
         # PILイメージとして開く
         input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
         
         # 前処理を適用
         input_image = preprocess_image(input_image)
+        print(json.dumps({"type": "progress", "value": 40}), flush=True)
         
         # 画像サイズを制限
         max_size = 1024
@@ -77,6 +80,7 @@ def process_image(base64_image):
         
         # カスタムマスクを生成
         custom_mask = create_custom_mask(input_image)
+        print(json.dumps({"type": "progress", "value": 60}), flush=True)
         
         # 背景を削除
         output = remove(
@@ -88,6 +92,7 @@ def process_image(base64_image):
             alpha_matting_erode_size=10,
             mask=custom_mask
         )
+        print(json.dumps({"type": "progress", "value": 90}), flush=True)
         
         # 結果をBase64に変換
         output_buffer = io.BytesIO()
@@ -95,13 +100,18 @@ def process_image(base64_image):
         output_buffer.seek(0)
         output_base64 = base64.b64encode(output_buffer.getvalue()).decode('utf-8')
         
-        return {
+        print(json.dumps({"type": "progress", "value": 100}), flush=True)
+        
+        result = {
+            "type": "result",
             "success": True,
             "image": f"data:image/png;base64,{output_base64}"
         }
+        return result
         
     except Exception as e:
         return {
+            "type": "result",
             "success": False,
             "error": str(e)
         }
@@ -114,15 +124,16 @@ def main():
             
             if data.get("command") == "process":
                 result = process_image(data.get("image", ""))
-                print(json.dumps(result))
+                print(json.dumps(result), flush=True)
                 sys.stdout.flush()
+                break  # 処理完了後、ループを抜ける
             elif data.get("command") == "health":
-                print(json.dumps({"success": True, "status": "ready"}))
-                sys.stdout.flush()
+                print(json.dumps({"success": True, "status": "ready"}), flush=True)
                 
         except Exception as e:
-            print(json.dumps({"success": False, "error": str(e)}))
+            print(json.dumps({"type": "result", "success": False, "error": str(e)}), flush=True)
             sys.stdout.flush()
+            break
 
 if __name__ == "__main__":
     main()

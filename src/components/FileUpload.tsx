@@ -87,22 +87,8 @@ export function FileUpload({
     
     try {
       setIsSaving(true);
-      setUploadProgress(0);
-      
-      // プログレスをシミュレート
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 10;
-        });
-      }, 200);
       
       const metadata = await saveImage(selectedFile.data, selectedFile.name, 'original');
-      clearInterval(progressInterval);
-      setUploadProgress(100);
       
       if (onImageSaved) {
         onImageSaved(metadata);
@@ -115,7 +101,6 @@ export function FileUpload({
       alert('画像の保存に失敗しました');
     } finally {
       setIsSaving(false);
-      setUploadProgress(0);
     }
   };
 
@@ -229,11 +214,7 @@ export function FileUpload({
         )}
         
         {isSaving && (
-          <div className={styles.progressBarContainer}>
-            <div className={styles.progressBar} style={{ width: `${uploadProgress}%` }}>
-              <span className={styles.progressText}>{Math.round(uploadProgress)}%</span>
-            </div>
-          </div>
+          <p>保存中...</p>
         )}
       </div>
       

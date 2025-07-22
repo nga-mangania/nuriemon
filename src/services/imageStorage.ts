@@ -386,7 +386,16 @@ export async function saveImage(
       file_path: imagePath
     };
 
+    // デバッグ用：imageデータは短縮して表示
+    const logMetadata = {
+      ...dbMetadata,
+      // file_pathは表示（短め）
+      // original_file_nameとsaved_file_nameも表示（短め）
+      // 他の情報はそのまま
+    };
+    console.log('[imageStorage] DatabaseService.saveImageMetadata呼び出し前:', dbMetadata.id);
     await DatabaseService.saveImageMetadata(dbMetadata);
+    console.log('[imageStorage] DatabaseService.saveImageMetadata呼び出し後:', dbMetadata.id);
 
     // 既存の形式に変換して返す（後方互換性のため）
     const metadata: ImageMetadata = {
@@ -486,22 +495,10 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
       }
     }
     
-    // ファイルの存在確認（デバッグ用）
-    console.log('ファイル読み込み試行:', {
-      imagePath,
-      saveLocation: settings.saveLocation,
-      customPath: settings.customPath,
-      baseDir: settings.saveLocation !== 'custom' ? getBaseDirectory(settings.saveLocation) : undefined,
-      storageLocation: dbMetadata?.storage_location,
-      file_path: (dbMetadata as any)?.file_path,
-      savedFileName: metadata.savedFileName,
-      imageType: (dbMetadata as any)?.image_type || metadata.type
-    });
     
     // ファイルの存在確認
     if (settings.saveLocation === 'custom' && settings.customPath) {
       const fileExists = await fileExistsAbsolute(imagePath);
-      console.log('カスタムパスのファイル存在確認:', { imagePath, fileExists });
       if (!fileExists) {
         throw new Error(`ファイルが見つかりません: ${imagePath}`);
       }

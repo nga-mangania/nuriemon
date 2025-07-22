@@ -146,3 +146,43 @@ export async function migrateFromJSON(jsonData: any[]): Promise<void> {
   
   console.log(`移行完了: ${migratedCount}件を新規移行、${skippedCount}件は既存のためスキップ`);
 }
+
+export class AppSettingsService {
+  // アプリケーション設定の保存
+  static async saveAppSetting(key: string, value: string): Promise<void> {
+    await invoke('save_app_setting', { key, value });
+  }
+
+  // アプリケーション設定の取得
+  static async getAppSetting(key: string): Promise<string | null> {
+    const result = await invoke<string | null>('get_app_setting', { key });
+    return result || null;
+  }
+
+  // 複数のアプリケーション設定の取得
+  static async getAppSettings(keys: string[]): Promise<Record<string, string>> {
+    return await invoke<Record<string, string>>('get_app_settings', { keys });
+  }
+
+  // 地面位置の保存
+  static async saveGroundPosition(position: number): Promise<void> {
+    await AppSettingsService.saveAppSetting('ground_position', position.toString());
+  }
+
+  // 地面位置の取得
+  static async getGroundPosition(): Promise<number> {
+    const value = await AppSettingsService.getAppSetting('ground_position');
+    return value ? parseInt(value, 10) : 50; // デフォルト値は50
+  }
+
+  // 削除時間の保存
+  static async saveDeletionTime(time: string): Promise<void> {
+    await AppSettingsService.saveAppSetting('deletion_time', time);
+  }
+
+  // 削除時間の取得
+  static async getDeletionTime(): Promise<string> {
+    const value = await AppSettingsService.getAppSetting('deletion_time');
+    return value || 'unlimited';
+  }
+}

@@ -2,9 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { open, confirm as tauriConfirm } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { saveImage, saveBackgroundFile, getAllMetadata, loadImage, deleteImage } from '../services/imageStorage';
 import { loadSettings, saveSettings } from '../services/settings';
 import { saveMovementSettings } from '../services/movementStorage';
+import { AppSettingsService } from '../services/database';
 import { MovementSettings } from './MovementSettings';
 import { GroundSetting } from './GroundSetting';
 import { AudioSettings } from './AudioSettings';
@@ -44,11 +46,18 @@ export function UploadPage() {
   // 設定を読み込み
   useEffect(() => {
     const loadUserSettings = async () => {
+      // SQLiteから地面位置と削除時間を読み込み
+      const [groundPos, delTime] = await Promise.all([
+        AppSettingsService.getGroundPosition(),
+        AppSettingsService.getDeletionTime()
+      ]);
+      
+      setGroundPosition(groundPos);
+      setDeletionTime(delTime);
+      
+      // その他の設定はsettings.jsonから読み込み
       const settings = await loadSettings();
       if (settings) {
-        setDeletionTime(settings.deletionTime || 'unlimited');
-        setGroundPosition(settings.groundPosition || 50);
-        
         // 動き設定を読み込み
         if (settings.lastMovementSettings) {
           setMovementSettings(settings.lastMovementSettings);
@@ -71,6 +80,15 @@ export function UploadPage() {
       }
     };
     loadUserSettings();
+
+    const unlistenPromise = listen<{value: number}>('image-processing-progress', (event) => {
+      console.log('[UploadPage] 進捗イベント受信:', event.payload.value);
+      setUploadProgress(event.payload.value);
+    });
+
+    return () => {
+      unlistenPromise.then(f => f());
+    };
   }, []);
 
   // STEP 01: 背景の設定
@@ -183,8 +201,8 @@ export function UploadPage() {
   // STEP 02: 地面の位置設定
   const handleGroundPositionChange = async (position: number) => {
     setGroundPosition(position);
-    const currentSettings = await loadSettings();
-    await saveSettings({ ...currentSettings, groundPosition: position });
+    // SQLiteに保存
+    await AppSettingsService.saveGroundPosition(position);
   };
 
 
@@ -192,8 +210,8 @@ export function UploadPage() {
   const handleDeletionTimeChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newTime = e.target.value;
     setDeletionTime(newTime);
-    const currentSettings = await loadSettings();
-    await saveSettings({ ...currentSettings, deletionTime: newTime });
+    // SQLiteに保存
+    await AppSettingsService.saveDeletionTime(newTime);
   };
 
   // STEP 05: お絵かきアップロード
@@ -239,39 +257,38 @@ export function UploadPage() {
     
     setUploadingImage(true);
     setUploadProgress(0);
-    
-    const progressInterval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 90) {
-          clearInterval(progressInterval);
-          return 90;
-        }
-        return prev + 10;
-      });
-    }, 200);
 
     try {
       // まず元画像を保存
-      const metadata = await saveImage(img.data, img.name, 'original');
+      await saveImage(img.data, img.name, 'original');
       
       // 背景除去処理を実行
-      setUploadProgress(50);
+      console.log('[UploadPage] 背景除去処理を開始');
       const result = await invoke<{ success: boolean; image?: string; error?: string }>('process_image', {
         imageData: img.data
       });
+      // base64データは長すぎるので短縮して表示
+      const logResult = result.image && result.image.length > 100
+        ? { ...result, image: `${result.image.substring(0, 50)}...(残り${result.image.length - 50}文字)` }
+        : result;
+      console.log('[UploadPage] 背景除去処理結果:', result.success ? '成功' : '失敗', result.error);
       
       if (result.success && result.image) {
         // 処理済み画像を保存
         const processedFileName = img.name.replace(/\.[^/.]+$/, '') + '-nobg.png';
-        await saveImage(result.image, processedFileName, 'processed');
-        setUploadProgress(90);
+        console.log('[UploadPage] 処理済み画像を保存開始:', processedFileName);
+        const processedMetadata = await saveImage(result.image, processedFileName, 'processed');
+        console.log('[UploadPage] 処理済み画像保存完了:', processedMetadata.id);
+        
+        // 動き設定を処理済み画像のIDで保存
+        console.log('[UploadPage] 動き設定を保存:', processedMetadata.id, movementSettings);
+        await saveMovementSettings(processedMetadata.id, movementSettings);
+        console.log('[UploadPage] 動き設定保存完了');
+      } else {
+        throw new Error(result.error || 'Background removal failed');
       }
       
-      clearInterval(progressInterval);
       setUploadProgress(100);
-      
-      // 動き設定を保存
-      await saveMovementSettings(metadata.id, movementSettings);
       
       // 最後の動き設定も保存（次回のデフォルト値として）
       const currentSettings = await loadSettings();
@@ -280,12 +297,15 @@ export function UploadPage() {
         lastMovementSettings: movementSettings
       });
       
-      alert('画像は正常にアップロードされ、背景が除去されました');
+      // アラートは削除（処理完了は視覚的に分かるため）
       clearImageSelection();
     } catch (error) {
-      clearInterval(progressInterval);
-      console.error('画像アップロードエラー:', error);
-      alert('画像のアップロードに失敗しました');
+      console.error('[UploadPage] 画像アップロードエラー:', error);
+      console.error('[UploadPage] エラー詳細:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      alert(`画像のアップロードに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setUploadingImage(false);
       setUploadProgress(0);
@@ -424,7 +444,9 @@ export function UploadPage() {
           <h2>お絵かきアップロード</h2>
           <MovementSettings
             settings={movementSettings}
-            onSettingsChange={setMovementSettings}
+            onSettingsChange={(newSettings) => {
+              setMovementSettings(prev => ({ ...prev, ...newSettings }));
+            }}
           />
           
           <div className={styles.uploadBox}>
