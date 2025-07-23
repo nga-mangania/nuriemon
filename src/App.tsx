@@ -2,31 +2,34 @@ import { useState, useEffect } from "react";
 import { Settings } from "./components/Settings";
 import { UploadPage } from "./components/UploadPage";
 import { GalleryPage } from "./components/GalleryPage";
+import { SettingsPage } from "./components/SettingsPage";
 import { initializeStorage } from "./services/imageStorage";
 import { startAutoDeleteService } from "./services/autoDelete";
-import { migrateFilePaths } from "./services/migration";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { useWorkspace } from "./hooks/useWorkspace";
+import { WorkspaceSelector } from "./components/WorkspaceSelector";
 import styles from "./App.module.scss";
 
 function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'upload' | 'gallery' | 'animation'>('upload');
+  const [activeTab, setActiveTab] = useState<'settings' | 'upload' | 'gallery' | 'animation'>('upload');
+  const { currentWorkspace } = useWorkspace();
 
-  // ストレージを初期化と自動削除サービスを開始
+  // ワークスペースが選択されたら初期化
   useEffect(() => {
-    const initialize = async () => {
-      try {
-        await initializeStorage();
-        // 既存データのfile_pathマイグレーションを実行
-        await migrateFilePaths();
-        startAutoDeleteService();
-      } catch (error) {
-        console.error('初期化エラー:', error);
-      }
-    };
-    
-    initialize();
-  }, []);
+    if (currentWorkspace) {
+      const initialize = async () => {
+        try {
+          await initializeStorage();
+          startAutoDeleteService();
+        } catch (error) {
+          console.error('初期化エラー:', error);
+        }
+      };
+      
+      initialize();
+    }
+  }, [currentWorkspace]);
 
   const handleSettingsSaved = () => {
     // 設定が変更されたらストレージを再初期化
@@ -34,10 +37,18 @@ function App() {
   };
 
   return (
-    <div className={styles.container}>
-      <header className={styles.header}>
+    <>
+      <WorkspaceSelector />
+      <div className={styles.container}>
+        <header className={styles.header}>
         <h1 className={styles.title}>ぬりえもん</h1>
         <div className={styles.tabs}>
+          <button
+            className={`${styles.tab} ${activeTab === 'settings' ? styles.active : ''}`}
+            onClick={() => setActiveTab('settings')}
+          >
+            初期設定
+          </button>
           <button
             className={`${styles.tab} ${activeTab === 'upload' ? styles.active : ''}`}
             onClick={() => setActiveTab('upload')}
@@ -121,6 +132,9 @@ function App() {
         </button>
       </header>
       <main className={`${styles.main} ${styles.fullWidth}`}>
+        {activeTab === 'settings' && (
+          <SettingsPage />
+        )}
         {activeTab === 'upload' && (
           <UploadPage />
         )}
@@ -134,7 +148,8 @@ function App() {
         onClose={() => setIsSettingsOpen(false)}
         onSave={handleSettingsSaved}
       />
-    </div>
+      </div>
+    </>
   );
 }
 

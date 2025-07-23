@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { open, confirm as tauriConfirm } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { saveAudioFile, getAllMetadata, deleteImage, loadImage } from '../services/imageStorage';
@@ -156,8 +156,7 @@ export function AudioSettings() {
   const clearBgmSelection = async () => {
     if (bgmFile?.uploaded && bgmFile?.id) {
       const confirmed = await tauriConfirm('BGMを削除しますか？', {
-        title: '削除の確認',
-        type: 'warning'
+        title: '削除の確認'
       });
       
       if (!confirmed) {
@@ -178,8 +177,7 @@ export function AudioSettings() {
   const clearSoundEffectSelection = async () => {
     if (soundEffectFile?.uploaded && soundEffectFile?.id) {
       const confirmed = await tauriConfirm('効果音を削除しますか？', {
-        title: '削除の確認',
-        type: 'warning'
+        title: '削除の確認'
       });
       
       if (!confirmed) {

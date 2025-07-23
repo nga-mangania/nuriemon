@@ -6,7 +6,15 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(mkdir:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(grep:*)",
+      "Bash(npm run check:*)",
+      "Bash(npm run dev:*)",
+      "Bash(ls:*)",
+      "Bash(cargo check:*)",
+      "Bash(npm run build:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npx tsc:*)"
     ],
     "deny": []
   }

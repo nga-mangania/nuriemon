@@ -1,0 +1,417 @@
+.settingsPage {
+  padding: 2rem;
+  max-width: 800px;
+  margin: 0 auto;
+
+  h1 {
+    font-size: 2rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    color: #333;
+  }
+}
+
+.section {
+  background: #fff;
+  border-radius: 8px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+  h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    color: #444;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 0.5rem;
+  }
+
+  h3 {
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    color: #555;
+  }
+}
+
+.workspaceInfo {
+  p {
+    font-size: 1.1rem;
+    color: #666;
+    margin-bottom: 1rem;
+  }
+
+  .workspacePath {
+    background: #f5f5f5;
+    padding: 1rem;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 1rem;
+    word-break: break-all;
+    color: #333;
+    margin-bottom: 1rem;
+  }
+
+  .changeWorkspaceButton {
+    padding: 0.75rem 1.5rem;
+    background-color: #2196f3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: background-color 0.3s;
+    margin-bottom: 1rem;
+
+    &:hover {
+      background-color: #1976d2;
+    }
+
+    &:active {
+      transform: translateY(1px);
+    }
+
+    &:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+      transform: none;
+    }
+  }
+}
+
+.locationSettings {
+  .radioGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+
+    label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      font-size: 1.1rem;
+
+      input[type="radio"] {
+        margin-right: 0.5rem;
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+      }
+
+      &:hover {
+        color: #2196f3;
+      }
+    }
+  }
+
+  .customPath {
+    margin-top: 1rem;
+    display: flex;
+    gap: 1rem;
+
+    input[type="text"] {
+      flex: 1;
+      padding: 0.5rem;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 1rem;
+      background-color: #f5f5f5;
+    }
+
+    button {
+      padding: 0.5rem 1rem;
+      background-color: #2196f3;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+
+      &:hover {
+        background-color: #1976d2;
+      }
+    }
+  }
+}
+
+.sliderContainer {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+
+  .slider {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 8px;
+    border-radius: 4px;
+    background: #ddd;
+    outline: none;
+
+    &::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #2196f3;
+      cursor: pointer;
+    }
+
+    &::-moz-range-thumb {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #2196f3;
+      cursor: pointer;
+      border: none;
+    }
+  }
+
+  .sliderValue {
+    font-size: 1.2rem;
+    font-weight: 500;
+    color: #333;
+    min-width: 50px;
+    text-align: right;
+  }
+}
+
+.audioSettings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+
+  .audioUpload {
+    padding: 1rem;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    background-color: #f9f9f9;
+  }
+}
+
+.note {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: #666;
+
+  p {
+    margin: 0.5rem 0;
+    
+    &:first-child {
+      margin-top: 0;
+    }
+    
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  a {
+    color: #2196f3;
+    text-decoration: none;
+    
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+select {
+  padding: 0.5rem 1rem;
+  font-size: 1.1rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: white;
+  cursor: pointer;
+  min-width: 150px;
+
+  &:focus {
+    outline: none;
+    border-color: #2196f3;
+  }
+}
+
+.animationButton {
+  width: 100%;
+  padding: 1rem 2rem;
+  font-size: 1.2rem;
+  font-weight: 500;
+  background-color: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+
+  &:hover:not(:disabled) {
+    background-color: #45a049;
+  }
+
+  &:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+  }
+}
+
+// 背景アップロード関連のスタイル
+.backgroundUpload {
+  .uploadBox {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .uploadControls {
+    display: flex;
+    gap: 1rem;
+    
+    .fileInputLabel {
+      padding: 0.5rem 1rem;
+      background-color: #2196f3;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: background-color 0.3s;
+
+      &:hover:not(:disabled) {
+        background-color: #1976d2;
+      }
+
+      &:disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+      }
+    }
+
+    .uploadButton {
+      padding: 0.5rem 1rem;
+      background-color: #4caf50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: background-color 0.3s;
+
+      &:hover:not(:disabled) {
+        background-color: #45a049;
+      }
+
+      &:disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  .fileInfo {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    background-color: #f0f0f0;
+    border-radius: 4px;
+    font-size: 0.9rem;
+
+    .fileIcon {
+      margin-right: 0.5rem;
+      color: #666;
+    }
+
+    .fileName {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .fileClear {
+      background: none;
+      border: none;
+      color: #666;
+      cursor: pointer;
+      padding: 0.25rem;
+      font-size: 1.2rem;
+
+      &:hover {
+        color: #d32f2f;
+      }
+
+      &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  .progressBarContainer {
+    width: 100%;
+    height: 24px;
+    background-color: #e0e0e0;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-top: 0.5rem;
+
+    .progressBar {
+      height: 100%;
+      background-color: #4caf50;
+      transition: width 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      .progressText {
+        color: white;
+        font-size: 0.875rem;
+        font-weight: 500;
+      }
+    }
+  }
+
+  .currentBackground {
+    margin-top: 1rem;
+    padding: 1rem;
+    background-color: #f5f5f5;
+    border-radius: 4px;
+
+    h4 {
+      margin: 0 0 1rem 0;
+      color: #333;
+    }
+
+    .backgroundPreview {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+
+      .previewImage,
+      .previewVideo {
+        max-width: 100%;
+        max-height: 200px;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .removeButton {
+        padding: 0.5rem 1rem;
+        background-color: #f44336;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: background-color 0.3s;
+
+        &:hover {
+          background-color: #d32f2f;
+        }
+      }
+    }
+  }
+}

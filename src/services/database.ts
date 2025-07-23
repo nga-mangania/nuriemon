@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { WorkspaceManager } from './workspaceManager';
 
 export interface ImageMetadata {
   id: string;
@@ -147,21 +148,65 @@ export async function migrateFromJSON(jsonData: any[]): Promise<void> {
   console.log(`移行完了: ${migratedCount}件を新規移行、${skippedCount}件は既存のためスキップ`);
 }
 
+export class ImageMetadataService {
+  // ImageMetadataのエイリアスとして、DatabaseServiceのメソッドを提供
+  static saveImageMetadata = DatabaseService.saveImageMetadata;
+  static getAllImages = DatabaseService.getAllImages;
+  static deleteImage = DatabaseService.deleteImage;
+  static imageExists = DatabaseService.imageExists;
+  static updateImageFilePath = DatabaseService.updateImageFilePath;
+}
+
+export class MovementSettingsService {
+  // MovementSettingsのエイリアスとして、DatabaseServiceのメソッドを提供
+  static saveMovementSettings = DatabaseService.saveMovementSettings;
+  static getMovementSettings = DatabaseService.getMovementSettings;
+  static getAllMovementSettings = DatabaseService.getAllMovementSettings;
+}
+
 export class AppSettingsService {
-  // アプリケーション設定の保存
+  // ワークスペース設定の保存
   static async saveAppSetting(key: string, value: string): Promise<void> {
-    await invoke('save_app_setting', { key, value });
+    const manager = WorkspaceManager.getInstance();
+    const settings = await manager.getWorkspaceSettings();
+    
+    if (!settings) {
+      throw new Error('ワークスペースが選択されていません');
+    }
+    
+    // ワークスペース設定に保存
+    await manager.saveWorkspaceSettings({ [key]: value });
   }
 
-  // アプリケーション設定の取得
+  // ワークスペース設定の取得
   static async getAppSetting(key: string): Promise<string | null> {
-    const result = await invoke<string | null>('get_app_setting', { key });
-    return result || null;
+    const manager = WorkspaceManager.getInstance();
+    const settings = await manager.getWorkspaceSettings();
+    
+    if (!settings) {
+      return null;
+    }
+    
+    return (settings as any)[key] || null;
   }
 
-  // 複数のアプリケーション設定の取得
+  // 複数のワークスペース設定の取得
   static async getAppSettings(keys: string[]): Promise<Record<string, string>> {
-    return await invoke<Record<string, string>>('get_app_settings', { keys });
+    const manager = WorkspaceManager.getInstance();
+    const settings = await manager.getWorkspaceSettings();
+    
+    if (!settings) {
+      return {};
+    }
+    
+    const result: Record<string, string> = {};
+    for (const key of keys) {
+      const value = (settings as any)[key];
+      if (value !== undefined) {
+        result[key] = String(value);
+      }
+    }
+    return result;
   }
 
   // 地面位置の保存
@@ -184,5 +229,72 @@ export class AppSettingsService {
   static async getDeletionTime(): Promise<string> {
     const value = await AppSettingsService.getAppSetting('deletion_time');
     return value || 'unlimited';
+  }
+
+  // 地面位置の更新（エイリアス）
+  static async updateGroundPosition(position: number): Promise<void> {
+    await AppSettingsService.saveGroundPosition(position);
+  }
+
+  // 設定の取得（フォルダ設定用）
+  static async getSettings(): Promise<{saveLocation: string, customPath: string}> {
+    const manager = WorkspaceManager.getInstance();
+    const currentWorkspace = manager.getCurrentWorkspace();
+    
+    if (!currentWorkspace) {
+      return {
+        saveLocation: 'workspace',
+        customPath: ''
+      };
+    }
+    
+    return {
+      saveLocation: 'workspace',
+      customPath: currentWorkspace
+    };
+  }
+
+  // 設定の更新（フォルダ設定用）
+  static async updateSettings(settings: {saveLocation?: string, customPath?: string}): Promise<void> {
+    if (settings.saveLocation !== undefined) {
+      await AppSettingsService.saveAppSetting('save_location', settings.saveLocation);
+    }
+    if (settings.customPath !== undefined) {
+      await AppSettingsService.saveAppSetting('custom_path', settings.customPath);
+    }
+  }
+
+  // 保存先ディレクトリの取得（統一化のため追加）
+  static async getSaveDirectory(): Promise<string> {
+    const manager = WorkspaceManager.getInstance();
+    return await manager.getSaveDirectory();
+  }
+
+  // 全ての設定を一括で取得（パフォーマンス向上）
+  static async getAllSettings(): Promise<{
+    saveLocation: string;
+    customPath: string;
+    groundPosition: number;
+    deletionTime: string;
+  }> {
+    const manager = WorkspaceManager.getInstance();
+    const workspace = manager.getCurrentWorkspace();
+    const settings = await manager.getWorkspaceSettings();
+    
+    if (!workspace || !settings) {
+      return {
+        saveLocation: 'workspace',
+        customPath: '',
+        groundPosition: 80,
+        deletionTime: 'unlimited'
+      };
+    }
+    
+    return {
+      saveLocation: 'workspace',
+      customPath: workspace,
+      groundPosition: settings.groundPosition || 80,
+      deletionTime: settings.deletionTime || 'unlimited'
+    };
   }
 }

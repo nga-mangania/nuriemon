@@ -1,7 +1,6 @@
-import { DatabaseService } from './database';
+import { DatabaseService, AppSettingsService } from './database';
 import { getAllMetadata } from './imageStorage';
 import { join } from '@tauri-apps/api/path';
-import { loadSettings, getSaveDirectory } from './settings';
 
 const IMAGES_DIR = 'images';
 const ORIGINALS_DIR = 'originals';
@@ -15,7 +14,6 @@ export async function migrateFilePaths(): Promise<void> {
     console.log('Starting file path migration...');
     
     const metadata = await getAllMetadata();
-    const settings = await loadSettings();
     let updatedCount = 0;
     let skippedCount = 0;
     
@@ -28,20 +26,20 @@ export async function migrateFilePaths(): Promise<void> {
       
       try {
         // file_pathを構築
-        const storageLocation = item.storage_location || await getSaveDirectory(settings);
+        const storageLocation = (item as any).storage_location || await AppSettingsService.getSaveDirectory();
         const imageType = (item as any).image_type || item.type;
         let filePath: string;
         
-        const fileName = item.savedFileName || item.saved_file_name;
+        const fileName = item.savedFileName || (item as any).saved_file_name;
         if (!fileName) {
-          console.warn(`No saved file name for ${item.originalFileName || item.original_file_name}, skipping...`);
+          console.warn(`No saved file name for ${item.originalFileName || (item as any).original_file_name}, skipping...`);
           continue;
         }
         
         if (imageType === 'bgm' || imageType === 'soundEffect') {
-          filePath = await join(storageLocation, 'nuriemon', 'audio', fileName);
+          filePath = await join(storageLocation, 'audio', fileName);
         } else if (imageType === 'background') {
-          filePath = await join(storageLocation, 'nuriemon', 'images', 'backgrounds', fileName);
+          filePath = await join(storageLocation, 'images', 'backgrounds', fileName);
         } else {
           const subDir = item.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
           filePath = await join(storageLocation, IMAGES_DIR, subDir, fileName);
@@ -50,10 +48,10 @@ export async function migrateFilePaths(): Promise<void> {
         // データベースを更新 - file_pathのみを更新
         await DatabaseService.updateImageFilePath(item.id, filePath);
         updatedCount++;
-        console.log(`Updated file_path for ${item.originalFileName || item.original_file_name}`);
+        console.log(`Updated file_path for ${item.originalFileName || (item as any).original_file_name}`);
         
       } catch (error) {
-        console.error(`Failed to update file_path for ${item.originalFileName || item.original_file_name}:`, error);
+        console.error(`Failed to update file_path for ${item.originalFileName || (item as any).original_file_name}:`, error);
       }
     }
     

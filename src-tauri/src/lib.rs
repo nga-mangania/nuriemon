@@ -3,13 +3,15 @@ use std::io::{Write, BufRead, BufReader};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tauri::{State, Manager, Emitter};
 
 mod db;
 mod events;
-use db::{Database, ImageMetadata, UserSettings, MovementSettings, generate_id, current_timestamp};
+mod workspace;
+use db::{ImageMetadata, UserSettings, MovementSettings, generate_id, current_timestamp};
 use events::{DataChangeEvent, emit_data_change};
+use workspace::{WorkspaceState, WorkspaceConnection};
 
 // Python処理の結果
 #[derive(Serialize, Deserialize, Clone)]
@@ -47,9 +49,8 @@ struct PythonProcess {
 #[allow(dead_code)]  // 将来の使用のために保持
 static PYTHON_PROCESS: Mutex<Option<PythonProcess>> = Mutex::new(None);
 
-// データベース管理構造体
+// アプリケーション状態管理構造体
 pub struct AppState {
-    db: Mutex<Database>,
     app_handle: tauri::AppHandle,
 }
 
@@ -217,11 +218,16 @@ async fn delete_file_absolute(path: String) -> Result<(), String> {
 #[tauri::command]
 async fn save_image_metadata(
     state: State<'_, AppState>,
+    workspace: State<'_, WorkspaceState>,
     metadata: ImageMetadata
 ) -> Result<(), String> {
     let image_id = metadata.id.clone();
     let image_type = metadata.image_type.clone();
-    let db = state.db.lock().unwrap();
+    
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    
     db.save_image_metadata(&metadata)
         .map_err(|e| format!("Failed to save image metadata: {}", e))?;
     
@@ -239,15 +245,24 @@ async fn save_image_metadata(
 }
 
 #[tauri::command]
-async fn get_all_images(state: State<'_, AppState>) -> Result<Vec<ImageMetadata>, String> {
-    let db = state.db.lock().unwrap();
+async fn get_all_images(workspace: State<'_, WorkspaceState>) -> Result<Vec<ImageMetadata>, String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    
     db.get_all_images()
         .map_err(|e| format!("Failed to get images: {}", e))
 }
 
 #[tauri::command]
-async fn delete_image(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let db = state.db.lock().unwrap();
+async fn delete_image(
+    state: State<'_, AppState>,
+    workspace: State<'_, WorkspaceState>,
+    id: String
+) -> Result<(), String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
     
     // 削除前に画像情報を取得してタイプを確認
     let image_type = db.get_image(&id)
@@ -274,35 +289,47 @@ async fn delete_image(state: State<'_, AppState>, id: String) -> Result<(), Stri
 
 #[tauri::command]
 async fn update_image_file_path(
-    state: State<'_, AppState>,
+    workspace: State<'_, WorkspaceState>,
     id: String,
     file_path: String
 ) -> Result<(), String> {
-    let db = state.db.lock().unwrap();
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    
     db.update_image_file_path(&id, &file_path)
         .map_err(|e| format!("Failed to update file path: {}", e))
 }
 
 #[tauri::command]
 async fn save_user_settings(
-    state: State<'_, AppState>,
+    workspace: State<'_, WorkspaceState>,
     settings: UserSettings
 ) -> Result<(), String> {
-    let db = state.db.lock().unwrap();
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    
     db.save_user_settings(&settings)
         .map_err(|e| format!("Failed to save user settings: {}", e))
 }
 
 #[tauri::command]
-async fn get_user_settings(state: State<'_, AppState>) -> Result<Option<UserSettings>, String> {
-    let db = state.db.lock().unwrap();
+async fn get_user_settings(workspace: State<'_, WorkspaceState>) -> Result<Option<UserSettings>, String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    
     db.get_user_settings()
         .map_err(|e| format!("Failed to get user settings: {}", e))
 }
 
 #[tauri::command]
-async fn get_image_counts(state: State<'_, AppState>) -> Result<(i32, i32), String> {
-    let db = state.db.lock().unwrap();
+async fn get_image_counts(workspace: State<'_, WorkspaceState>) -> Result<(i32, i32), String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    
     db.get_image_counts()
         .map_err(|e| format!("Failed to get image counts: {}", e))
 }
@@ -319,9 +346,17 @@ fn get_current_timestamp() -> String {
 
 // データベース操作: 動き設定の保存
 #[tauri::command]
-fn save_movement_settings(state: State<AppState>, settings: MovementSettings) -> Result<(), String> {
+fn save_movement_settings(
+    state: State<AppState>,
+    workspace: State<WorkspaceState>,
+    settings: MovementSettings
+) -> Result<(), String> {
     let image_id = settings.image_id.clone();
-    let db = state.db.lock().unwrap();
+    
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    
     db.save_movement_settings(&settings)
         .map_err(|e| format!("Failed to save movement settings: {}", e))?;
     
@@ -333,24 +368,37 @@ fn save_movement_settings(state: State<AppState>, settings: MovementSettings) ->
 
 // データベース操作: 動き設定の取得
 #[tauri::command]
-fn get_movement_settings(state: State<AppState>, image_id: String) -> Result<Option<MovementSettings>, String> {
-    let db = state.db.lock().unwrap();
+fn get_movement_settings(workspace: State<WorkspaceState>, image_id: String) -> Result<Option<MovementSettings>, String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
     db.get_movement_settings(&image_id)
         .map_err(|e| format!("Failed to get movement settings: {}", e))
 }
 
 // データベース操作: すべての動き設定の取得
 #[tauri::command]
-fn get_all_movement_settings(state: State<AppState>) -> Result<Vec<MovementSettings>, String> {
-    let db = state.db.lock().unwrap();
+fn get_all_movement_settings(workspace: State<WorkspaceState>) -> Result<Vec<MovementSettings>, String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    
     db.get_all_movement_settings()
         .map_err(|e| format!("Failed to get all movement settings: {}", e))
 }
 
 // アプリケーション設定の保存
 #[tauri::command]
-fn save_app_setting(state: State<AppState>, key: String, value: String) -> Result<(), String> {
-    let db = state.db.lock().unwrap();
+fn save_app_setting(
+    state: State<AppState>,
+    workspace: State<WorkspaceState>,
+    key: String,
+    value: String
+) -> Result<(), String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    
     db.save_app_setting(&key, &value)
         .map_err(|e| format!("Failed to save app setting: {}", e))?;
     
@@ -374,16 +422,21 @@ fn save_app_setting(state: State<AppState>, key: String, value: String) -> Resul
 
 // アプリケーション設定の取得
 #[tauri::command]
-fn get_app_setting(state: State<AppState>, key: String) -> Result<Option<String>, String> {
-    let db = state.db.lock().unwrap();
+fn get_app_setting(workspace: State<WorkspaceState>, key: String) -> Result<Option<String>, String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    
     db.get_app_setting(&key)
         .map_err(|e| format!("Failed to get app setting: {}", e))
 }
 
 // 複数のアプリケーション設定の取得
 #[tauri::command]
-fn get_app_settings(state: State<AppState>, keys: Vec<String>) -> Result<std::collections::HashMap<String, String>, String> {
-    let db = state.db.lock().unwrap();
+fn get_app_settings(workspace: State<WorkspaceState>, keys: Vec<String>) -> Result<std::collections::HashMap<String, String>, String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
     let keys_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
     db.get_app_settings(&keys_refs)
         .map_err(|e| format!("Failed to get app settings: {}", e))
@@ -391,36 +444,21 @@ fn get_app_settings(state: State<AppState>, keys: Vec<String>) -> Result<std::co
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // データベースパスの設定
-    // Tauri v2では、アプリデータディレクトリはアプリ初期化後に取得する必要がある
-    let home_dir = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
-    let app_dir = PathBuf::from(home_dir).join(".nuriemon");
-    let db_path = app_dir.join("nuriemon.db");
-    
-    // データベースディレクトリの作成
-    if let Some(parent) = db_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(move |app| {
-            // データベースの初期化
-            let database = Database::new(db_path.clone())
-                .expect("Failed to create database");
-            database.initialize()
-                .expect("Failed to initialize database");
-            
+            // アプリケーション状態の初期化
             let app_state = AppState {
-                db: Mutex::new(database),
                 app_handle: app.handle().clone(),
             };
             
+            // ワークスペース接続の初期化
+            let workspace_connection = WorkspaceState::new(WorkspaceConnection::new());
+            
             app.manage(app_state);
+            app.manage(workspace_connection);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -445,7 +483,13 @@ pub fn run() {
             get_all_movement_settings,
             save_app_setting,
             get_app_setting,
-            get_app_settings
+            get_app_settings,
+            // ワークスペース関連
+            workspace::initialize_workspace_db,
+            workspace::connect_workspace_db,
+            workspace::close_workspace_db,
+            workspace::save_global_setting,
+            workspace::get_global_setting
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

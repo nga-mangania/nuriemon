@@ -5,7 +5,6 @@ import {
   SIZE_SETTINGS,
   MOVEMENT_SETTINGS,
   AnimatedImage,
-  SpecialMovement,
   textEmotes,
   svgEmotes,
 } from '../services/animationSettings';
@@ -160,7 +159,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     }
 
     const currentTime = Date.now();
-    const currentSpeed = SPEED_SETTINGS[image.speed as keyof typeof SPEED_SETTINGS] || SPEED_SETTINGS.medium;
+    const currentSpeed = typeof image.speed === 'number' ? image.speed : (SPEED_SETTINGS[image.speed as keyof typeof SPEED_SETTINGS] || SPEED_SETTINGS.medium);
     const amplitudeFactor = SIZE_SETTINGS[image.size as keyof typeof SIZE_SETTINGS] || SIZE_SETTINGS.medium;
 
     // 通常の動き

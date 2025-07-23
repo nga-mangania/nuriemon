@@ -1,19 +1,19 @@
 import { useState, useEffect } from 'react';
 import { confirm as tauriConfirm } from '@tauri-apps/plugin-dialog';
 import { getAllMetadata, loadImage, deleteImage, ImageMetadata } from '../services/imageStorage';
-import { loadSettings } from '../services/settings';
 import { MovementSettings } from './MovementSettings';
 import { getAllMovementSettings, updateMovementSettings } from '../services/movementStorage';
 import styles from './GalleryPage.module.scss';
 
-interface GalleryImage extends ImageMetadata {
+interface GalleryImage extends Omit<ImageMetadata, 'size'> {
   thumbnailUrl?: string;
   loading?: boolean;
   // 動き設定
   movementType?: string;
   movementPattern?: string;
   speed?: number;
-  size?: string;
+  movementSize?: string;
+  size: number; // ImageMetadataのsizeプロパティ
 }
 
 // 動きの名前マッピング
@@ -63,7 +63,6 @@ export function GalleryPage() {
     speed: 0.5,
     size: 'medium'
   });
-  const [deletionTime, setDeletionTime] = useState('unlimited');
   const [isDeleting, setIsDeleting] = useState(false);
 
   // タブに応じて画像をフィルタリング
@@ -86,7 +85,6 @@ export function GalleryPage() {
     setIsLoading(true);
     try {
       const metadata = await getAllMetadata();
-      const settings = await loadSettings();
       
       // 画像のみフィルタリング（音声や背景を除外）
       const imageMetadata = metadata.filter(m => {
@@ -110,14 +108,11 @@ export function GalleryPage() {
           movementType: movementSettings?.type || 'walk',
           movementPattern: movementSettings?.movement || 'normal',
           speed: movementSettings?.speed || 0.5,
-          size: movementSettings?.size || 'medium'
+          movementSize: movementSettings?.size || 'medium'
         };
       });
       setImages(galleryImages);
       
-      if (settings?.deletionTime) {
-        setDeletionTime(settings.deletionTime);
-      }
 
       // サムネイルを順次生成
       for (let i = 0; i < galleryImages.length; i++) {
@@ -215,8 +210,7 @@ export function GalleryPage() {
   // 画像を削除
   const handleDeleteImage = async (image: GalleryImage) => {
     const confirmed = await tauriConfirm(`"${image.originalFileName}" を削除しますか？`, {
-      title: '削除の確認',
-      type: 'warning'
+      title: '削除の確認'
     });
     
     if (!confirmed) {
@@ -237,8 +231,7 @@ export function GalleryPage() {
     if (selectedImages.size === 0) return;
     
     const confirmed = await tauriConfirm(`選択した${selectedImages.size}個の画像を削除しますか？`, {
-      title: '削除の確認',
-      type: 'warning'
+      title: '削除の確認'
     });
     
     if (!confirmed) {
@@ -270,7 +263,7 @@ export function GalleryPage() {
       type: image.movementType || 'walk',
       movement: image.movementPattern || 'normal',
       speed: image.speed || 0.5,
-      size: image.size || 'medium'
+      size: image.movementSize || 'medium'
     });
   };
 
@@ -410,7 +403,7 @@ export function GalleryPage() {
                       <p>タイプ: {getTypeName(image.movementType)}</p>
                       <p>動き: {getMovementName(image.movementPattern)}</p>
                       <p>速度: {formatSpeed(image.speed)}</p>
-                      <p>サイズ: {getSizeName(image.size)}</p>
+                      <p>サイズ: {getSizeName(image.movementSize)}</p>
                     </>
                   )}
                   <p>アップロード: {new Date(image.createdAt).toLocaleString('ja-JP')}</p>
@@ -434,8 +427,18 @@ export function GalleryPage() {
           <div className={styles.editModal}>
             <h3>{editingImage.originalFileName}の編集</h3>
             <MovementSettings
-              settings={tempSettings}
-              onSettingsChange={setTempSettings}
+              settings={{
+                type: tempSettings.type as 'walk' | 'fly',
+                movement: tempSettings.movement,
+                speed: tempSettings.speed,
+                size: tempSettings.size
+              }}
+              onSettingsChange={(newSettings) => {
+                setTempSettings(prev => ({
+                  ...prev,
+                  ...newSettings
+                }));
+              }}
             />
             <div className={styles.modalActions}>
               <button 

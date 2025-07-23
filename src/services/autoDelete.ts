@@ -3,10 +3,10 @@
  * 設定された非表示時間に基づいて画像を自動的に削除する
  */
 
-import { getAllMetadata, deleteImage, ImageMetadata } from './imageStorage';
+import { getAllMetadata, deleteImage } from './imageStorage';
 import { loadSettings } from './settings';
 
-let autoDeleteInterval: NodeJS.Timeout | null = null;
+let autoDeleteInterval: number | null = null;
 
 /**
  * 自動削除をチェック
@@ -76,7 +76,7 @@ export function startAutoDeleteService() {
   checkAutoDelete();
   
   // 1分ごとにチェック
-  autoDeleteInterval = setInterval(() => {
+  autoDeleteInterval = window.setInterval(() => {
     checkAutoDelete();
   }, 60 * 1000);
   
@@ -88,7 +88,7 @@ export function startAutoDeleteService() {
  */
 export function stopAutoDeleteService() {
   if (autoDeleteInterval) {
-    clearInterval(autoDeleteInterval);
+    window.clearInterval(autoDeleteInterval);
     autoDeleteInterval = null;
     console.log('自動削除サービスを停止しました');
   }

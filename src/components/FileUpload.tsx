@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { saveImage } from '../services/imageStorage';
-import { loadSettings } from '../services/settings';
 import styles from './FileUpload.module.scss';
 
 interface FileUploadProps {
@@ -28,15 +27,11 @@ export function FileUpload({
   },
   onMovementSettingsChange 
 }: FileUploadProps) {
-  const [isLoading, setIsLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<{name: string, data: string} | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async () => {
-    setIsLoading(true);
-    
     try {
       // ファイル選択ダイアログを開く
       const selected = await open({
@@ -77,8 +72,6 @@ export function FileUpload({
     } catch (error) {
       console.error('ファイル選択エラー:', error);
       alert('ファイルの選択に失敗しました');
-    } finally {
-      setIsLoading(false);
     }
   };
 

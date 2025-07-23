@@ -1,9 +1,9 @@
 import { BaseDirectory, exists, mkdir, readFile, writeFile, remove } from '@tauri-apps/plugin-fs';
 import { join } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
-import { loadSettings, getSaveDirectory } from './settings';
+import { loadSettings } from './settings';
 import { ensureDirectory, writeFileAbsolute, readFileAbsolute, fileExistsAbsolute } from './customFileOperations';
-import { DatabaseService, ImageMetadata as DbImageMetadata, migrateFromJSON } from './database';
+import { DatabaseService, migrateFromJSON, AppSettingsService } from './database';
 
 // 既存の型定義（後方互換性のため維持）
 export interface ImageMetadata {
@@ -51,11 +51,10 @@ function getBaseDirectory(saveLocation: string): BaseDirectory {
 export async function saveBackgroundFile(dataUrl: string, fileName: string): Promise<ImageMetadata> {
   const id = await DatabaseService.generateId();
   const savedFileName = `background-${id}-${fileName}`;
-  const saveDir = await getSaveDirectory();
-  const baseDir = getBaseDirectory(saveDir);
+  const saveDir = await AppSettingsService.getSaveDirectory();
   
   // ディレクトリパスを構築
-  const dirPath = await join(await getSaveDirectory(), 'nuriemon', 'images', 'backgrounds');
+  const dirPath = await join(saveDir, 'images', 'backgrounds');
   
   // ディレクトリを作成
   await ensureDirectory(dirPath);
@@ -105,11 +104,10 @@ export async function saveBackgroundFile(dataUrl: string, fileName: string): Pro
 export async function saveAudioFile(dataUrl: string, fileName: string, type: 'bgm' | 'soundEffect'): Promise<ImageMetadata> {
   const id = await DatabaseService.generateId();
   const savedFileName = `${type}-${id}-${fileName}`;
-  const saveDir = await getSaveDirectory();
-  const baseDir = getBaseDirectory(saveDir);
+  const saveDir = await AppSettingsService.getSaveDirectory();
   
   // ディレクトリパスを構築
-  const dirPath = await join(await getSaveDirectory(), 'nuriemon', 'audio');
+  const dirPath = await join(saveDir, 'audio');
   
   // ディレクトリを作成
   await ensureDirectory(dirPath);
@@ -157,7 +155,7 @@ export async function saveAudioFile(dataUrl: string, fileName: string, type: 'bg
 export async function initializeStorage(): Promise<void> {
   try {
     const settings = await loadSettings();
-    const saveDir = await getSaveDirectory(settings);
+    const saveDir = await AppSettingsService.getSaveDirectory();
     
     // imagesディレクトリが存在しない場合は作成
     const imagesPath = await join(saveDir, IMAGES_DIR);
@@ -239,7 +237,7 @@ export async function initializeStorage(): Promise<void> {
 async function checkAndMigrateData(): Promise<void> {
   try {
     const settings = await loadSettings();
-    const metadataPath = await join(await getSaveDirectory(settings), METADATA_FILE);
+    const metadataPath = await join(await AppSettingsService.getSaveDirectory(), METADATA_FILE);
     
     let jsonExists = false;
     if (settings.saveLocation === 'custom' && settings.customPath) {
@@ -273,7 +271,7 @@ async function checkAndMigrateData(): Promise<void> {
       console.log('既存のJSONデータをSQLiteに移行中...');
       
       // 保存場所を含めてデータを更新
-      const storageLocation = await getSaveDirectory(settings);
+      const storageLocation = await AppSettingsService.getSaveDirectory();
       const updatedList = metadataList.map(item => ({
         ...item,
         storage_location: storageLocation
@@ -330,7 +328,7 @@ export async function saveImage(
     const settings = await loadSettings();
     
     // 保存パスを決定
-    const saveDir = await getSaveDirectory(settings);
+    const saveDir = await AppSettingsService.getSaveDirectory();
     
     const subDir = type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
     const imagePath = await join(saveDir, IMAGES_DIR, subDir, savedFileName);
@@ -386,13 +384,6 @@ export async function saveImage(
       file_path: imagePath
     };
 
-    // デバッグ用：imageデータは短縮して表示
-    const logMetadata = {
-      ...dbMetadata,
-      // file_pathは表示（短め）
-      // original_file_nameとsaved_file_nameも表示（短め）
-      // 他の情報はそのまま
-    };
     console.log('[imageStorage] DatabaseService.saveImageMetadata呼び出し前:', dbMetadata.id);
     await DatabaseService.saveImageMetadata(dbMetadata);
     console.log('[imageStorage] DatabaseService.saveImageMetadata呼び出し後:', dbMetadata.id);
@@ -467,7 +458,7 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
       imagePath = (dbMetadata as any).file_path;
     } else {
       // 互換性のため従来のパス構築も残す
-      const storageLocation = dbMetadata?.storage_location || await getSaveDirectory(settings);
+      const storageLocation = dbMetadata?.storage_location || await AppSettingsService.getSaveDirectory();
       
       // nullチェック
       if (!storageLocation || !metadata.savedFileName) {
@@ -487,9 +478,9 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
       
       // ディレクトリパスを構築
       if (imageType === 'bgm' || imageType === 'soundEffect') {
-        imagePath = await join(storageLocation, 'nuriemon', subDir, metadata.savedFileName);
+        imagePath = await join(storageLocation, subDir, metadata.savedFileName);
       } else if (imageType === 'background') {
-        imagePath = await join(storageLocation, 'nuriemon', 'images', subDir, metadata.savedFileName);
+        imagePath = await join(storageLocation, 'images', subDir, metadata.savedFileName);
       } else {
         imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
       }
@@ -576,7 +567,7 @@ export async function deleteImage(metadata: ImageMetadata): Promise<void> {
     if ((dbMetadata as any)?.file_path) {
       imagePath = (dbMetadata as any).file_path;
     } else {
-      const storageLocation = dbMetadata?.storage_location || await getSaveDirectory(settings);
+      const storageLocation = dbMetadata?.storage_location || await AppSettingsService.getSaveDirectory();
       
       // nullチェック
       if (!storageLocation || !metadata.savedFileName) {
@@ -592,10 +583,10 @@ export async function deleteImage(metadata: ImageMetadata): Promise<void> {
       
       if (imageType === 'bgm' || imageType === 'soundEffect') {
         subDir = 'audio';
-        imagePath = await join(storageLocation, 'nuriemon', subDir, metadata.savedFileName);
+        imagePath = await join(storageLocation, subDir, metadata.savedFileName);
       } else if (imageType === 'background') {
         subDir = 'backgrounds';
-        imagePath = await join(storageLocation, 'nuriemon', IMAGES_DIR, subDir, metadata.savedFileName);
+        imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);
       } else {
         subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
         imagePath = await join(storageLocation, IMAGES_DIR, subDir, metadata.savedFileName);

@@ -59,7 +59,7 @@ const AnimationPageSimple: React.FC = () => {
   }, [loadBackground, loadAudioFiles, updateImages]);
 
   // --- イベントハンドラ ---
-  const handleImageChange = useCallback(async (imageId?: string) => {
+  const handleImageChange = useCallback(async () => {
     // ファイルシステムへの書き込み完了を待つ
     await new Promise(resolve => setTimeout(resolve, 500));
     await updateImages();

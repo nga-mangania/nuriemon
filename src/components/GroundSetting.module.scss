@@ -16,12 +16,20 @@ $text-color: #2d334a;
   overflow: hidden;
   cursor: pointer;
   user-select: none;
+  // レイヤーコンテキストを作成
+  isolation: isolate;
 }
 
 .backgroundMedia {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  z-index: 0;
+  // 背景として表示
+  pointer-events: none;
 }
 
 .placeholder {
@@ -42,6 +50,9 @@ $text-color: #2d334a;
   background-color: #ff0000;
   cursor: ns-resize;
   transition: top 0.1s ease;
+  z-index: 10;
+  // 赤線を目立たせる
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   
   &::before,
   &::after {

@@ -17,6 +17,17 @@ export function GroundSetting({
   const [groundPosition, setGroundPosition] = useState(initialGroundPosition);
   const [isDragging, setIsDragging] = useState(false);
 
+  // デバッグ用ログ
+  useEffect(() => {
+    console.log('[GroundSetting] Component mounted/updated:', {
+      hasBackgroundUrl: !!backgroundUrl,
+      backgroundType,
+      urlLength: backgroundUrl?.length || 0,
+      urlPreview: backgroundUrl ? `${backgroundUrl.substring(0, 100)}...` : 'null',
+      initialGroundPosition
+    });
+  }, [backgroundUrl, backgroundType, initialGroundPosition]);
+
   useEffect(() => {
     setGroundPosition(initialGroundPosition);
   }, [initialGroundPosition]);
@@ -66,12 +77,24 @@ export function GroundSetting({
               className={styles.backgroundMedia}
               muted
               loop
+              autoPlay
+              playsInline
+              onError={(e) => {
+                console.error('[GroundSetting] Video load error:', e);
+                console.error('[GroundSetting] Failed URL:', backgroundUrl);
+              }}
+              onLoadedData={() => console.log('[GroundSetting] Video loaded successfully')}
             />
           ) : (
             <img 
               src={backgroundUrl} 
               alt="背景" 
               className={styles.backgroundMedia}
+              onError={(e) => {
+                console.error('[GroundSetting] Image load error:', e);
+                console.error('[GroundSetting] Failed URL:', backgroundUrl);
+              }}
+              onLoad={() => console.log('[GroundSetting] Image loaded successfully')}
             />
           )
         ) : (
