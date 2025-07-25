@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { Settings } from "./components/Settings";
 import { UploadPage } from "./components/UploadPage";
 import { GalleryPage } from "./components/GalleryPage";
 import { SettingsPage } from "./components/SettingsPage";
+import { Sidebar } from "./components/Sidebar/Sidebar";
 import { initializeStorage } from "./services/imageStorage";
 import { startAutoDeleteService } from "./services/autoDelete";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -10,14 +10,36 @@ import { useWorkspace } from "./hooks/useWorkspace";
 import { WorkspaceSelector } from "./components/WorkspaceSelector";
 import styles from "./App.module.scss";
 
-function App() {
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'settings' | 'upload' | 'gallery' | 'animation'>('upload');
-  const { currentWorkspace } = useWorkspace();
+// 初期ローディング画面を非表示にする
+function hideInitialLoading() {
+  const loadingElement = document.getElementById('initial-loading');
+  if (loadingElement) {
+    loadingElement.classList.add('hidden');
+    // アニメーション完了後に完全に削除
+    setTimeout(() => {
+      loadingElement.style.display = 'none';
+    }, 300);
+  }
+}
 
-  // ワークスペースが選択されたら初期化
+function App() {
+  const [activeTab, setActiveTab] = useState<'settings' | 'upload' | 'gallery' | 'animation'>('upload');
+  const { isLoading, needsWorkspace, isReady, currentWorkspace } = useWorkspace();
+
+  // 状態に基づいて初期ローディング画面を制御
   useEffect(() => {
-    if (currentWorkspace) {
+    // 初期化が完了したら必ず初期ローディング画面を非表示
+    if (!isLoading) {
+      // 即座に非表示にする（遅延を最小限に）
+      requestAnimationFrame(() => {
+        hideInitialLoading();
+      });
+    }
+  }, [isLoading]);
+
+  // ワークスペースが準備できたら初期化
+  useEffect(() => {
+    if (isReady && currentWorkspace) {
       const initialize = async () => {
         try {
           await initializeStorage();
@@ -29,128 +51,68 @@ function App() {
       
       initialize();
     }
-  }, [currentWorkspace]);
+  }, [isReady, currentWorkspace]);
 
-  const handleSettingsSaved = () => {
-    // 設定が変更されたらストレージを再初期化
-    initializeStorage().catch(console.error);
+  const handleAnimationClick = async () => {
+    try {
+      // 既存のアニメーションウィンドウがあるか確認
+      const existingWindow = await WebviewWindow.getByLabel('animation');
+      
+      if (existingWindow) {
+        // 既存のウィンドウをフォーカス
+        await existingWindow.setFocus();
+      } else {
+        // 新しいウィンドウを作成
+        const animationWindow = new WebviewWindow('animation', {
+          url: '#/animation',
+          title: 'ぬりえもん - アニメーション',
+          width: 1024,
+          height: 768,
+          resizable: true,
+          decorations: true,
+        });
+        
+        // ウィンドウが作成されたらメインウィンドウをアップロードタブに戻す
+        animationWindow.once('tauri://created', () => {
+          setActiveTab('upload');
+        });
+      }
+    } catch (error) {
+      console.error('アニメーションウィンドウの操作エラー:', error);
+    }
   };
 
-  return (
-    <>
-      <WorkspaceSelector />
-      <div className={styles.container}>
-        <header className={styles.header}>
-        <h1 className={styles.title}>ぬりえもん</h1>
-        <div className={styles.tabs}>
-          <button
-            className={`${styles.tab} ${activeTab === 'settings' ? styles.active : ''}`}
-            onClick={() => setActiveTab('settings')}
-          >
-            初期設定
-          </button>
-          <button
-            className={`${styles.tab} ${activeTab === 'upload' ? styles.active : ''}`}
-            onClick={() => setActiveTab('upload')}
-          >
-            アップロード
-          </button>
-          <button
-            className={`${styles.tab} ${activeTab === 'gallery' ? styles.active : ''}`}
-            onClick={() => setActiveTab('gallery')}
-          >
-            ギャラリー
-          </button>
-          <button
-            className={`${styles.tab} ${activeTab === 'animation' ? styles.active : ''}`}
-            onClick={async () => {
-              console.log('[DEBUG] アニメーションタブがクリックされました');
-              try {
-                // 既存のアニメーションウィンドウがあるか確認
-                console.log('[DEBUG] 既存のウィンドウを確認中...');
-                const existingWindow = await WebviewWindow.getByLabel('animation');
-                console.log('[DEBUG] 既存のウィンドウ:', existingWindow);
-                
-                if (existingWindow) {
-                  // 既存のウィンドウをフォーカス
-                  console.log('[DEBUG] 既存のウィンドウにフォーカスします');
-                  await existingWindow.setFocus();
-                } else {
-                  // 新しいウィンドウを作成
-                  console.log('[DEBUG] 新しいウィンドウを作成します');
-                  const animationWindow = new WebviewWindow('animation', {
-                    url: '#/animation',
-                    title: 'ぬりえもん - アニメーション',
-                    width: 1024,
-                    height: 768,
-                    resizable: true,
-                    decorations: true,
-                    devtools: true,  // 開発者ツールを有効化
-                  });
-                  
-                  console.log('[DEBUG] ウィンドウ作成完了:', animationWindow);
-                  
-                  // ウィンドウが作成されたらメインウィンドウをアップロードタブに戻す
-                  animationWindow.once('tauri://created', async () => {
-                    console.log('[DEBUG] ウィンドウが正常に作成されました');
-                    // 開発環境の場合、自動的に開発者ツールを開く
-                    if (import.meta.env.DEV) {
-                      try {
-                        // @ts-ignore
-                        await animationWindow.openDevtools();
-                        console.log('[DEBUG] アニメーションウィンドウの開発者ツールを開きました');
-                      } catch (e) {
-                        console.log('[DEBUG] 開発者ツールの自動オープンに失敗（手動で開いてください）');
-                      }
-                    }
-                    setActiveTab('upload');
-                  });
-                  
-                  // エラーイベントも監視
-                  animationWindow.once('tauri://error', (error) => {
-                    console.error('[DEBUG] ウィンドウ作成エラー:', error);
-                  });
-                }
-              } catch (error) {
-                console.error('[DEBUG] アニメーションウィンドウの操作エラー:', error);
-                console.error('[DEBUG] エラーの詳細:', {
-                  message: error instanceof Error ? error.message : '不明なエラー',
-                  stack: error instanceof Error ? error.stack : undefined
-                });
-              }
-            }}
-          >
-            アニメーション
-          </button>
-        </div>
-        <button 
-          className={styles.settingsButton}
-          onClick={() => setIsSettingsOpen(true)}
-          title="設定"
-        >
-          ⚙️
-        </button>
-      </header>
-      <main className={`${styles.main} ${styles.fullWidth}`}>
-        {activeTab === 'settings' && (
-          <SettingsPage />
-        )}
-        {activeTab === 'upload' && (
-          <UploadPage />
-        )}
-        {activeTab === 'gallery' && (
-          <GalleryPage />
-        )}
-      </main>
-      
-      <Settings
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        onSave={handleSettingsSaved}
-      />
+  // 初期化中は何も表示しない（HTMLのローディング画面が表示される）
+  if (isLoading) {
+    return null;
+  }
+
+  // ワークスペース選択が必要な場合
+  if (needsWorkspace) {
+    return <WorkspaceSelector />;
+  }
+
+  // 準備完了したらメインUIを表示
+  if (isReady) {
+    return (
+      <div className={styles.appLayout}>
+        <Sidebar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onAnimationClick={handleAnimationClick}
+        />
+        
+        <main className={styles.mainContent}>
+          {activeTab === 'settings' && <SettingsPage />}
+          {activeTab === 'upload' && <UploadPage />}
+          {activeTab === 'gallery' && <GalleryPage />}
+        </main>
       </div>
-    </>
-  );
+    );
+  }
+
+  // フォールバック（通常は到達しない）
+  return null;
 }
 
 export default App;

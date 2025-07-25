@@ -1,0 +1,73 @@
+@use '../../styles/variables' as vars;
+
+.sidebar {
+  width: 240px;
+  height: 100vh;
+  background-color: #f8f9fa;
+  border-right: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.logo {
+  padding: vars.$spacing-lg vars.$spacing-md;
+  border-bottom: 1px solid #e0e0e0;
+  
+  h1 {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: vars.$primary-color;
+    margin: 0;
+    text-align: center;
+  }
+}
+
+.navigation {
+  flex: 1;
+  padding: vars.$spacing-md 0;
+  overflow-y: auto;
+}
+
+.menuItem {
+  width: 100%;
+  padding: vars.$spacing-md vars.$spacing-lg;
+  background: transparent;
+  border: none;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: vars.$spacing-sm;
+  font-size: 1rem;
+  color: #333;
+  transition: all 0.2s ease;
+  text-align: left;
+
+  &:hover {
+    background-color: #e8e9ea;
+  }
+
+  &.active {
+    background-color: #e3f2fd;
+    border-left-color: vars.$primary-color;
+    color: vars.$primary-color;
+    font-weight: 500;
+  }
+
+  &:focus {
+    outline: none;
+    background-color: #e8e9ea;
+  }
+}
+
+.icon {
+  font-size: 1.25rem;
+  width: 1.5rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.label {
+  flex: 1;
+}

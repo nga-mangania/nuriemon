@@ -1,112 +1,32 @@
 @use './styles/variables' as vars;
 
-.container {
-  min-height: 100vh;
+.appLayout {
   display: flex;
-  flex-direction: column;
-  background-color: vars.$background-color;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #ffffff;
 }
 
-.header {
-  background-color: white;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  padding: vars.$spacing-md;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  position: relative;
-}
-
-.title {
-  color: vars.$primary-color;
-  font-size: 2rem;
-  font-weight: bold;
-  text-align: center;
-  margin: 0;
-}
-
-.tabs {
-  display: flex;
-  gap: vars.$spacing-sm;
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.tab {
-  background: none;
-  border: none;
-  padding: vars.$spacing-sm vars.$spacing-md;
-  font-size: 1rem;
-  cursor: pointer;
-  color: vars.$text-secondary;
-  position: relative;
-  transition: vars.$transition-base;
-  
-  &:hover {
-    color: vars.$primary-color;
-  }
-  
-  &.active {
-    color: vars.$primary-color;
-    font-weight: 600;
-    
-    &::after {
-      content: '';
-      position: absolute;
-      bottom: -2px;
-      left: 0;
-      right: 0;
-      height: 3px;
-      background: vars.$primary-color;
-      border-radius: 2px;
-    }
-  }
-}
-
-.main {
+.mainContent {
   flex: 1;
+  overflow-y: auto;
   padding: vars.$spacing-lg;
-  max-width: 1400px;
-  margin: 0 auto;
-  width: 100%;
-  display: grid;
-  gap: vars.$spacing-lg;
-  align-items: start;
-
-  &.twoColumn {
-    grid-template-columns: 1fr 1fr;
-    
-    @media (max-width: vars.$breakpoint-md) {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  &.fullWidth {
-    grid-template-columns: 1fr;
-  }
-}
-
-.leftColumn,
-.rightColumn {
-  display: flex;
-  flex-direction: column;
-  gap: vars.$spacing-lg;
-}
-
-.settingsButton {
-  position: absolute;
-  right: vars.$spacing-md;
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  opacity: 0.6;
-  transition: vars.$transition-base;
-  padding: vars.$spacing-sm;
+  background-color: #ffffff;
   
-  &:hover {
-    opacity: 1;
-    transform: rotate(90deg);
+  // メインコンテンツの最大幅を設定（オプション）
+  > * {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+}
+
+// フルスクリーン表示用のクラス（必要に応じて）
+.fullScreen {
+  .mainContent {
+    padding: 0;
+    
+    > * {
+      max-width: none;
+    }
   }
 }

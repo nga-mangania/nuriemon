@@ -1,75 +1,33 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import { useAppStore } from '../stores/appStore';
 import { WorkspaceManager } from '../services/workspaceManager';
-import { listen } from '@tauri-apps/api/event';
 
 /**
- * ワークスペース管理フック
+ * ワークスペース管理フック（シンプル化版）
+ * Zustandストアのラッパーとして機能
  */
 export function useWorkspace() {
-  const [currentWorkspace, setCurrentWorkspace] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { status, currentWorkspace, error, initialize, switchWorkspace } = useAppStore();
+  const initializeRef = useRef(false);
 
-  const manager = WorkspaceManager.getInstance();
-
+  // 初回マウント時に一度だけ初期化
   useEffect(() => {
-    // ワークスペース変更イベントをリスン
-    const unsubscribe = listen('workspace-changed', (event) => {
-      const { path } = event.payload as { path: string };
-      setCurrentWorkspace(path);
-    });
-
-    // 初期化
-    initializeWorkspace();
-
-    return () => {
-      unsubscribe.then(fn => fn());
-    };
-  }, []);
-
-  const initializeWorkspace = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-
-      // 最後に使用したワークスペースを取得
-      const lastWorkspace = await manager.getLastWorkspace();
-      
-      if (lastWorkspace) {
-        // 既存のワークスペースを開く
-        await switchWorkspace(lastWorkspace);
-      } else {
-        // 新規ユーザーの場合
-        setIsLoading(false);
-      }
-    } catch (err) {
-      console.error('[useWorkspace] 初期化エラー:', err);
-      setError(err instanceof Error ? err.message : '初期化に失敗しました');
-      setIsLoading(false);
+    if (!initializeRef.current) {
+      initializeRef.current = true;
+      initialize();
     }
-  };
-
-  const switchWorkspace = async (path: string, onProgress?: (message: string) => void) => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      
-      await manager.switchWorkspace(path, onProgress);
-      setCurrentWorkspace(path);
-    } catch (err) {
-      console.error('[useWorkspace] ワークスペース切り替えエラー:', err);
-      setError(err instanceof Error ? err.message : 'ワークスペースの切り替えに失敗しました');
-      throw err;
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  }, [initialize]);
 
   return {
+    // 状態
     currentWorkspace,
-    isLoading,
+    isLoading: status === 'initializing',
+    needsWorkspace: status === 'workspace-needed',
+    isReady: status === 'ready',
     error,
+    
+    // アクション
     switchWorkspace,
-    manager
+    manager: WorkspaceManager.getInstance()
   };
 }
