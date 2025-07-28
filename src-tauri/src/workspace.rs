@@ -48,6 +48,7 @@ impl WorkspaceConnection {
             .as_ref()
             .ok_or_else(|| "データベースに接続されていません".to_string())
     }
+
 }
 
 pub type WorkspaceState = Mutex<WorkspaceConnection>;

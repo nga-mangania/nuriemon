@@ -264,6 +264,27 @@ export class AppSettingsService {
     }
   }
 
+  // 自動取り込みパスの保存
+  static async setAutoImportPath(path: string): Promise<void> {
+    await AppSettingsService.saveAppSetting('auto_import_path', path);
+  }
+
+  // 自動取り込みパスの取得
+  static async getAutoImportPath(): Promise<string | null> {
+    return await AppSettingsService.getAppSetting('auto_import_path');
+  }
+
+  // 自動取り込み有効/無効の保存
+  static async setAutoImportEnabled(enabled: boolean): Promise<void> {
+    await AppSettingsService.saveAppSetting('auto_import_enabled', enabled.toString());
+  }
+
+  // 自動取り込み有効/無効の取得
+  static async getAutoImportEnabled(): Promise<boolean> {
+    const value = await AppSettingsService.getAppSetting('auto_import_enabled');
+    return value === 'true';
+  }
+
   // 保存先ディレクトリの取得（統一化のため追加）
   static async getSaveDirectory(): Promise<string> {
     const manager = WorkspaceManager.getInstance();

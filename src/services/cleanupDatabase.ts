@@ -11,7 +11,16 @@ export async function cleanupDatabase(): Promise<void> {
     console.log('[cleanupDatabase] データベースのクリーンアップを開始します...');
     
     const metadata = await getAllMetadata();
+    console.log(`[cleanupDatabase] データベース内の画像数: ${metadata.length}`);
+    console.log('[cleanupDatabase] データベース内のファイルID一覧:', metadata.map(m => ({
+      id: m.id,
+      fileName: m.savedFileName || (m as any).saved_file_name,
+      type: (m as any).image_type || m.type,
+      filePath: (m as any).file_path
+    })));
+    
     const currentSaveDir = await AppSettingsService.getSaveDirectory();
+    console.log(`[cleanupDatabase] 現在の保存ディレクトリ: ${currentSaveDir}`);
     
     let deletedCount = 0;
     let updatedCount = 0;
@@ -67,8 +76,10 @@ export async function cleanupDatabase(): Promise<void> {
             deletedCount++;
           } else {
             // 通常の画像ファイル
+            console.log(`[cleanupDatabase] 通常画像を削除: ${item.id}, パス: ${filePath}`);
             await DatabaseService.deleteImage(item.id);
             deletedCount++;
+            console.log(`[cleanupDatabase] 削除完了: ${item.id}`);
           }
         } else {
           // ファイルが存在する場合、パスが正しいか確認

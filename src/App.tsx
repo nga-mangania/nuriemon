@@ -10,6 +10,8 @@ import { useWorkspace } from "./hooks/useWorkspace";
 import { WorkspaceSelector } from "./components/WorkspaceSelector";
 import styles from "./App.module.scss";
 
+console.log('[App.tsx] Module loaded');
+
 // 初期ローディング画面を非表示にする
 function hideInitialLoading() {
   const loadingElement = document.getElementById('initial-loading');
@@ -23,8 +25,11 @@ function hideInitialLoading() {
 }
 
 function App() {
+  console.log('[App] Component rendering');
   const [activeTab, setActiveTab] = useState<'settings' | 'upload' | 'gallery' | 'animation'>('upload');
   const { isLoading, needsWorkspace, isReady, currentWorkspace } = useWorkspace();
+  
+  console.log('[App] State:', { isLoading, needsWorkspace, isReady, currentWorkspace });
 
   // 状態に基づいて初期ローディング画面を制御
   useEffect(() => {

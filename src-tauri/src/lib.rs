@@ -9,16 +9,17 @@ use tauri::{State, Manager, Emitter};
 mod db;
 mod events;
 mod workspace;
+mod file_watcher;
 use db::{ImageMetadata, UserSettings, MovementSettings, generate_id, current_timestamp};
 use events::{DataChangeEvent, emit_data_change};
 use workspace::{WorkspaceState, WorkspaceConnection};
 
 // Python処理の結果
 #[derive(Serialize, Deserialize, Clone)]
-struct ProcessResult {
-    success: bool,
-    image: Option<String>,
-    error: Option<String>,
+pub struct ProcessResult {
+    pub success: bool,
+    pub image: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -58,6 +59,83 @@ pub struct AppState {
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+// 同期版のprocess_image（内部使用向け）
+pub fn process_image_sync(image_data: String) -> Result<ProcessResult, String> {
+    use std::process::{Command, Stdio};
+    use std::io::{Write, BufRead, BufReader};
+    
+    // Pythonスクリプトのパスを取得
+    let python_script = std::env::current_dir()
+        .map_err(|e| e.to_string())?
+        .join("../python-sidecar/main.py");
+    
+    println!("[Rust] Python script path: {:?}", python_script);
+    
+    // スクリプトが存在するか確認
+    if !python_script.exists() {
+        return Err(format!("Python script not found at: {:?}", python_script));
+    }
+    
+    // Pythonコマンドを実行
+    let mut child = Command::new("python3")
+        .arg(&python_script)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start Python process: {}", e))?;
+    
+    // 標準入力に画像データを送信
+    let stdin = child.stdin.as_mut()
+        .ok_or("Failed to get stdin")?;
+    
+    let command = serde_json::json!({
+        "command": "process",
+        "image": image_data
+    });
+    
+    writeln!(stdin, "{}", command.to_string())
+        .map_err(|e| format!("Failed to write to stdin: {}", e))?;
+    
+    // 結果を読み取る
+    let stdout = child.stdout.as_mut()
+        .ok_or("Failed to get stdout")?;
+    let reader = BufReader::new(stdout);
+    
+    let mut final_result: Option<ProcessResult> = None;
+
+    for line in reader.lines() {
+        if let Ok(line) = line {
+            if let Ok(output) = serde_json::from_str::<PythonOutput>(&line) {
+                match output {
+                    PythonOutput::Progress { value } => {
+                        println!("[Rust] Progress: {}", value);
+                    },
+                    PythonOutput::Result(result) => {
+                        println!("[Rust] Result received: success={}", result.success);
+                        final_result = Some(result);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    // プロセスが正常に終了するのを待つ
+    let status = child.wait().map_err(|e| format!("Failed to wait on child: {}", e))?;
+    if !status.success() {
+        let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+        let err_reader = BufReader::new(stderr);
+        let err_lines: Vec<String> = err_reader.lines().filter_map(Result::ok).collect();
+        return Err(format!("Python process exited with error: {}", err_lines.join("\n")));
+    }
+    
+    match final_result {
+        Some(result) => Ok(result),
+        None => Err("Failed to get final result from Python process".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -442,6 +520,31 @@ fn get_app_settings(workspace: State<WorkspaceState>, keys: Vec<String>) -> Resu
         .map_err(|e| format!("Failed to get app settings: {}", e))
 }
 
+// フォルダ監視の開始
+#[tauri::command]
+fn start_folder_watching(
+    state: State<AppState>,
+    workspace: State<WorkspaceState>,
+    watch_path: String
+) -> Result<(), String> {
+    // 現在のワークスペースパスを取得（絶対パス）
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let workspace_path = conn.current_path.as_ref()
+        .ok_or("ワークスペースが選択されていません".to_string())?
+        .parent()  // .nuriemonディレクトリの親を取得
+        .and_then(|p| p.parent())  // nuriemon.dbの親の親
+        .ok_or("ワークスペースパスの取得に失敗しました".to_string())?
+        .to_string_lossy()
+        .to_string();
+    
+    file_watcher::start_folder_watching(
+        state.app_handle.clone(),
+        watch_path,
+        workspace_path
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -489,7 +592,9 @@ pub fn run() {
             workspace::connect_workspace_db,
             workspace::close_workspace_db,
             workspace::save_global_setting,
-            workspace::get_global_setting
+            workspace::get_global_setting,
+            // フォルダ監視
+            start_folder_watching
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

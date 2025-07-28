@@ -6,10 +6,19 @@ import { GroundSetting } from './GroundSetting';
 import { 
   AppSettingsService
 } from '../services/database';
+
+console.log('[SettingsPage] Starting imports...');
+
+import { AutoImportService } from '../services/autoImportService';
+
+console.log('[SettingsPage] AutoImportService imported');
+
 import { emit } from '@tauri-apps/api/event';
 import { getAllMetadata, loadImage, deleteImage, saveBackgroundFile } from '../services/imageStorage';
 import { WorkspaceManager } from '../services/workspaceManager';
 import styles from './SettingsPage.module.scss';
+
+console.log('[SettingsPage] All imports completed');
 
 export function SettingsPage() {
   const [currentWorkspace, setCurrentWorkspace] = useState<string>('');
@@ -22,6 +31,11 @@ export function SettingsPage() {
   // 背景アップロード関連のstate
   const [uploadingBackground, setUploadingBackground] = useState(false);
   const [backgroundProgress, setBackgroundProgress] = useState(0);
+  
+  // 自動取り込み関連のstate
+  const [autoImportEnabled, setAutoImportEnabled] = useState(false);
+  const [autoImportPath, setAutoImportPath] = useState<string | null>(null);
+  const [isStartingAutoImport, setIsStartingAutoImport] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -33,11 +47,14 @@ export function SettingsPage() {
         console.log('[SettingsPage] マイグレーション完了');
         
         // 次にクリーンアップを実行
-        const { cleanupDatabase, removeDuplicateFiles } = await import('../services/cleanupDatabase');
+        const { removeDuplicateFiles, cleanupDatabase } = await import('../services/cleanupDatabase');
+        console.log('[SettingsPage] removeDuplicateFilesを開始...');
         await removeDuplicateFiles();
-        // クリーンアップは一時的に無効化（ファイルパスの不整合を修正するまで）
-        // await cleanupDatabase();
-        // console.log('[SettingsPage] データベースのクリーンアップ完了');
+        console.log('[SettingsPage] removeDuplicateFiles完了');
+        // ファイルパスの不整合を修正
+        console.log('[SettingsPage] cleanupDatabaseを開始...');
+        await cleanupDatabase();
+        console.log('[SettingsPage] データベースのクリーンアップ完了');
         
         // 最後に設定を読み込み
         await loadSettings();
@@ -64,6 +81,13 @@ export function SettingsPage() {
       
       setGroundPosition(allSettings.groundPosition);
       setDeletionTime(allSettings.deletionTime);
+      
+      // 自動取り込み設定を読み込み
+      const autoImportService = AutoImportService.getInstance();
+      const importPath = await AppSettingsService.getAutoImportPath();
+      const importEnabled = await AppSettingsService.getAutoImportEnabled();
+      setAutoImportPath(importPath);
+      setAutoImportEnabled(importEnabled && autoImportService.isCurrentlyWatching());
       
       console.log('[SettingsPage] 設定を読み込みました:', allSettings);
     } catch (error) {
@@ -279,6 +303,81 @@ export function SettingsPage() {
           </button>
           <div className={styles.note}>
             <p>※ 作業フォルダを変更すると、そのフォルダに保存されているデータが読み込まれます。</p>
+          </div>
+        </div>
+      </section>
+
+      {/* ステップ1.5: 自動取り込み設定 */}
+      <section className={styles.section}>
+        <h2>ステップ1.5: 自動取り込み設定（オプション）</h2>
+        <div className={styles.autoImportSettings}>
+          <div className={styles.autoImportPath}>
+            <p>監視フォルダ: {autoImportPath || '未設定'}</p>
+            <button
+              className={styles.selectFolderButton}
+              onClick={async () => {
+                try {
+                  const selected = await open({
+                    directory: true,
+                    multiple: false,
+                    title: '監視するフォルダを選択'
+                  });
+                  
+                  if (selected && typeof selected === 'string') {
+                    setAutoImportPath(selected);
+                    await AppSettingsService.setAutoImportPath(selected);
+                  }
+                } catch (error) {
+                  console.error('フォルダ選択エラー:', error);
+                  alert('フォルダの選択に失敗しました');
+                }
+              }}
+            >
+              フォルダを選択
+            </button>
+          </div>
+          
+          <div className={styles.autoImportToggle}>
+            <label>
+              <input
+                type="checkbox"
+                checked={autoImportEnabled}
+                onChange={async (e) => {
+                  const enabled = e.target.checked;
+                  
+                  if (enabled) {
+                    if (!autoImportPath) {
+                      alert('先に監視フォルダを選択してください');
+                      return;
+                    }
+                    
+                    try {
+                      setIsStartingAutoImport(true);
+                      const autoImportService = AutoImportService.getInstance();
+                      await autoImportService.startWatching(autoImportPath);
+                      setAutoImportEnabled(true);
+                    } catch (error) {
+                      console.error('自動取り込み開始エラー:', error);
+                      alert('自動取り込みの開始に失敗しました');
+                      setAutoImportEnabled(false);
+                    } finally {
+                      setIsStartingAutoImport(false);
+                    }
+                  } else {
+                    const autoImportService = AutoImportService.getInstance();
+                    await autoImportService.stopWatching();
+                    setAutoImportEnabled(false);
+                  }
+                }}
+                disabled={isStartingAutoImport}
+              />
+              {isStartingAutoImport ? '開始中...' : '自動取り込みを有効にする'}
+            </label>
+          </div>
+          
+          <div className={styles.note}>
+            <p>※ 指定したフォルダに画像ファイルが追加されると、自動的に背景除去してアニメーションに追加します。</p>
+            <p>※ スキャナーの保存先フォルダを指定すると便利です。</p>
           </div>
         </div>
       </section>
