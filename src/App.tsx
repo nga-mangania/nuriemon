@@ -4,10 +4,12 @@ import { GalleryPage } from "./components/GalleryPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { Sidebar } from "./components/Sidebar/Sidebar";
 import { initializeStorage } from "./services/imageStorage";
-import { startAutoDeleteService } from "./services/autoDelete";
+import { startAutoDeleteService, stopAutoDeleteService } from "./services/autoDelete";
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { listen } from '@tauri-apps/api/event';
 import { useWorkspace } from "./hooks/useWorkspace";
 import { WorkspaceSelector } from "./components/WorkspaceSelector";
+import { TauriEventListener } from "./events/tauriEventListener";
 import styles from "./App.module.scss";
 
 console.log('[App.tsx] Module loaded');
@@ -49,14 +51,59 @@ function App() {
         try {
           await initializeStorage();
           startAutoDeleteService();
+          
+          // Tauriイベントリスナーをセットアップ
+          const eventListener = TauriEventListener.getInstance();
+          await eventListener.setupListeners();
+          console.log('[App] Tauriイベントリスナーをセットアップしました');
         } catch (error) {
           console.error('初期化エラー:', error);
         }
       };
       
       initialize();
+      
+      // クリーンアップ
+      return () => {
+        const eventListener = TauriEventListener.getInstance();
+        eventListener.cleanup();
+      };
     }
   }, [isReady, currentWorkspace]);
+
+  // ワークスペース変更時に自動削除サービスを再起動
+  useEffect(() => {
+    if (!isReady) return;
+
+    const setupWorkspaceListener = async () => {
+      const unlisten = await listen('workspace-data-loaded', async (_event) => {
+        console.log('[App] ワークスペース変更検出、自動削除サービスを再起動します');
+        
+        // 既存の自動削除サービスを停止
+        stopAutoDeleteService();
+        
+        // ストレージを再初期化
+        try {
+          await initializeStorage();
+          // 自動削除サービスを再起動
+          startAutoDeleteService();
+          console.log('[App] 自動削除サービスを再起動しました');
+        } catch (error) {
+          console.error('[App] 自動削除サービスの再起動エラー:', error);
+        }
+      });
+
+      return () => {
+        unlisten();
+      };
+    };
+
+    const cleanupPromise = setupWorkspaceListener();
+
+    return () => {
+      cleanupPromise.then(cleanup => cleanup && cleanup());
+    };
+  }, [isReady]);
 
   const handleAnimationClick = async () => {
     try {

@@ -2343,6 +2343,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "notify",
+ "once_cell",
+ "rand 0.8.5",
  "rusqlite",
  "serde",
  "serde_json",

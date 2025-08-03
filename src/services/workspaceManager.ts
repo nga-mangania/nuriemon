@@ -1,6 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
 import { join } from '@tauri-apps/api/path';
 import { emit } from '@tauri-apps/api/event';
+import { useWorkspaceStore } from '../stores/workspaceStore';
+
+// ワークスペース関連のイベントタイプ
+export type WorkspaceEventType = 
+  | 'workspace-changed'      // ワークスペースが変更された
+  | 'workspace-data-loaded'  // ワークスペースのデータが読み込まれた
+  | 'workspace-settings-updated' // ワークスペースの設定が更新された
+  | 'workspace-before-change';   // ワークスペース変更前
 
 /**
  * ワークスペース設定インターフェース
@@ -30,12 +38,17 @@ export interface WorkspaceInfo {
   settings?: WorkspaceSettings;
 }
 
+// ワークスペースイベント
+export interface WorkspaceEvent {
+  type: WorkspaceEventType;
+  data: any;
+}
+
 /**
  * ワークスペース管理クラス
  */
 export class WorkspaceManager {
   private static instance: WorkspaceManager;
-  private currentWorkspace: string | null = null;
   private isChangingWorkspace = false;
 
   private constructor() {}
@@ -51,7 +64,7 @@ export class WorkspaceManager {
    * 現在のワークスペースパスを取得
    */
   getCurrentWorkspace(): string | null {
-    return this.currentWorkspace;
+    return useWorkspaceStore.getState().currentWorkspace;
   }
 
   /**
@@ -136,6 +149,21 @@ export class WorkspaceManager {
   }
 
   /**
+   * ワークスペースイベントを発行
+   */
+  private emitWorkspaceEvent(event: WorkspaceEvent) {
+    console.log(`[WorkspaceManager] Emitting ${event.type}`, event.data);
+    emit(event.type, event.data);
+    
+    // デバッグ用に全てのイベントタイプを同時に発火することも確認
+    console.log('[WorkspaceManager] イベント発火詳細:', {
+      type: event.type,
+      data: event.data,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  /**
    * ワークスペースを切り替え
    */
   async switchWorkspace(path: string, onProgress?: (message: string) => void): Promise<void> {
@@ -143,12 +171,23 @@ export class WorkspaceManager {
       throw new Error('ワークスペースの切り替え中です');
     }
 
+    console.log('[WorkspaceManager] ⭐ Switching workspace to:', path);
     this.isChangingWorkspace = true;
     onProgress?.('ワークスペースを準備しています...');
 
     try {
       // 現在の接続をクローズ
-      if (this.currentWorkspace) {
+      const currentWorkspace = this.getCurrentWorkspace();
+      if (currentWorkspace) {
+        // ワークスペース変更前イベントを発行
+        this.emitWorkspaceEvent({
+          type: 'workspace-before-change',
+          data: { 
+            oldPath: currentWorkspace, 
+            newPath: path 
+          }
+        });
+        
         onProgress?.('現在のワークスペースを閉じています...');
         await invoke('close_workspace_db');
       }
@@ -165,22 +204,46 @@ export class WorkspaceManager {
       onProgress?.('データベースに接続しています...');
       const nuriemonPath = await join(path, '.nuriemon');
       const dbPath = await join(nuriemonPath, 'nuriemon.db');
+      console.log('[WorkspaceManager] 📡 Rust側にDB接続を要求...');
       await invoke('connect_workspace_db', { dbPath });
+      console.log('[WorkspaceManager] ✅ Rust側DB接続完了');
 
-      // 現在のワークスペースを更新
-      this.currentWorkspace = path;
+      // Zustandストアを更新
+      const oldWorkspace = useWorkspaceStore.getState().currentWorkspace;
+      
+      // ワークスペース設定を読み込む
+      const workspaceInfo = await this.checkWorkspace(path);
+      if (workspaceInfo.settings) {
+        useWorkspaceStore.getState().setSettings(workspaceInfo.settings);
+      }
+      useWorkspaceStore.getState().setCurrentWorkspace(path);
+      
+      console.log('[WorkspaceManager] ✅ ワークスペース変更完了:', oldWorkspace, '->', path);
 
       // グローバル設定を更新
       await this.saveLastWorkspace(path);
 
-      // イベントを発行
-      emit('workspace-changed', { path });
+      // ワークスペース変更イベントを発行
+      this.emitWorkspaceEvent({
+        type: 'workspace-changed',
+        data: { path, dbPath }
+      });
+
+      // データ読み込み完了イベントを発行（少し遅延させて、DBが確実に準備できるようにする）
+      setTimeout(() => {
+        console.log('[WorkspaceManager] 🔔 workspace-data-loadedイベントを発火します');
+        this.emitWorkspaceEvent({
+          type: 'workspace-data-loaded',
+          data: { path }
+        });
+        console.log('[WorkspaceManager] ✅ workspace-data-loadedイベント発火完了');
+      }, 100);
 
       onProgress?.('ワークスペースの切り替えが完了しました');
       console.log('[WorkspaceManager] ワークスペース切り替え完了:', path);
 
     } catch (error) {
-      console.error('[WorkspaceManager] ワークスペース切り替えエラー:', error);
+      console.error('[WorkspaceManager] ❌ ワークスペース切り替えエラー:', error);
       throw error;
     } finally {
       this.isChangingWorkspace = false;
@@ -216,16 +279,50 @@ export class WorkspaceManager {
    * ワークスペース設定を取得
    */
   async getWorkspaceSettings(): Promise<WorkspaceSettings | null> {
-    if (!this.currentWorkspace) {
+    // まずストアから取得を試みる
+    const state = useWorkspaceStore.getState();
+    if (state.settings) {
+      return state.settings;
+    }
+    
+    // ストアにない場合はファイルから読み込む
+    const currentWorkspace = state.currentWorkspace;
+    if (!currentWorkspace) {
       return null;
     }
 
     try {
-      const settingsPath = await join(this.currentWorkspace, '.nuriemon', 'settings.json');
+      const settingsPath = await join(currentWorkspace, '.nuriemon', 'settings.json');
       // Rust側でファイル読み込み（権限問題を回避）
       const bytes = await invoke<number[]>('read_file_absolute', { path: settingsPath });
-      const content = new TextDecoder().decode(new Uint8Array(bytes));
-      return JSON.parse(content);
+      let content = new TextDecoder().decode(new Uint8Array(bytes));
+      
+      // JSONの破損を修復
+      // 末尾の不正な文字列を削除
+      const lastBraceIndex = content.lastIndexOf('}');
+      if (lastBraceIndex !== -1) {
+        const afterLastBrace = content.substring(lastBraceIndex + 1).trim();
+        if (afterLastBrace && !afterLastBrace.match(/^\s*$/)) {
+          console.warn('[WorkspaceManager] JSONの末尾に不正な文字列を検出:', afterLastBrace);
+          content = content.substring(0, lastBraceIndex + 1);
+        }
+      }
+      
+      // デバッグログ追加
+      console.log('[WorkspaceManager] settings.json content length:', content.length);
+      if (content.length > 1000) {
+        console.log('[WorkspaceManager] settings.json preview:', content.substring(0, 200) + '...');
+      } else {
+        console.log('[WorkspaceManager] settings.json content:', content);
+      }
+      
+      try {
+        return JSON.parse(content);
+      } catch (parseError) {
+        console.error('[WorkspaceManager] JSON解析エラー詳細:', parseError);
+        console.error('[WorkspaceManager] 問題のあるJSON:', content);
+        throw parseError;
+      }
     } catch (error) {
       console.error('[WorkspaceManager] ワークスペース設定読み込みエラー:', error);
       return null;
@@ -236,35 +333,62 @@ export class WorkspaceManager {
    * ワークスペース設定を保存
    */
   async saveWorkspaceSettings(settings: Partial<WorkspaceSettings>): Promise<void> {
-    if (!this.currentWorkspace) {
+    const currentWorkspace = useWorkspaceStore.getState().currentWorkspace;
+    
+    if (!currentWorkspace) {
       throw new Error('ワークスペースが選択されていません');
     }
 
-    const current = await this.getWorkspaceSettings();
+    let current = await this.getWorkspaceSettings();
     if (!current) {
-      throw new Error('現在の設定を読み込めませんでした');
+      // 初期設定を作成
+      console.log('[WorkspaceManager] 現在の設定が読み込めないため、初期設定を作成します');
+      current = {
+        version: '1.0.0',
+        groundPosition: 50,
+        deletionTime: 'unlimited',
+        saveLocation: 'workspace',
+        customPath: currentWorkspace
+      };
     }
 
     const updated = { ...current, ...settings };
-    const settingsPath = await join(this.currentWorkspace, '.nuriemon', 'settings.json');
+    const settingsPath = await join(currentWorkspace, '.nuriemon', 'settings.json');
+    
+    // 保存前のデバッグログ
+    console.log('[WorkspaceManager] 保存する設定:', updated);
+    const jsonString = JSON.stringify(updated, null, 2);
+    console.log('[WorkspaceManager] JSON文字列長:', jsonString.length);
     
     // Rust側でファイル書き込み（権限問題を回避）
     await invoke('write_file_absolute', {
       path: settingsPath,
-      contents: Array.from(new TextEncoder().encode(JSON.stringify(updated, null, 2)))
+      contents: Array.from(new TextEncoder().encode(jsonString))
     });
 
+    // Zustandストアを更新
+    console.log('[WorkspaceManager] Zustandストアを更新します:', settings);
+    useWorkspaceStore.getState().updateSettings(settings);
+    console.log('[WorkspaceManager] ストア更新後の地面位置:', useWorkspaceStore.getState().groundPosition);
+    
     // 設定変更イベントを発行
-    emit('workspace-settings-changed', updated);
+    this.emitWorkspaceEvent({
+      type: 'workspace-settings-updated',
+      data: updated
+    });
+
+    // data-changedイベントは削除し、Zustandストアの更新のみ行う
+    // AnimationViewなどのコンポーネントはZustandから直接状態を購読する
   }
 
   /**
    * 保存ディレクトリを取得（常にワークスペース内）
    */
   async getSaveDirectory(): Promise<string> {
-    if (!this.currentWorkspace) {
+    const currentWorkspace = useWorkspaceStore.getState().currentWorkspace;
+    if (!currentWorkspace) {
       throw new Error('ワークスペースが選択されていません');
     }
-    return this.currentWorkspace;
+    return currentWorkspace;
   }
 }

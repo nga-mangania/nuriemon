@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { open, confirm as tauriConfirm } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
+import { listen } from '@tauri-apps/api/event';
 import { saveAudioFile, getAllMetadata, deleteImage, loadImage } from '../services/imageStorage';
 import styles from './AudioSettings.module.scss';
 
@@ -10,34 +11,58 @@ export function AudioSettings() {
   const [uploadingBgm, setUploadingBgm] = useState(false);
   const [uploadingSoundEffect, setUploadingSoundEffect] = useState(false);
 
+  // loadExistingAudioFiles関数を外部定義
+  const loadExistingAudioFiles = async () => {
+    try {
+      console.log('[AudioSettings] Loading existing audio files...');
+      const metadata = await getAllMetadata();
+      console.log('[AudioSettings] All metadata:', metadata);
+      const bgm = metadata.find(m => (m as any).image_type === 'bgm');
+      const soundEffect = metadata.find(m => (m as any).image_type === 'soundEffect');
+      console.log('[AudioSettings] Found BGM:', bgm);
+      console.log('[AudioSettings] Found Sound Effect:', soundEffect);
+      
+      if (bgm) {
+        const bgmData = await loadImage(bgm);
+        console.log('[AudioSettings] BGM data loaded, setting state');
+        setBgmFile({ name: bgm.originalFileName, data: bgmData, uploaded: true, id: bgm.id });
+      } else {
+        setBgmFile(null);
+      }
+      
+      if (soundEffect) {
+        const soundData = await loadImage(soundEffect);
+        console.log('[AudioSettings] Sound effect data loaded, setting state');
+        setSoundEffectFile({ name: soundEffect.originalFileName, data: soundData, uploaded: true, id: soundEffect.id });
+      } else {
+        setSoundEffectFile(null);
+      }
+    } catch (error) {
+      console.error('[AudioSettings] 既存音声ファイルの読み込みエラー:', error);
+    }
+  };
+
   // 既存の音声ファイルを読み込み
   useEffect(() => {
-    const loadExistingAudioFiles = async () => {
-      try {
-        console.log('Loading existing audio files...');
-        const metadata = await getAllMetadata();
-        console.log('All metadata in AudioSettings:', metadata);
-        const bgm = metadata.find(m => (m as any).image_type === 'bgm');
-        const soundEffect = metadata.find(m => (m as any).image_type === 'soundEffect');
-        console.log('Found BGM:', bgm);
-        console.log('Found Sound Effect:', soundEffect);
-        
-        if (bgm) {
-          const bgmData = await loadImage(bgm);
-          console.log('BGM data loaded, setting state');
-          setBgmFile({ name: bgm.originalFileName, data: bgmData, uploaded: true, id: bgm.id });
-        }
-        if (soundEffect) {
-          const soundData = await loadImage(soundEffect);
-          console.log('Sound effect data loaded, setting state');
-          setSoundEffectFile({ name: soundEffect.originalFileName, data: soundData, uploaded: true, id: soundEffect.id });
-        }
-      } catch (error) {
-        console.error('既存音声ファイルの読み込みエラー:', error);
-      }
+    loadExistingAudioFiles();
+    
+    // ワークスペース変更イベントをリッスン
+    const setupListeners = async () => {
+      const unlisten = await listen('workspace-data-loaded', async () => {
+        console.log('[AudioSettings] ワークスペースデータ読み込み完了を検知');
+        // 音声ファイルを再読み込み
+        await loadExistingAudioFiles();
+      });
+      
+      return unlisten;
     };
     
-    loadExistingAudioFiles();
+    let unlisten: (() => void) | undefined;
+    setupListeners().then(fn => { unlisten = fn; });
+    
+    return () => {
+      if (unlisten) unlisten();
+    };
   }, []);
 
   const handleBgmSelect = async () => {

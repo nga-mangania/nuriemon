@@ -1,12 +1,28 @@
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::thread::JoinHandle;
 use tauri::{AppHandle, Emitter};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use std::fs;
 use base64::{Engine as _, engine::general_purpose};
+use once_cell::sync::Lazy;
+
+// グローバルなwatcher管理
+struct WatcherState {
+    watcher_thread: Option<JoinHandle<()>>,
+    stop_sender: Option<Sender<()>>,
+}
+
+static WATCHER_STATE: Lazy<Arc<Mutex<WatcherState>>> = Lazy::new(|| {
+    Arc::new(Mutex::new(WatcherState {
+        watcher_thread: None,
+        stop_sender: None,
+    }))
+});
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AutoImportStarted {
@@ -32,23 +48,25 @@ pub struct AutoImportError {
 pub struct AnimationSettings {
     pub animation_type: String,
     pub speed: f32,
-    pub position_x: f32,
-    pub position_y: f32,
     pub size: f32,
 }
 
 pub fn start_folder_watching(
     app_handle: AppHandle,
     watch_path: String,
-    workspace_id: String,
+    workspace_path: String,
 ) -> Result<(), String> {
     if !Path::new(&watch_path).exists() {
         return Err("指定されたフォルダが存在しません".to_string());
     }
 
+    // 既存のwatcherを停止
+    stop_folder_watching();
+
     let app_handle_clone = app_handle.clone();
+    let (stop_tx, stop_rx) = channel::<()>();
     
-    thread::spawn(move || {
+    let thread_handle = thread::spawn(move || {
         let (tx, rx) = channel();
         
         let mut watcher = RecommendedWatcher::new(tx, Config::default())
@@ -59,34 +77,69 @@ pub fn start_folder_watching(
         
         println!("Watching folder: {}", watch_path);
         
-        for res in rx {
-            match res {
-                Ok(event) => {
-                    if let EventKind::Create(_) = event.kind {
-                        for path in event.paths {
-                            if is_image_file(&path) {
-                                println!("New image detected: {:?}", path);
-                                
-                                let result = process_new_image(
-                                    app_handle_clone.clone(),
-                                    path.clone(),
-                                    workspace_id.clone(),
-                                );
-                                
-                                match result {
-                                    Ok(_) => println!("Image processed successfully"),
-                                    Err(e) => eprintln!("Error processing image: {}", e),
+        loop {
+            // stop_rxをチェック
+            if stop_rx.try_recv().is_ok() {
+                println!("Stopping folder watcher for: {}", watch_path);
+                break;
+            }
+            
+            // file eventsをチェック（タイムアウト付き）
+            match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(res) => match res {
+                    Ok(event) => {
+                        if let EventKind::Create(_) = event.kind {
+                            for path in event.paths {
+                                if is_image_file(&path) {
+                                    println!("New image detected: {:?}", path);
+                                    
+                                    let result = process_new_image(
+                                        app_handle_clone.clone(),
+                                        path.clone(),
+                                        workspace_path.clone(),
+                                    );
+                                    
+                                    match result {
+                                        Ok(_) => println!("Image processed successfully"),
+                                        Err(e) => eprintln!("Error processing image: {}", e),
+                                    }
                                 }
                             }
                         }
                     }
+                    Err(e) => eprintln!("Watch error: {:?}", e),
+                },
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // タイムアウトは正常、ループを続ける
                 }
-                Err(e) => eprintln!("Watch error: {:?}", e),
+                Err(e) => {
+                    eprintln!("Channel error: {:?}", e);
+                    break;
+                }
             }
         }
     });
     
+    // グローバル状態を更新
+    let mut state = WATCHER_STATE.lock().unwrap();
+    state.watcher_thread = Some(thread_handle);
+    state.stop_sender = Some(stop_tx);
+    
     Ok(())
+}
+
+pub fn stop_folder_watching() {
+    let mut state = WATCHER_STATE.lock().unwrap();
+    
+    // 停止シグナルを送信
+    if let Some(sender) = state.stop_sender.take() {
+        let _ = sender.send(());
+    }
+    
+    // スレッドの終了を待つ
+    if let Some(thread) = state.watcher_thread.take() {
+        let _ = thread.join();
+    }
 }
 
 fn is_image_file(path: &Path) -> bool {
@@ -101,7 +154,7 @@ fn is_image_file(path: &Path) -> bool {
 fn process_new_image(
     app_handle: AppHandle,
     image_path: PathBuf,
-    workspace_id: String,
+    workspace_path: String,
 ) -> Result<(), String> {
     // 画像IDを生成
     let image_id = Uuid::new_v4().to_string();
@@ -116,10 +169,10 @@ fn process_new_image(
     // 画像処理を実行
     let handle_clone = app_handle.clone();
     let image_id_clone = image_id.clone();
-    let workspace_id_clone = workspace_id.clone();
+    let workspace_path_clone = workspace_path.clone();
     
     thread::spawn(move || {
-        match process_image_async(handle_clone.clone(), image_path, image_id_clone.clone(), workspace_id_clone) {
+        match process_image_async(handle_clone.clone(), image_path, image_id_clone.clone(), workspace_path_clone) {
             Ok(processed_path) => {
                 // ランダムアニメーション設定を生成
                 let animation = generate_random_animation();
@@ -151,7 +204,7 @@ fn process_image_async(
     _app_handle: AppHandle,
     image_path: PathBuf,
     image_id: String,
-    workspace_id: String,
+    workspace_path: String,
 ) -> Result<String, String> {
     // 画像ファイルを読み込み
     let image_data = fs::read(&image_path)
@@ -199,8 +252,8 @@ fn process_image_async(
         .map_err(|e| format!("Failed to decode base64: {}", e))?;
     
     // 保存先パスを生成（ワークスペースは既にフルパスなので、そのまま使用）
-    let workspace_path = PathBuf::from(&workspace_id);
-    let processed_dir = workspace_path.join("images").join("processed");
+    let workspace_dir = PathBuf::from(&workspace_path);
+    let processed_dir = workspace_dir.join("images").join("processed");
     
     // ディレクトリを作成
     fs::create_dir_all(&processed_dir)
@@ -218,22 +271,26 @@ fn process_image_async(
 }
 
 fn generate_random_animation() -> AnimationSettings {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use rand::Rng;
     
-    // 簡易的な乱数生成（実際はrandクレートを使用すべき）
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u32;
+    let mut rng = rand::thread_rng();
     
-    let animation_types = vec!["float", "bounce", "rotate", "swim"];
-    let animation_type = animation_types[seed as usize % animation_types.len()].to_string();
+    // 50%の確率で歩くタイプ、50%の確率で飛ぶタイプ
+    let is_walk = rng.gen_bool(0.5);
+    
+    let animation_type = if is_walk {
+        // 歩くタイプの動き
+        let walk_types = vec!["normal", "slow", "fast"];
+        walk_types[rng.gen_range(0..walk_types.len())].to_string()
+    } else {
+        // 飛ぶタイプの動き
+        let fly_types = vec!["float", "bounce", "rotate", "swim"];
+        fly_types[rng.gen_range(0..fly_types.len())].to_string()
+    };
     
     AnimationSettings {
         animation_type,
-        speed: 0.5 + (seed % 100) as f32 / 100.0, // 0.5 ~ 1.5
-        position_x: (seed % 80) as f32 + 10.0, // 10 ~ 90
-        position_y: (seed % 60) as f32 + 20.0, // 20 ~ 80
-        size: 0.8 + (seed % 40) as f32 / 100.0, // 0.8 ~ 1.2
+        speed: rng.gen_range(0.5..=1.5), // 0.5 ~ 1.5
+        size: rng.gen_range(0.8..=1.2), // 0.8 ~ 1.2
     }
 }

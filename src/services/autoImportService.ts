@@ -22,13 +22,12 @@ interface AutoImportError {
 interface AnimationSettings {
   animation_type: string;
   speed: number;
-  position_x: number;
-  position_y: number;
   size: number;
 }
 
 export class AutoImportService {
   private static instance: AutoImportService;
+  private static isStarting = false; // 開始中フラグを追加
   private isWatching = false;
   private unlisteners: Array<() => void> = [];
   private processingImages = new Map<string, { path: string, startTime: number }>();
@@ -43,10 +42,13 @@ export class AutoImportService {
   }
 
   async startWatching(watchPath: string): Promise<void> {
-    if (this.isWatching) {
-      console.warn('Already watching a folder');
+    if (this.isWatching || AutoImportService.isStarting) {
+      console.warn('Already watching or starting to watch a folder');
       return;
     }
+
+    AutoImportService.isStarting = true;
+    console.log('[AutoImportService] Starting folder watching:', watchPath);
 
     try {
       // Rust側でフォルダ監視を開始
@@ -78,12 +80,21 @@ export class AutoImportService {
     } catch (error) {
       console.error('Failed to start folder watching:', error);
       throw error;
+    } finally {
+      AutoImportService.isStarting = false;
     }
   }
 
   async stopWatching(): Promise<void> {
     if (!this.isWatching) {
       return;
+    }
+
+    // Rust側のfile watcherを停止
+    try {
+      await invoke('stop_folder_watching');
+    } catch (error) {
+      console.error('Failed to stop folder watching:', error);
     }
 
     // すべてのイベントリスナーを解除
@@ -141,11 +152,15 @@ export class AutoImportService {
         file_path: processed_path
       });
 
+      // アニメーションタイプから動きタイプを判定
+      const walkTypes = ['normal', 'slow', 'fast'];
+      const isWalkType = walkTypes.includes(animation_settings.animation_type);
+      
       // アニメーション設定を保存
       await MovementSettingsService.saveMovementSettings({
         image_id,
-        movement_type: animation_settings.animation_type,
-        movement_pattern: 'default',
+        movement_type: isWalkType ? 'walk' : 'fly',
+        movement_pattern: animation_settings.animation_type,
         speed: animation_settings.speed,
         size: animation_settings.size.toString(),
         created_at: new Date().toISOString(),

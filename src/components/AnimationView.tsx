@@ -8,6 +8,7 @@ import {
   textEmotes,
   svgEmotes,
 } from '../services/animationSettings';
+import { useWorkspaceStore } from '../stores/workspaceStore';
 import styles from './AnimationView.module.scss';
 
 const noise2D = createNoise2D();
@@ -22,23 +23,33 @@ interface AnimationViewProps {
     size: string;
     speed: number;
   }>;
-  groundPosition?: number;
-  backgroundUrl?: string | null;
-  backgroundType?: string;
   onImageClick?: (imageId: string) => void;
 }
 
 const AnimationView: React.FC<AnimationViewProps> = ({ 
   images: inputImages, 
-  groundPosition = 80,
-  backgroundUrl,
-  backgroundType = 'image',
   onImageClick 
 }) => {
+  // Zustandストアから直接状態を取得
+  const {
+    deletionTime,
+    groundPosition,
+    backgroundUrl,
+    backgroundType
+  } = useWorkspaceStore();
+  
   const [animatedImages, setAnimatedImages] = useState<AnimatedImage[]>([]);
   const animatedImagesRef = useRef<Record<string, AnimatedImage>>({});
   const animationRef = useRef<number>();
   const canvasRef = useRef<HTMLDivElement>(null);
+  
+  // デバッグログ：地面位置の確認
+  useEffect(() => {
+    console.log('[AnimationView] 地面位置が変更されました:', groundPosition);
+  }, [groundPosition]);
+  console.log('[AnimationView] 削除時間:', deletionTime);
+  
+  // Zustandストアが削除時間を管理しているため、読み込みとイベントリスナーは不要
   
 
   // 特殊な動きを管理する関数
@@ -112,13 +123,28 @@ const AnimationView: React.FC<AnimationViewProps> = ({
 
   // 画像を初期化
   const initializeImage = useCallback((data: any): AnimatedImage => {
+    // Y座標を動的に計算
+    let initialY: number;
+    if (data.type === 'walk') {
+      // 歩くタイプは常に現在の地面位置
+      initialY = groundPosition;
+      console.log(`[AnimationView] 歩く画像 ${data.id} を地面位置 ${groundPosition} に配置`);
+    } else {
+      // 飛ぶタイプは地面位置を考慮してランダムに配置
+      const minY = 10;
+      const maxY = Math.max(groundPosition - 10, minY + 10);
+      initialY = Math.random() * (maxY - minY) + minY;
+    }
+    
     return {
       ...data,
       x: Math.random() * 80 + 10,
-      y: data.type === 'walk' ? groundPosition : Math.random() * (groundPosition - 20) + 10,
+      y: initialY,
       velocityX: (Math.random() - 0.5) * 0.5,
       velocityY: data.type === 'walk' ? 0 : (Math.random() - 0.5) * 0.5,
       scale: 1,
+      createdAt: Date.now(), // 画像が作成された時刻を記録
+      deletionTime: deletionTime, // 現在の削除時間設定を適用
       rotation: 0,
       zRotation: 0,
       flipped: false,
@@ -134,7 +160,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       isNewImage: false,
       specialMovementCooldown: 0,
     };
-  }, [groundPosition]);
+  }, [groundPosition, deletionTime]);
 
   // 画像を移動
   const moveImage = useCallback((image: AnimatedImage): AnimatedImage => {
@@ -254,14 +280,33 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   // アニメーションループ
   useEffect(() => {
     function animate() {
-      const updatedImages = Object.values(animatedImagesRef.current).map(image => moveImage(image));
+      const currentTime = Date.now();
+      const updatedImages: AnimatedImage[] = [];
       
-      animatedImagesRef.current = updatedImages.reduce((acc, img) => {
+      const deletionTimeMs = (deletionTime !== 'unlimited')
+        ? parseInt(deletionTime) * 60 * 1000
+        : -1;
+
+      for (const image of Object.values(animatedImagesRef.current)) {
+        // 削除チェック
+        if (deletionTimeMs > 0 && image.createdAt && currentTime - image.createdAt >= deletionTimeMs) {
+          console.log(`[AnimationView] 画像 ${image.id} を削除時間経過により削除`);
+          continue; // この画像は更新リストに追加しない
+        }
+
+        // 画像の移動処理
+        updatedImages.push(moveImage(image));
+      }
+
+      // 参照(ref)と状態(state)を更新
+      const newImageMap = updatedImages.reduce((acc, img) => {
         acc[img.id] = img;
         return acc;
       }, {} as Record<string, AnimatedImage>);
 
+      animatedImagesRef.current = newImageMap;
       setAnimatedImages(updatedImages);
+
       animationRef.current = requestAnimationFrame(animate);
     }
 
@@ -272,7 +317,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [moveImage]);
+  }, [moveImage, deletionTime]);
 
   // 入力画像が変更されたら初期化
   useEffect(() => {
@@ -301,6 +346,25 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       return acc;
     }, {} as Record<string, AnimatedImage>);
   }, [inputImages, initializeImage]);
+
+  // 地面位置が変更されたら歩くタイプの画像の位置を更新
+  useEffect(() => {
+    const updatedImages = Object.values(animatedImagesRef.current).map(img => {
+      if (img.type === 'walk') {
+        // 歩くタイプは新しい地面位置に移動
+        return {
+          ...img,
+          y: groundPosition
+        };
+      }
+      return img;
+    });
+
+    animatedImagesRef.current = updatedImages.reduce((acc, img) => {
+      acc[img.id] = img;
+      return acc;
+    }, {} as Record<string, AnimatedImage>);
+  }, [groundPosition]);
 
   // デバッグ用のスタイル情報
   const containerStyle = backgroundUrl && backgroundType === 'image' 

@@ -3,39 +3,62 @@ import { open, confirm } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { AudioSettings } from './AudioSettings';
 import { GroundSetting } from './GroundSetting';
-import { 
-  AppSettingsService
-} from '../services/database';
 
 console.log('[SettingsPage] Starting imports...');
 
-import { AutoImportService } from '../services/autoImportService';
-
-console.log('[SettingsPage] AutoImportService imported');
-
-import { emit } from '@tauri-apps/api/event';
+import { emit, listen } from '@tauri-apps/api/event';
 import { getAllMetadata, loadImage, deleteImage, saveBackgroundFile } from '../services/imageStorage';
 import { WorkspaceManager } from '../services/workspaceManager';
+import { useWorkspaceStore } from '../stores/workspaceStore';
 import styles from './SettingsPage.module.scss';
 
 console.log('[SettingsPage] All imports completed');
 
 export function SettingsPage() {
-  const [currentWorkspace, setCurrentWorkspace] = useState<string>('');
-  const [groundPosition, setGroundPosition] = useState(80);
-  const [deletionTime, setDeletionTime] = useState('unlimited');
+  // Zustandストアから状態を取得
+  const { 
+    currentWorkspace, 
+    groundPosition, 
+    deletionTime, 
+    backgroundUrl,
+    backgroundType,
+    setGroundPosition, 
+    setDeletionTime,
+    setBackground 
+  } = useWorkspaceStore();
+  
   const [isAnimationWindowOpen, setIsAnimationWindowOpen] = useState(false);
-  const [currentBackground, setCurrentBackground] = useState<{url: string, type: 'image' | 'video'} | null>(null);
   const [isChangingWorkspace, setIsChangingWorkspace] = useState(false);
   
   // 背景アップロード関連のstate
   const [uploadingBackground, setUploadingBackground] = useState(false);
   const [backgroundProgress, setBackgroundProgress] = useState(0);
   
-  // 自動取り込み関連のstate
-  const [autoImportEnabled, setAutoImportEnabled] = useState(false);
-  const [autoImportPath, setAutoImportPath] = useState<string | null>(null);
-  const [isStartingAutoImport, setIsStartingAutoImport] = useState(false);
+  const loadSettings = async () => {
+    // Zustandストアがすでに設定を管理しているため、背景画像の読み込みのみ行う
+    console.log('[SettingsPage] 現在の設定:', { 
+      groundPosition, 
+      deletionTime,
+      currentWorkspace
+    });
+    
+    // 背景画像の読み込み
+    try {
+      const metadata = await getAllMetadata();
+      const background = metadata.find(m => (m as any).image_type === 'background');
+      if (background) {
+        console.log('[SettingsPage] Loading background:', background);
+        const backgroundData = await loadImage(background);
+        console.log('[SettingsPage] Background loaded, data URL length:', backgroundData.length);
+        const bgType = background.originalFileName.match(/\.(mp4|mov)$/i) ? 'video' : 'image' as const;
+        setBackground(backgroundData, bgType);
+      } else {
+        console.log('[SettingsPage] No background found in metadata');
+      }
+    } catch (error) {
+      console.error('背景画像の読み込みエラー:', error);
+    }
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -67,66 +90,59 @@ export function SettingsPage() {
     init();
   }, []);
 
-  const loadSettings = async () => {
-    try {
-      // ワークスペース情報を取得
-      const manager = WorkspaceManager.getInstance();
-      const workspace = manager.getCurrentWorkspace();
-      if (workspace) {
-        setCurrentWorkspace(workspace);
+  // ワークスペース変更を監視
+  useEffect(() => {
+    const unlistenPromise = listen('workspace-data-loaded', async () => {
+      console.log('[SettingsPage] ワークスペースデータ読み込み完了を検知');
+      // 設定を再読み込み
+      await loadSettings();
+
+      // 背景画像も再読み込み
+      try {
+        const metadata = await getAllMetadata();
+        const backgroundMeta = metadata.find(m => (m as any).image_type === 'background');
+        if (backgroundMeta) {
+          const backgroundData = await loadImage(backgroundMeta);
+          const bgType = backgroundMeta.originalFileName.match(/\.(mp4|mov)$/i) ? 'video' : 'image' as const;
+          setBackground(backgroundData, bgType);
+        } else {
+          setBackground(null, 'image');
+        }
+      } catch (error) {
+        console.error('[SettingsPage] 背景画像の再読み込みエラー:', error);
       }
-      
-      // 全ての設定を一括で取得（パフォーマンス向上）
-      const allSettings = await AppSettingsService.getAllSettings();
-      
-      setGroundPosition(allSettings.groundPosition);
-      setDeletionTime(allSettings.deletionTime);
-      
-      // 自動取り込み設定を読み込み
-      const autoImportService = AutoImportService.getInstance();
-      const importPath = await AppSettingsService.getAutoImportPath();
-      const importEnabled = await AppSettingsService.getAutoImportEnabled();
-      setAutoImportPath(importPath);
-      setAutoImportEnabled(importEnabled && autoImportService.isCurrentlyWatching());
-      
-      console.log('[SettingsPage] 設定を読み込みました:', allSettings);
-    } catch (error) {
-      console.error('[SettingsPage] 設定の読み込みに失敗しました:', error);
-      // エラー時はデフォルト値を設定
-      setGroundPosition(80);
-      setDeletionTime('unlimited');
-    }
-    
-    // 背景画像の読み込み
-    try {
-      const metadata = await getAllMetadata();
-      const background = metadata.find(m => (m as any).image_type === 'background');
-      if (background) {
-        console.log('[SettingsPage] Loading background:', background);
-        const backgroundData = await loadImage(background);
-        console.log('[SettingsPage] Background loaded, data URL length:', backgroundData.length);
-        setCurrentBackground({
-          url: backgroundData,
-          type: background.originalFileName.match(/\.(mp4|mov)$/i) ? 'video' : 'image'
-        });
-      } else {
-        console.log('[SettingsPage] No background found in metadata');
-      }
-    } catch (error) {
-      console.error('背景画像の読み込みエラー:', error);
-    }
-  };
+    });
+
+    return () => {
+      unlistenPromise.then(unlisten => unlisten());
+    };
+  }, [loadSettings, setBackground]);
 
   const handleGroundPositionChange = async (value: number) => {
+    // Zustandストアを更新
     setGroundPosition(value);
-    await AppSettingsService.updateGroundPosition(value);
-    emit('ground-position-change', value);
+    
+    // WorkspaceManagerを使用して設定を保存
+    try {
+      const manager = WorkspaceManager.getInstance();
+      await manager.saveWorkspaceSettings({ groundPosition: value });
+    } catch (error) {
+      console.error('[SettingsPage] 地面位置の保存エラー:', error);
+    }
   };
 
   const handleDeletionTimeChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newTime = e.target.value;
+    // Zustandストアを更新
     setDeletionTime(newTime);
-    await AppSettingsService.saveDeletionTime(newTime);
+    
+    // WorkspaceManagerのみに保存（責務の一元化）
+    try {
+      const manager = WorkspaceManager.getInstance();
+      await manager.saveWorkspaceSettings({ deletionTime: newTime });
+    } catch (error) {
+      console.error('[SettingsPage] 削除時間の保存エラー:', error);
+    }
   };
 
   const handleBackgroundSelect = async () => {
@@ -210,7 +226,7 @@ export function SettingsPage() {
 
 
   const handleRemoveBackground = async () => {
-    if (!currentBackground) return;
+    if (!backgroundUrl) return;
     
     const confirmed = await confirm('現在の背景を削除しますか？');
     if (!confirmed) return;
@@ -220,7 +236,7 @@ export function SettingsPage() {
       const background = metadata.find(m => (m as any).image_type === 'background');
       if (background) {
         await deleteImage(background);
-        setCurrentBackground(null);
+        setBackground(null, 'image');
         emit('background-change');
       }
     } catch (error) {
@@ -265,14 +281,9 @@ export function SettingsPage() {
       });
 
       if (selected && typeof selected === 'string') {
-        // ワークスペースを切り替え
+        // ワークスペースを切り替えるだけ
+        // UIの更新はZustandストアとイベントリスナーが自動的に処理する
         await WorkspaceManager.getInstance().switchWorkspace(selected);
-        
-        // ワークスペース情報を更新
-        setCurrentWorkspace(selected);
-        
-        // 設定を再読み込み
-        await loadSettings();
       }
     } catch (error) {
       console.error('ワークスペース変更エラー:', error);
@@ -307,80 +318,6 @@ export function SettingsPage() {
         </div>
       </section>
 
-      {/* ステップ1.5: 自動取り込み設定 */}
-      <section className={styles.section}>
-        <h2>ステップ1.5: 自動取り込み設定（オプション）</h2>
-        <div className={styles.autoImportSettings}>
-          <div className={styles.autoImportPath}>
-            <p>監視フォルダ: {autoImportPath || '未設定'}</p>
-            <button
-              className={styles.selectFolderButton}
-              onClick={async () => {
-                try {
-                  const selected = await open({
-                    directory: true,
-                    multiple: false,
-                    title: '監視するフォルダを選択'
-                  });
-                  
-                  if (selected && typeof selected === 'string') {
-                    setAutoImportPath(selected);
-                    await AppSettingsService.setAutoImportPath(selected);
-                  }
-                } catch (error) {
-                  console.error('フォルダ選択エラー:', error);
-                  alert('フォルダの選択に失敗しました');
-                }
-              }}
-            >
-              フォルダを選択
-            </button>
-          </div>
-          
-          <div className={styles.autoImportToggle}>
-            <label>
-              <input
-                type="checkbox"
-                checked={autoImportEnabled}
-                onChange={async (e) => {
-                  const enabled = e.target.checked;
-                  
-                  if (enabled) {
-                    if (!autoImportPath) {
-                      alert('先に監視フォルダを選択してください');
-                      return;
-                    }
-                    
-                    try {
-                      setIsStartingAutoImport(true);
-                      const autoImportService = AutoImportService.getInstance();
-                      await autoImportService.startWatching(autoImportPath);
-                      setAutoImportEnabled(true);
-                    } catch (error) {
-                      console.error('自動取り込み開始エラー:', error);
-                      alert('自動取り込みの開始に失敗しました');
-                      setAutoImportEnabled(false);
-                    } finally {
-                      setIsStartingAutoImport(false);
-                    }
-                  } else {
-                    const autoImportService = AutoImportService.getInstance();
-                    await autoImportService.stopWatching();
-                    setAutoImportEnabled(false);
-                  }
-                }}
-                disabled={isStartingAutoImport}
-              />
-              {isStartingAutoImport ? '開始中...' : '自動取り込みを有効にする'}
-            </label>
-          </div>
-          
-          <div className={styles.note}>
-            <p>※ 指定したフォルダに画像ファイルが追加されると、自動的に背景除去してアニメーションに追加します。</p>
-            <p>※ スキャナーの保存先フォルダを指定すると便利です。</p>
-          </div>
-        </div>
-      </section>
 
       {/* ステップ2: 背景の設定 */}
       <section className={styles.section}>
@@ -405,13 +342,13 @@ export function SettingsPage() {
               </div>
             )}
             
-            {currentBackground && (
+            {backgroundUrl && (
               <div className={styles.currentBackground}>
                 <h4>現在の背景</h4>
                 <div className={styles.backgroundPreview}>
-                  {currentBackground.type === 'video' ? (
+                  {backgroundType === 'video' ? (
                     <video 
-                      src={currentBackground.url} 
+                      src={backgroundUrl} 
                       className={styles.previewVideo}
                       autoPlay
                       loop
@@ -419,7 +356,7 @@ export function SettingsPage() {
                     />
                   ) : (
                     <img 
-                      src={currentBackground.url} 
+                      src={backgroundUrl} 
                       alt="現在の背景" 
                       className={styles.previewImage}
                     />
@@ -446,10 +383,10 @@ export function SettingsPage() {
       <section className={styles.section}>
         <h2>ステップ3: 地面の位置設定</h2>
         <GroundSetting
-          backgroundUrl={currentBackground?.url}
-          backgroundType={currentBackground?.type}
+          backgroundUrl={backgroundUrl || undefined}
+          backgroundType={backgroundType}
           onGroundPositionChange={handleGroundPositionChange}
-          initialGroundPosition={groundPosition}
+          groundPosition={groundPosition}
         />
         <div className={styles.note}>
           <p>赤線をドラッグして地面の位置を調整して下さい。(スマートフォンの場合はタップして下さい。)</p>

@@ -209,17 +209,6 @@ export class AppSettingsService {
     return result;
   }
 
-  // 地面位置の保存
-  static async saveGroundPosition(position: number): Promise<void> {
-    await AppSettingsService.saveAppSetting('ground_position', position.toString());
-  }
-
-  // 地面位置の取得
-  static async getGroundPosition(): Promise<number> {
-    const value = await AppSettingsService.getAppSetting('ground_position');
-    return value ? parseInt(value, 10) : 50; // デフォルト値は50
-  }
-
   // 削除時間の保存
   static async saveDeletionTime(time: string): Promise<void> {
     await AppSettingsService.saveAppSetting('deletion_time', time);
@@ -229,11 +218,6 @@ export class AppSettingsService {
   static async getDeletionTime(): Promise<string> {
     const value = await AppSettingsService.getAppSetting('deletion_time');
     return value || 'unlimited';
-  }
-
-  // 地面位置の更新（エイリアス）
-  static async updateGroundPosition(position: number): Promise<void> {
-    await AppSettingsService.saveGroundPosition(position);
   }
 
   // 設定の取得（フォルダ設定用）

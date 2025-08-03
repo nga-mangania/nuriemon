@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { getAllMetadata, loadImage } from '../services/imageStorage';
 import { getAllMovementSettings } from '../services/movementStorage';
+import { listen } from '@tauri-apps/api/event';
 
 export const useAnimationData = () => {
   const [animatedImages, setAnimatedImages] = useState<any[]>([]);
@@ -71,6 +72,18 @@ export const useAnimationData = () => {
       return validImages;
     });
   }, [isFirstLoad]);
+
+  // バックエンドからの更新通知をリッスン
+  useEffect(() => {
+    const unlistenPromise = listen('image-list-updated', () => {
+      console.log('[useAnimationData] Image list update event received.');
+      updateImages();
+    });
+
+    return () => {
+      unlistenPromise.then(unlisten => unlisten());
+    };
+  }, [updateImages]);
 
   return {
     animatedImages,

@@ -5,16 +5,15 @@ interface GroundSettingProps {
   backgroundUrl?: string;
   backgroundType?: string;
   onGroundPositionChange: (position: number) => void;
-  initialGroundPosition?: number;
+  groundPosition: number; // initialGroundPositionからgroundPositionに変更
 }
 
 export function GroundSetting({ 
   backgroundUrl, 
   backgroundType, 
   onGroundPositionChange,
-  initialGroundPosition = 50 
+  groundPosition = 50 
 }: GroundSettingProps) {
-  const [groundPosition, setGroundPosition] = useState(initialGroundPosition);
   const [isDragging, setIsDragging] = useState(false);
 
   // デバッグ用ログ
@@ -24,13 +23,9 @@ export function GroundSetting({
       backgroundType,
       urlLength: backgroundUrl?.length || 0,
       urlPreview: backgroundUrl ? `${backgroundUrl.substring(0, 100)}...` : 'null',
-      initialGroundPosition
+      groundPosition
     });
-  }, [backgroundUrl, backgroundType, initialGroundPosition]);
-
-  useEffect(() => {
-    setGroundPosition(initialGroundPosition);
-  }, [initialGroundPosition]);
+  }, [backgroundUrl, backgroundType, groundPosition]);
 
   const handleMouseDown = () => {
     setIsDragging(true);
@@ -47,7 +42,7 @@ export function GroundSetting({
     const y = e.clientY - rect.top;
     const percentage = Math.max(0, Math.min(100, (y / rect.height) * 100));
     
-    setGroundPosition(percentage);
+    // 内部状態を更新せず、直接親コンポーネントに通知
     onGroundPositionChange(percentage);
   };
 
@@ -56,7 +51,7 @@ export function GroundSetting({
     const y = e.clientY - rect.top;
     const percentage = Math.max(0, Math.min(100, (y / rect.height) * 100));
     
-    setGroundPosition(percentage);
+    // 内部状態を更新せず、直接親コンポーネントに通知
     onGroundPositionChange(percentage);
   };
 

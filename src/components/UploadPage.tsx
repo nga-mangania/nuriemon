@@ -7,6 +7,7 @@ import { saveImage } from '../services/imageStorage';
 import { AppSettingsService } from '../services/database';
 import { saveMovementSettings } from '../services/movementStorage';
 import { MovementSettings } from './MovementSettings';
+import { AutoImportService } from '../services/autoImportService';
 import styles from './UploadPage.module.scss';
 
 export function UploadPage() {
@@ -26,16 +27,30 @@ export function UploadPage() {
     size: 'medium'
   });
 
+  // 自動取り込み関連のstate
+  const [autoImportEnabled, setAutoImportEnabled] = useState(false);
+  const [autoImportPath, setAutoImportPath] = useState<string | null>(null);
+  const [isStartingAutoImport, setIsStartingAutoImport] = useState(false);
+
+  // loadUserSettings関数を外部定義
+  const loadUserSettings = async () => {
+    // 動き設定の読み込み（現在は設定に保存されていない）
+    // TODO: 動き設定を別途管理する仕組みが必要
+    
+    // フォルダ設定を読み込み（表示用）
+    const settings = await AppSettingsService.getSettings();
+    console.log('[UploadPage] 現在の保存設定:', settings);
+    
+    // 自動取り込み設定を読み込み
+    const autoImportService = AutoImportService.getInstance();
+    const importPath = await AppSettingsService.getAutoImportPath();
+    const importEnabled = await AppSettingsService.getAutoImportEnabled();
+    setAutoImportPath(importPath);
+    setAutoImportEnabled(importEnabled && autoImportService.isCurrentlyWatching());
+  };
+
   // 設定を読み込み
   useEffect(() => {
-    const loadUserSettings = async () => {
-      // 動き設定の読み込み（現在は設定に保存されていない）
-      // TODO: 動き設定を別途管理する仕組みが必要
-      
-      // フォルダ設定を読み込み（表示用）
-      const settings = await AppSettingsService.getSettings();
-      console.log('[UploadPage] 現在の保存設定:', settings);
-    };
     loadUserSettings();
 
     const unlistenPromise = listen<{value: number}>('image-processing-progress', (event) => {
@@ -49,11 +64,43 @@ export function UploadPage() {
       await loadUserSettings();
     });
 
+    // ワークスペース変更イベントをリッスン
+    const workspaceUnlistenPromise = listen('workspace-data-loaded', async () => {
+      console.log('[UploadPage] ワークスペースデータ読み込み完了を検知');
+      // 設定を再読み込み
+      await loadUserSettings();
+      
+      // 自動取り込みが有効な場合は再開始が必要
+      const autoImportService = AutoImportService.getInstance();
+      const currentPath = await AppSettingsService.getAutoImportPath();
+      const currentEnabled = await AppSettingsService.getAutoImportEnabled();
+      
+      console.log('[UploadPage] 自動取り込み状態:', {
+        enabled: currentEnabled,
+        path: currentPath,
+        isWatching: autoImportService.isCurrentlyWatching()
+      });
+      
+      if (currentEnabled && currentPath) {
+        console.log('[UploadPage] 自動取り込みを再開始します');
+        try {
+          // 一旦停止してから再開始
+          await autoImportService.stopWatching();
+          // Rust側で新しいワークスペースパスを使うように再開始
+          await autoImportService.startWatching(currentPath);
+          console.log('[UploadPage] 自動取り込み再開始完了');
+        } catch (error) {
+          console.error('[UploadPage] 自動取り込み再開始エラー:', error);
+        }
+      }
+    });
+
     return () => {
       unlistenPromise.then(f => f());
       settingsUnlistenPromise.then(f => f());
+      workspaceUnlistenPromise.then(f => f());
     };
-  }, []);
+  }, []); // 依存配列から削除
 
   // お絵かきアップロード
   const handleImageSelect = async () => {
@@ -198,6 +245,90 @@ export function UploadPage() {
             <p>対応ファイル：jpg、png(10MB以下)</p>
             <p>※画面を動く速さを0にするとその場に留まります。</p>
             <p>※アップロード時に自動的に背景が除去されます。</p>
+          </div>
+        </div>
+
+        {/* 区切り線 */}
+        <div className={styles.divider}>
+          <span>または</span>
+        </div>
+
+        {/* 自動取り込み設定 */}
+        <div className={styles.autoImportSection}>
+          <h2>📁 フォルダを監視して自動取り込み</h2>
+          
+          <div className={styles.autoImportSettings}>
+            <div className={styles.autoImportPath}>
+              <p>監視フォルダ: {autoImportPath || '未設定'}</p>
+              <button
+                className={styles.selectFolderButton}
+                onClick={async () => {
+                  try {
+                    const selected = await open({
+                      directory: true,
+                      multiple: false,
+                      title: '監視するフォルダを選択'
+                    });
+                    
+                    if (selected && typeof selected === 'string') {
+                      setAutoImportPath(selected);
+                      await AppSettingsService.setAutoImportPath(selected);
+                    }
+                  } catch (error) {
+                    console.error('フォルダ選択エラー:', error);
+                    alert('フォルダの選択に失敗しました');
+                  }
+                }}
+              >
+                フォルダを選択
+              </button>
+            </div>
+            
+            <div className={styles.autoImportToggle}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={autoImportEnabled}
+                  onChange={async (e) => {
+                    const enabled = e.target.checked;
+                    
+                    if (enabled) {
+                      if (!autoImportPath) {
+                        alert('先に監視フォルダを選択してください');
+                        return;
+                      }
+                      
+                      try {
+                        setIsStartingAutoImport(true);
+                        const autoImportService = AutoImportService.getInstance();
+                        await autoImportService.startWatching(autoImportPath);
+                        setAutoImportEnabled(true);
+                      } catch (error) {
+                        console.error('自動取り込み開始エラー:', error);
+                        alert('自動取り込みの開始に失敗しました');
+                        setAutoImportEnabled(false);
+                      } finally {
+                        setIsStartingAutoImport(false);
+                      }
+                    } else {
+                      const autoImportService = AutoImportService.getInstance();
+                      await autoImportService.stopWatching();
+                      setAutoImportEnabled(false);
+                    }
+                  }}
+                  disabled={isStartingAutoImport}
+                />
+                {isStartingAutoImport ? '開始中...' : '監視を開始'}
+              </label>
+              {autoImportEnabled && (
+                <span className={styles.statusBadge}>監視中</span>
+              )}
+            </div>
+          </div>
+          
+          <div className={styles.note}>
+            <p>💡 新しい画像が追加されると自動的に背景除去して処理されます</p>
+            <p>※ スキャナーの保存先フォルダを指定すると便利です</p>
           </div>
         </div>
       </div>

@@ -530,6 +530,9 @@ fn start_folder_watching(
     // 現在のワークスペースパスを取得（絶対パス）
     let conn = workspace.lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    
+    println!("[Rust] start_folder_watching - current_path: {:?}", conn.current_path);
+    
     let workspace_path = conn.current_path.as_ref()
         .ok_or("ワークスペースが選択されていません".to_string())?
         .parent()  // .nuriemonディレクトリの親を取得
@@ -538,11 +541,21 @@ fn start_folder_watching(
         .to_string_lossy()
         .to_string();
     
+    println!("[Rust] start_folder_watching - watch_path: {}", watch_path);
+    println!("[Rust] start_folder_watching - workspace_path: {}", workspace_path);
+    
     file_watcher::start_folder_watching(
         state.app_handle.clone(),
         watch_path,
         workspace_path
     )
+}
+
+// フォルダ監視の停止
+#[tauri::command]
+fn stop_folder_watching() -> Result<(), String> {
+    file_watcher::stop_folder_watching();
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -594,7 +607,8 @@ pub fn run() {
             workspace::save_global_setting,
             workspace::get_global_setting,
             // フォルダ監視
-            start_folder_watching
+            start_folder_watching,
+            stop_folder_watching
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

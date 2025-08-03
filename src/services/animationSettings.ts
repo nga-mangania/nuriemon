@@ -152,6 +152,8 @@ export interface AnimatedImage {
   emote?: Emote | null;
   emoteTimer?: number;
   lastUpdateTime?: number;
+  createdAt?: number; // 画像が追加された時刻
+  deletionTime?: string; // 削除時間設定（'unlimited', '1', '2', etc.）
 }
 
 export interface SpecialMovement {

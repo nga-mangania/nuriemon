@@ -2,14 +2,16 @@ import React, { useEffect, useState, useCallback } from 'react';
 import AnimationView from './AnimationView';
 import { useAudio } from '../hooks/useAudio';
 import { useAnimationData } from '../hooks/useAnimationData';
-import { AppSettingsService } from '../services/database';
-import { useDataChangeListener } from '../events/useDataChangeListener';
+import { useWorkspaceStore } from '../stores/workspaceStore';
+import { listen } from '@tauri-apps/api/event';
 import styles from './AnimationPage.module.scss';
 
 const AnimationPageSimple: React.FC = () => {
-  const [groundPosition, setGroundPosition] = useState(80);
-  const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
-  const [backgroundType, setBackgroundType] = useState<string>('image');
+  // Zustandストアから状態を取得（setGroundPositionとsetBackgroundのみ使用）
+  const { 
+    setBackground 
+  } = useWorkspaceStore();
+  
   const [isInitialized, setIsInitialized] = useState(false);
 
   const { 
@@ -35,21 +37,20 @@ const AnimationPageSimple: React.FC = () => {
       const background = metadata.find(m => (m as any).image_type === 'background');
       if (background) {
         const backgroundData = await loadImage(background);
-        setBackgroundUrl(backgroundData);
-        setBackgroundType(background.originalFileName.match(/\.(mp4|mov)$/i) ? 'video' : 'image');
+        const bgType = background.originalFileName.match(/\.(mp4|mov)$/i) ? 'video' : 'image' as const;
+        setBackground(backgroundData, bgType);
       } else {
-        setBackgroundUrl(null);
+        setBackground(null, 'image');
       }
     } catch (error) {
       console.error('背景の読み込みエラー:', error);
     }
-  }, []);
+  }, [setBackground]);
 
   // --- 初期化処理 ---
   useEffect(() => {
     const initialize = async () => {
-      const position = await AppSettingsService.getGroundPosition();
-      setGroundPosition(position);
+      // Zustandストアが既に設定を管理しているため、背景とオーディオの読み込みのみ行う
       await loadBackground();
       await loadAudioFiles();
       await updateImages(true); // 初期ロードフラグをtrueで渡す
@@ -59,33 +60,32 @@ const AnimationPageSimple: React.FC = () => {
   }, [loadBackground, loadAudioFiles, updateImages]);
 
   // --- イベントハンドラ ---
-  const handleImageChange = useCallback(async () => {
-    // ファイルシステムへの書き込み完了を待つ
-    await new Promise(resolve => setTimeout(resolve, 500));
-    await updateImages();
-  }, [updateImages]);
+  // data-changedイベントリスナーは削除（Zustandストアへの統一のため）
+  // 画像、オーディオ、背景の変更は必要に応じて別のTauriイベントで通知される
+  // 地面位置の変更はZustandストアから直接購読される
 
-  const handleAudioChange = useCallback(async () => {
-    await loadAudioFiles();
-  }, [loadAudioFiles]);
+  // --- ワークスペース変更を監視 ---
+  useEffect(() => {
+    const unlisteners: Array<() => void> = [];
 
-  const handleBackgroundChange = useCallback(async () => {
-    await loadBackground();
-  }, [loadBackground]);
+    const setupListeners = async () => {
+      // ワークスペースデータ読み込み完了時
+      const unlisten1 = await listen('workspace-data-loaded', async () => {
+        console.log('[AnimationPageSimple] ワークスペースデータ読み込み完了を検知');
+        // Zustandストアが自動的に更新されるため、背景とオーディオ、画像のみ再読み込み
+        await loadBackground();
+        await loadAudioFiles();
+        await updateImages();
+      });
+      unlisteners.push(unlisten1);
+    };
 
-  const handleGroundPositionChange = useCallback((position: number) => {
-    setGroundPosition(position);
-  }, []);
+    setupListeners();
 
-  // --- イベントリスナーの設定 ---
-  useDataChangeListener({
-    onImageAdded: handleImageChange,
-    onImageDeleted: handleImageChange,
-    onAudioUpdated: handleAudioChange,
-    onBackgroundChanged: handleBackgroundChange,
-    onAnimationSettingsChanged: handleImageChange,
-    onGroundPositionChanged: handleGroundPositionChange,
-  });
+    return () => {
+      unlisteners.forEach(unlisten => unlisten());
+    };
+  }, [loadBackground, loadAudioFiles, updateImages]);
 
   return (
     <div className={styles.animationPage}>
@@ -94,9 +94,6 @@ const AnimationPageSimple: React.FC = () => {
       
       <AnimationView
         images={animatedImages}
-        groundPosition={groundPosition}
-        backgroundUrl={backgroundUrl}
-        backgroundType={backgroundType}
       />
       
       {audioPermissionNeeded && (
