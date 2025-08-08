@@ -17,7 +17,10 @@
       "Bash(npx tsc:*)",
       "Bash(npm install:*)",
       "Bash(find:*)",
-      "Bash(cargo:*)"
+      "Bash(cargo:*)",
+      "Bash(npm search:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npm run:*)"
     ],
     "deny": []
   }

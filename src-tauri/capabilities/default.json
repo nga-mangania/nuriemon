@@ -1,45 +1,31 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main and animation windows",
-  "windows": ["main", "animation"],
+  "description": "Default permissions",
+  "windows": ["main", "animation", "qr-display"],
   "permissions": [
-    "core:event:allow-listen",
-    "core:default",
-    "core:webview:allow-create-webview-window",
+    "core:path:default",
+    "core:event:default",
     "core:window:default",
-    "opener:default",
+    "core:app:default",
+    "core:resources:default",
+    "core:menu:default",
+    "core:tray:default",
+    "store:default",
     "dialog:default",
     "fs:default",
-    "fs:allow-read",
-    "fs:allow-write",
-    "fs:allow-exists",
-    "fs:allow-create",
-    "fs:allow-remove",
-    "fs:allow-mkdir",
     "fs:allow-app-read-recursive",
     "fs:allow-app-write-recursive",
-    "fs:allow-appdata-read-recursive",
-    "fs:allow-appdata-write-recursive",
-    "fs:allow-picture-read-recursive",
-    "fs:allow-picture-write-recursive",
     "fs:allow-download-read-recursive",
     "fs:allow-download-write-recursive",
     "fs:allow-document-read-recursive",
     "fs:allow-document-write-recursive",
+    "fs:allow-picture-read-recursive",
+    "fs:allow-picture-write-recursive",
+    "fs:allow-desktop-read-recursive",
+    "fs:allow-desktop-write-recursive",
     "fs:allow-home-read-recursive",
     "fs:allow-home-write-recursive",
-    {
-      "identifier": "fs:scope",
-      "allow": [
-        {
-          "path": "**/.nuriemon/**"
-        },
-        {
-          "path": "**"
-        }
-      ]
-    },
-    "core:path:default"
+    "opener:default"
   ]
 }

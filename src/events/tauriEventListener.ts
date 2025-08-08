@@ -1,6 +1,7 @@
 import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { WorkspaceManager } from '../services/workspaceManager';
+import { DatabaseService } from '../services/database';
 
 export interface DataChangeEvent {
   type: 'ImageAdded' | 'ImageDeleted' | 'AudioUpdated' | 'BackgroundChanged' | 
@@ -30,6 +31,9 @@ export class TauriEventListener {
    * すべてのイベントリスナーをセットアップ
    */
   async setupListeners(): Promise<void> {
+    // 初期画像リストを読み込む
+    await this.updateImageList();
+    
     // data-changedイベントのリスナー
     const dataChangeUnlisten = await listen<DataChangeEvent>('data-changed', (event) => {
       const { type, data } = event.payload;
@@ -57,9 +61,9 @@ export class TauriEventListener {
         case 'ImageAdded':
         case 'ImageDeleted':
         case 'AnimationSettingsChanged':
-          // UIに画像リストの更新が必要であることを通知する
-          console.log(`[TauriEventListener] ${type} event received, emitting image-list-updated`);
-          emit('image-list-updated');
+          // データベースから最新の画像リストを取得してストアを更新
+          console.log(`[TauriEventListener] ${type} event received, updating image list`);
+          this.updateImageList();
           break;
         // 他のイベントタイプは必要に応じて実装
       }
@@ -82,6 +86,43 @@ export class TauriEventListener {
     this.unlisteners.push(workspaceChangedUnlisten);
   }
   
+  /**
+   * データベースから画像リストを取得してストアを更新
+   */
+  private async updateImageList(): Promise<void> {
+    try {
+      // データベースから全画像メタデータを取得
+      const dbImages = await DatabaseService.getAllImages();
+      
+      // データベースの形式からストアの形式に変換
+      const images = dbImages.map(dbImage => ({
+        id: dbImage.id,
+        originalFileName: dbImage.original_file_name,
+        savedFileName: dbImage.saved_file_name,
+        type: dbImage.image_type as 'original' | 'processed',
+        createdAt: dbImage.created_at,
+        size: dbImage.size,
+        width: dbImage.width,
+        height: dbImage.height,
+        file_path: dbImage.file_path
+      }));
+      
+      // processedタイプの画像のみをフィルタ
+      const processedImages = images.filter(img => img.type === 'processed');
+      
+      // ストアを更新
+      const store = useWorkspaceStore.getState();
+      store.setImages(processedImages);
+      
+      console.log(`[TauriEventListener] Updated image list with ${processedImages.length} processed images`);
+      
+      // 他のウィンドウにも通知
+      emit('image-list-updated');
+    } catch (error) {
+      console.error('[TauriEventListener] Failed to update image list:', error);
+    }
+  }
+
   /**
    * すべてのイベントリスナーをクリーンアップ
    */

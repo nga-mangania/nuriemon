@@ -4,15 +4,17 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import AnimationWindow from "./windows/AnimationWindow";
+import { QrDisplayWindow } from "./windows/QrDisplayWindow";
 import "./styles/reset.scss";
 
 console.log('[main.tsx] Imports completed');
 
-// URLのハッシュに基づいて適切なコンポーネントを表示
+// ウィンドウタイプの判定
 const hash = window.location.hash;
 const isAnimationWindow = hash === '#/animation';
+const isQrDisplayWindow = (window as any).QR_DISPLAY_WINDOW === true;
 
-console.log('[main.tsx] Hash:', hash, 'isAnimationWindow:', isAnimationWindow);
+console.log('[main.tsx] Hash:', hash, 'isAnimationWindow:', isAnimationWindow, 'isQrDisplayWindow:', isQrDisplayWindow);
 
 try {
   const rootElement = document.getElementById("root");
@@ -23,7 +25,8 @@ try {
   } else {
     ReactDOM.createRoot(rootElement as HTMLElement).render(
       <React.StrictMode>
-        {isAnimationWindow ? <AnimationWindow /> : <App />}
+        {isQrDisplayWindow ? <QrDisplayWindow /> : 
+         isAnimationWindow ? <AnimationWindow /> : <App />}
       </React.StrictMode>,
     );
     console.log('[main.tsx] React app rendered');

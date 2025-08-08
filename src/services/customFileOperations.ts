@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { exists, mkdir, readFile, writeFile, remove } from '@tauri-apps/plugin-fs';
 import { loadSettings } from './settings';
 
 /**
@@ -6,23 +6,26 @@ import { loadSettings } from './settings';
  */
 
 export async function ensureDirectory(path: string): Promise<void> {
-  await invoke('ensure_directory', { path });
+  const dirExists = await exists(path);
+  if (!dirExists) {
+    await mkdir(path, { recursive: true });
+  }
 }
 
 export async function writeFileAbsolute(path: string, contents: Uint8Array): Promise<void> {
-  await invoke('write_file_absolute', { 
-    path, 
-    contents: Array.from(contents) 
-  });
+  await writeFile(path, contents);
 }
 
 export async function readFileAbsolute(path: string): Promise<Uint8Array> {
-  const result = await invoke<number[]>('read_file_absolute', { path });
-  return new Uint8Array(result);
+  return await readFile(path);
 }
 
 export async function fileExistsAbsolute(path: string): Promise<boolean> {
-  return await invoke<boolean>('file_exists_absolute', { path });
+  return await exists(path);
+}
+
+export async function deleteFileAbsolute(path: string): Promise<void> {
+  await remove(path);
 }
 
 /**

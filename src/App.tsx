@@ -5,11 +5,13 @@ import { SettingsPage } from "./components/SettingsPage";
 import { Sidebar } from "./components/Sidebar/Sidebar";
 import { initializeStorage } from "./services/imageStorage";
 import { startAutoDeleteService, stopAutoDeleteService } from "./services/autoDelete";
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useWorkspace } from "./hooks/useWorkspace";
 import { WorkspaceSelector } from "./components/WorkspaceSelector";
 import { TauriEventListener } from "./events/tauriEventListener";
+import { rehydrateStore, saveStateToFile, useWorkspaceStore } from "./stores/workspaceStore";
+import { emit } from '@tauri-apps/api/event';
 import styles from "./App.module.scss";
 
 console.log('[App.tsx] Module loaded');
@@ -49,6 +51,8 @@ function App() {
     if (isReady && currentWorkspace) {
       const initialize = async () => {
         try {
+          // ストアを再水和
+          await rehydrateStore();
           await initializeStorage();
           startAutoDeleteService();
           
@@ -107,28 +111,10 @@ function App() {
 
   const handleAnimationClick = async () => {
     try {
-      // 既存のアニメーションウィンドウがあるか確認
-      const existingWindow = await WebviewWindow.getByLabel('animation');
-      
-      if (existingWindow) {
-        // 既存のウィンドウをフォーカス
-        await existingWindow.setFocus();
-      } else {
-        // 新しいウィンドウを作成
-        const animationWindow = new WebviewWindow('animation', {
-          url: '#/animation',
-          title: 'ぬりえもん - アニメーション',
-          width: 1024,
-          height: 768,
-          resizable: true,
-          decorations: true,
-        });
-        
-        // ウィンドウが作成されたらメインウィンドウをアップロードタブに戻す
-        animationWindow.once('tauri://created', () => {
-          setActiveTab('upload');
-        });
-      }
+      // Rustコマンドを使用してアニメーションウィンドウを開く
+      await invoke('open_animation_window');
+      // メインウィンドウをアップロードタブに戻す
+      setActiveTab('upload');
     } catch (error) {
       console.error('アニメーションウィンドウの操作エラー:', error);
     }
@@ -143,6 +129,7 @@ function App() {
   if (needsWorkspace) {
     return <WorkspaceSelector />;
   }
+
 
   // 準備完了したらメインUIを表示
   if (isReady) {
@@ -166,5 +153,15 @@ function App() {
   // フォールバック（通常は到達しない）
   return null;
 }
+
+// Zustandストアの変更を監視して他のウィンドウに通知
+useWorkspaceStore.subscribe(
+  (state) => state.images,
+  (images) => {
+    console.log('[App] Images changed in store, emitting store-updated event');
+    // 画像リストが変更されたら他のウィンドウに通知
+    emit('store-updated');
+  }
+);
 
 export default App;

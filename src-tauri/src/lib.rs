@@ -1,7 +1,7 @@
 use std::process::{Command, Stdio};
 use std::io::{Write, BufRead, BufReader};
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::fs;
 use std::path::Path;
 use tauri::{State, Manager, Emitter};
@@ -10,9 +10,15 @@ mod db;
 mod events;
 mod workspace;
 mod file_watcher;
+mod web_server;
+mod websocket;
+mod qr_manager;
+mod server_state;
 use db::{ImageMetadata, UserSettings, MovementSettings, generate_id, current_timestamp};
 use events::{DataChangeEvent, emit_data_change};
 use workspace::{WorkspaceState, WorkspaceConnection};
+use qr_manager::QrManager;
+use server_state::ServerState;
 
 // Python処理の結果
 #[derive(Serialize, Deserialize, Clone)]
@@ -558,12 +564,133 @@ fn stop_folder_watching() -> Result<(), String> {
     Ok(())
 }
 
+// Webサーバーの起動
+#[tauri::command]
+async fn start_web_server(
+    state: State<'_, AppState>,
+    server_state: State<'_, ServerState>,
+) -> Result<u16, String> {
+    // すでに起動済みの場合はポート番号を返す
+    if let Some(port) = server_state.get_server_port() {
+        return Ok(port);
+    }
+    
+    // Webサーバーを起動
+    let port = web_server::start_web_server(state.app_handle.clone())
+        .await
+        .map_err(|e| format!("Webサーバーの起動に失敗しました: {}", e))?;
+    
+    // QRマネージャーを初期化
+    let qr_manager = Arc::new(QrManager::new(port));
+    server_state.set_qr_manager(qr_manager);
+    
+    // ポート番号を保存
+    server_state.set_server_port(port);
+    
+    Ok(port)
+}
+
+// QRコードの生成
+#[tauri::command]
+fn generate_qr_code(
+    image_id: String,
+    server_state: State<'_, ServerState>,
+) -> Result<serde_json::Value, String> {
+    let qr_manager = server_state.get_qr_manager()
+        .ok_or("Webサーバーが起動していません".to_string())?;
+    
+    let (session_id, qr_code) = qr_manager.create_session(&image_id);
+    
+    Ok(serde_json::json!({
+        "sessionId": session_id,
+        "qrCode": qr_code,
+        "imageId": image_id
+    }))
+}
+
+// QRコードセッションの状態を取得
+#[tauri::command]
+fn get_qr_session_status(
+    session_id: String,
+    server_state: State<'_, ServerState>,
+) -> Result<serde_json::Value, String> {
+    let qr_manager = server_state.get_qr_manager()
+        .ok_or("Webサーバーが起動していません".to_string())?;
+    
+    if let Some((connected, remaining)) = qr_manager.get_session_status(&session_id) {
+        Ok(serde_json::json!({
+            "connected": connected,
+            "remainingSeconds": remaining.as_secs()
+        }))
+    } else {
+        Err("セッションが見つかりません".to_string())
+    }
+}
+
+// QRコード表示ウィンドウを開く
+#[tauri::command]
+async fn open_animation_window(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::webview::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+    
+    // すでにウィンドウが存在する場合は前面に表示
+    if let Some(window) = app.get_webview_window("animation") {
+        window.show().map_err(|e| format!("ウィンドウの表示に失敗しました: {}", e))?;
+        window.set_focus().map_err(|e| format!("ウィンドウのフォーカスに失敗しました: {}", e))?;
+        return Ok(());
+    }
+    
+    // 新しいウィンドウを作成
+    let _window = WebviewWindowBuilder::new(&app, "animation", WebviewUrl::App("#/animation".into()))
+        .inner_size(1024.0, 768.0)
+        .title("ぬりえもん - アニメーション")
+        .resizable(true)
+        .build()
+        .map_err(|e| format!("アニメーションウィンドウの作成に失敗しました: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_qr_window(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::webview::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+    
+    // すでにウィンドウが存在する場合は前面に表示
+    if let Some(window) = app.get_webview_window("qr-display") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    
+    // 新しいウィンドウを作成
+    let window = WebviewWindowBuilder::new(
+        &app,
+        "qr-display",
+        WebviewUrl::App("qr-display.html".into())
+    )
+    .title("QRコード - ぬりえもん")
+    .inner_size(600.0, 700.0)
+    .resizable(true)
+    .build()
+    .map_err(|e| format!("ウィンドウの作成に失敗しました: {}", e))?;
+    
+    // 開発モードの場合、開発者ツールを自動的に開く
+    #[cfg(debug_assertions)]
+    {
+        window.open_devtools();
+    }
+    
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
         .setup(move |app| {
             // アプリケーション状態の初期化
             let app_state = AppState {
@@ -573,8 +700,23 @@ pub fn run() {
             // ワークスペース接続の初期化
             let workspace_connection = WorkspaceState::new(WorkspaceConnection::new());
             
+            // サーバー状態の初期化
+            let server_state = ServerState::new();
+            
             app.manage(app_state);
             app.manage(workspace_connection);
+            app.manage(server_state);
+            
+            // デバッグビルド時は開発者ツールを開く
+            #[cfg(debug_assertions)]
+            {
+                use tauri::Manager;
+                for (label, window) in app.webview_windows() {
+                    println!("[Debug] Opening devtools for window: {}", label);
+                    window.open_devtools();
+                }
+            }
+            
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -608,7 +750,13 @@ pub fn run() {
             workspace::get_global_setting,
             // フォルダ監視
             start_folder_watching,
-            stop_folder_watching
+            stop_folder_watching,
+            // Webサーバーとスマホ連携
+            start_web_server,
+            generate_qr_code,
+            get_qr_session_status,
+            open_qr_window,
+            open_animation_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
