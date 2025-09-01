@@ -277,6 +277,42 @@ async fn get_all_images(workspace: State<'_, WorkspaceState>) -> Result<Vec<Imag
 }
 
 #[tauri::command]
+async fn hide_image(
+    state: State<'_, AppState>,
+    workspace: State<'_, WorkspaceState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = workspace.lock().map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    db.set_hidden(&id, true).map_err(|e| format!("Failed to hide image: {}", e))?;
+    emit_data_change(&state.app_handle, DataChangeEvent::ImageDeleted { id: id.clone() })?; // reuse list update
+    Ok(())
+}
+
+#[tauri::command]
+async fn restart_display(
+    state: State<'_, AppState>,
+    workspace: State<'_, WorkspaceState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = workspace.lock().map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    db.restart_display_now(&id).map_err(|e| format!("Failed to restart display: {}", e))?;
+    emit_data_change(&state.app_handle, DataChangeEvent::ImageAdded { id: id.clone() })?; // reuse list update
+    Ok(())
+}
+
+#[tauri::command]
+async fn mark_display_started(
+    workspace: State<'_, WorkspaceState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = workspace.lock().map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get()?;
+    db.mark_display_started_if_null(&id).map_err(|e| format!("Failed to mark display started: {}", e))
+}
+
+#[tauri::command]
 async fn delete_image(
     state: State<'_, AppState>,
     workspace: State<'_, WorkspaceState>,
@@ -715,6 +751,9 @@ pub fn run() {
             delete_file_absolute,
             save_image_metadata,
             get_all_images,
+            hide_image,
+            restart_display,
+            mark_display_started,
             delete_image,
             update_image_file_path,
             save_user_settings,

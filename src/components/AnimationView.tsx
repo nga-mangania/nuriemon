@@ -404,11 +404,15 @@ const AnimationView: React.FC<AnimationViewProps> = ({
         ? parseInt(deletionTime) * 60 * 1000
         : -1;
 
+      // 非表示の永続化: 一度だけhide APIを叩くためのセット
+      const toHide: string[] = [];
+
       for (const image of Object.values(animatedImagesRef.current)) {
         // 削除チェック
         if (deletionTimeMs > 0 && image.createdAt && currentTime - image.createdAt >= deletionTimeMs) {
-          console.log(`[AnimationView] 画像 ${image.id} を削除時間経過により削除`);
-          continue; // この画像は更新リストに追加しない
+          console.log(`[AnimationView] 画像 ${image.id} を非表示（時間経過）`);
+          toHide.push(image.id);
+          continue; // この画像は更新リストに追加しない（アニメ画面から消す）
         }
 
         // 画像の移動処理
@@ -423,6 +427,18 @@ const AnimationView: React.FC<AnimationViewProps> = ({
 
       animatedImagesRef.current = newImageMap;
       setAnimatedImages(updatedImages);
+
+      // 非表示の永続化をバックグラウンドで実行
+      if (toHide.length > 0) {
+        (async () => {
+          const { DatabaseService } = await import('../services/database');
+          try {
+            for (const id of toHide) {
+              await DatabaseService.hideImage(id);
+            }
+          } catch (e) { console.warn('[AnimationView] hideImage failed', e); }
+        })();
+      }
 
       animationRef.current = requestAnimationFrame(animate);
     }

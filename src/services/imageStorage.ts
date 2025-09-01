@@ -330,6 +330,8 @@ export async function getAllMetadata(): Promise<ImageMetadata[]> {
       height: dbMeta.height,
       // image_typeを追加で保持
       image_type: dbMeta.image_type,
+      is_hidden: (dbMeta as any).is_hidden,
+      display_started_at: (dbMeta as any).display_started_at,
     } as any));
   } catch (error) {
     console.error('メタデータ取得エラー:', error);

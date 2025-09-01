@@ -104,7 +104,9 @@ export class TauriEventListener {
         size: dbImage.size,
         width: dbImage.width,
         height: dbImage.height,
-        file_path: dbImage.file_path
+        file_path: dbImage.file_path,
+        is_hidden: (dbImage as any).is_hidden,
+        display_started_at: (dbImage as any).display_started_at,
       }));
       
       // processedタイプの画像のみをフィルタ

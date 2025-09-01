@@ -12,6 +12,8 @@ export interface ImageMetadata {
   height?: number;
   storage_location: string;
   file_path?: string | null;
+  is_hidden?: number;
+  display_started_at?: string | null;
 }
 
 export interface UserSettings {
@@ -61,6 +63,17 @@ export class DatabaseService {
   // 全画像メタデータの取得
   static async getAllImages(): Promise<ImageMetadata[]> {
     return await invoke<ImageMetadata[]>('get_all_images');
+  }
+
+  // 表示状態の更新
+  static async hideImage(id: string): Promise<void> {
+    await invoke('hide_image', { id });
+  }
+  static async restartDisplay(id: string): Promise<void> {
+    await invoke('restart_display', { id });
+  }
+  static async markDisplayStarted(id: string): Promise<void> {
+    await invoke('mark_display_started', { id });
   }
 
   // 画像の削除

@@ -16,6 +16,8 @@ pub struct ImageMetadata {
     pub height: Option<i32>,
     pub storage_location: String, // 保存先のパス
     pub file_path: Option<String>, // ファイルの完全パス
+    pub is_hidden: i32, // 0 or 1
+    pub display_started_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -117,6 +119,36 @@ impl Database {
             }
         }
 
+        // is_hidden カラムの追加
+        match self.conn.execute(
+            "ALTER TABLE images ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0",
+            [],
+        ) {
+            Ok(_) => {},
+            Err(e) => {
+                if !e.to_string().contains("duplicate column name") {
+                    return Err(e);
+                }
+            }
+        }
+        // display_started_at カラムの追加
+        match self.conn.execute(
+            "ALTER TABLE images ADD COLUMN display_started_at TEXT",
+            [],
+        ) {
+            Ok(_) => {},
+            Err(e) => {
+                if !e.to_string().contains("duplicate column name") {
+                    return Err(e);
+                }
+            }
+        }
+        // インデックス
+        let _ = self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_images_hidden ON images (is_hidden)",
+            [],
+        );
+
         // アプリケーション設定テーブル
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS app_settings (
@@ -184,7 +216,7 @@ impl Database {
     // 画像メタデータの取得（全件）
     pub fn get_all_images(&self) -> Result<Vec<ImageMetadata>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location, file_path 
+            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location, file_path, is_hidden, display_started_at 
              FROM images 
              ORDER BY created_at DESC"
         )?;
@@ -201,6 +233,8 @@ impl Database {
                 height: row.get(7)?,
                 storage_location: row.get(8)?,
                 file_path: row.get(9)?,
+                is_hidden: row.get(10).unwrap_or(0),
+                display_started_at: row.get(11).ok(),
             })
         })?;
 
@@ -215,7 +249,7 @@ impl Database {
     #[allow(dead_code)]
     pub fn get_image_by_id(&self, id: &str) -> Result<Option<ImageMetadata>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location, file_path 
+            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location, file_path, is_hidden, display_started_at 
              FROM images 
              WHERE id = ?1"
         )?;
@@ -232,6 +266,8 @@ impl Database {
                 height: row.get(7)?,
                 storage_location: row.get(8)?,
                 file_path: row.get(9)?,
+                is_hidden: row.get(10).unwrap_or(0),
+                display_started_at: row.get(11).ok(),
             })
         })?;
 
@@ -244,6 +280,30 @@ impl Database {
     // 画像の削除
     pub fn delete_image(&self, id: &str) -> Result<()> {
         self.conn.execute("DELETE FROM images WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn set_hidden(&self, id: &str, hidden: bool) -> Result<()> {
+        let v = if hidden { 1 } else { 0 };
+        self.conn.execute("UPDATE images SET is_hidden = ?1 WHERE id = ?2", params![v, id])?;
+        Ok(())
+    }
+
+    pub fn restart_display_now(&self, id: &str) -> Result<()> {
+        let now = current_timestamp();
+        self.conn.execute(
+            "UPDATE images SET is_hidden = 0, display_started_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_display_started_if_null(&self, id: &str) -> Result<()> {
+        let now = current_timestamp();
+        self.conn.execute(
+            "UPDATE images SET display_started_at = COALESCE(display_started_at, ?1) WHERE id = ?2",
+            params![now, id],
+        )?;
         Ok(())
     }
 

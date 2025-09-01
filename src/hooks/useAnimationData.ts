@@ -22,6 +22,8 @@ export const useAnimationData = () => {
         speed: 0.5
       };
       
+      // 表示開始時刻（DBのdisplay_started_atがあれば優先）
+      const startedAt = (metadata as any).display_started_at ? Date.parse((metadata as any).display_started_at) : Date.now();
       // AnimatedImage型に適合する完全なオブジェクトを作成
       const animatedImage: any = {
         id: metadata.id,
@@ -48,6 +50,7 @@ export const useAnimationData = () => {
         scaleSpeed: 0.002,
         animationStartTime: Date.now(),
         isNewImage: false,
+        createdAt: startedAt,
       };
       return animatedImage;
     } catch (error) {
@@ -60,7 +63,8 @@ export const useAnimationData = () => {
     const metadata = await getAllMetadata();
     return metadata.filter(img => {
       const imageType = (img as any).image_type || img.type;
-      return imageType === 'processed';
+      const hidden = (img as any).is_hidden === 1;
+      return imageType === 'processed' && !hidden;
     });
   };
 
