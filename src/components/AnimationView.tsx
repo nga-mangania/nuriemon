@@ -86,12 +86,26 @@ const AnimationView: React.FC<AnimationViewProps> = ({
           case 'move': {
             const dir = payload.direction as string | undefined;
             apply((img) => {
-              const accel = 2.0; // 体感しやすいブースト
-              if (dir === 'left') img.velocityX = -Math.abs(img.velocityX) - accel;
-              if (dir === 'right') img.velocityX = Math.abs(img.velocityX) + accel;
-              if (dir === 'up') img.velocityY = -Math.abs(img.velocityY) - accel;
-              if (dir === 'down') img.velocityY = Math.abs(img.velocityY) + accel;
-              img.directionChangeTimer = 30; // しばらく方向を維持
+              // 小さな“ちょい動かし”（即時オフセット）＋ごく弱い速度ブースト
+              const nudge = 1.5; // % 単位の微小移動
+              const accel = 0.4; // 速度ブーストを小さく
+              if (dir === 'left') {
+                img.x = Math.max(-5, Math.min(95, img.x - nudge));
+                img.velocityX = -Math.abs(img.velocityX) - accel;
+              }
+              if (dir === 'right') {
+                img.x = Math.max(-5, Math.min(95, img.x + nudge));
+                img.velocityX = Math.abs(img.velocityX) + accel;
+              }
+              if (dir === 'up') {
+                img.y = Math.max(0, img.y - nudge);
+                img.velocityY = -Math.abs(img.velocityY) - accel;
+              }
+              if (dir === 'down') {
+                img.y = Math.min(100, img.y + nudge);
+                img.velocityY = Math.abs(img.velocityY) + accel;
+              }
+              img.directionChangeTimer = 10; // 維持時間も短く
             });
             break;
           }
