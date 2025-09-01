@@ -134,9 +134,11 @@ function App() {
       }
     };
     run();
-    // 設定変更時にも再評価
-    const sub = listen('app-settings-changed', () => run());
-    return () => { sub.then(un => un()); };
+    // 設定変更／ワークスペース変更時にも再評価
+    const subs: Array<Promise<() => void>> = [];
+    subs.push(listen('app-settings-changed', () => run()));
+    subs.push(listen('workspace-data-loaded', () => run()));
+    return () => { subs.forEach(p => p.then(un => un())); };
   }, [isReady]);
 
   const handleAnimationClick = async () => {

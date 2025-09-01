@@ -72,11 +72,23 @@ export const QrDisplayWindow: React.FC = () => {
       if (base) setRelayBaseUrl(base);
       const eid = await AppSettingsService.getAppSetting('relay_event_id');
       if (eid) setRelayEventId(eid);
-      const pid = (await AppSettingsService.getAppSetting('pcid')) || (await AppSettingsService.getAppSetting('pc_id'));
+      let pid = (await AppSettingsService.getAppSetting('pcid')) || (await AppSettingsService.getAppSetting('pc_id'));
+      if (!pid) {
+        // 新しいワークスペースなどで未設定なら自動生成して保存
+        pid = generateDefaultPcid();
+        try { await AppSettingsService.saveAppSetting('pcid', pid); } catch {}
+      }
       if (pid) setPcId(pid);
       debug(`settings: mode=${mode} base=${base} eid=${eid} pcid=${pid}`);
     } catch (_) {}
   };
+
+  function generateDefaultPcid(): string {
+    const alphabet = '0123456789abcdefghjkmnpqrstvwxyz';
+    let s = '';
+    for (let i = 0; i < 6; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+    return `pc-${s}`;
+  }
 
   // ウィンドウ起動時に一度だけファイルから状態を読み込む
   useEffect(() => {
@@ -216,15 +228,34 @@ export const QrDisplayWindow: React.FC = () => {
       const envKey = `${relayBaseUrl}|${relayEventId}|${pcId}|${operationMode}`;
       if (relayActive) {
         // Relay: sid を発行し、pending-sid に登録
-        if (!relayEventId) {
-          console.warn('[QrDisplayWindow] relayEventId 未設定のため、Localにフォールバック');
-          debug('relayEventId is empty; cannot register pending-sid');
-          return;
-        }
-        if (!pcId) {
-          console.warn('[QrDisplayWindow] pcid が未設定です');
-          debug('pcid is empty; cannot register pending-sid');
-          return;
+        if (!relayEventId || !pcId) {
+          // Autoモード時はローカルへフォールバック、Relay固定時はエラー表示
+          if (operationMode === 'relay') {
+            setBanner('Relay設定が不足しています（イベントID/PCID）。設定画面で確認してください。');
+            debug('missing relayEventId or pcid in relay mode');
+            inflightRef.current.delete(imageId);
+            return;
+          } else {
+            debug('missing relayEventId/pcid in auto; fallback to local');
+            const result = await invoke<{ sessionId: string; qrCode: string; imageId: string }>('generate_qr_code', { imageId });
+            session = {
+              imageId: result.imageId,
+              sessionId: result.sessionId,
+              qrCode: result.qrCode,
+              connected: false,
+              envKey,
+            };
+            setBanner('Relay設定が未完了のため、ローカル接続に切替えました');
+            // store and return
+            setSessions(prev => {
+              const m = new Map(prev);
+              (session as any).sessionKey = sessionKey;
+              m.set(imageId, session);
+              return m;
+            });
+            inflightRef.current.delete(imageId);
+            return;
+          }
         }
 
         // 必要ならPC登録（ベストエフォート + リトライ）
