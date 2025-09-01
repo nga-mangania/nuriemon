@@ -187,7 +187,7 @@ impl Database {
     // 特定の画像メタデータを取得
     pub fn get_image(&self, id: &str) -> Result<Option<ImageMetadata>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location, file_path 
+            "SELECT id, original_file_name, saved_file_name, image_type, created_at, size, width, height, storage_location, file_path, is_hidden, display_started_at 
              FROM images 
              WHERE id = ?1"
         )?;
@@ -204,6 +204,8 @@ impl Database {
                 height: row.get(7)?,
                 storage_location: row.get(8)?,
                 file_path: row.get(9)?,
+                is_hidden: row.get(10).unwrap_or(0),
+                display_started_at: row.get(11).ok(),
             })
         })?;
 

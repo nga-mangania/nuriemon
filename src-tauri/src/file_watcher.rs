@@ -295,6 +295,8 @@ fn process_image_async(
         height: None,
         storage_location: workspace_path.clone(),
         file_path: Some(save_path.to_string_lossy().to_string()),
+        is_hidden: 0,
+        display_started_at: None,
     };
 
     db.save_image_metadata(&metadata)
