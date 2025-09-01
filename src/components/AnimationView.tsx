@@ -526,7 +526,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
               alt={image.originalFileName}
               className={`${styles.animatedImage} ${image.movement} ${image.size}`}
               style={{
-                transform: `scale(${image.scaleX || 1}, ${image.scaleY || 1}) rotate(${
+                transform: `scale(${(image.scaleX || 1) * (image.specialScale || 1)}, ${(image.scaleY || 1) * (image.specialScale || 1)}) rotate(${ 
                   image.rotation
                 }deg) scaleX(${image.flipped ? -1 : 1})`,
               }}

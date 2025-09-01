@@ -541,9 +541,8 @@ function appHtml(): string {
     #status{opacity:.85;margin-bottom:10px}
     .preview{width:100%;height:140px;border-radius:12px;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid rgba(255,255,255,.12)}
     .preview img{max-width:100%;max-height:100%;display:block}
-    .row{display:flex;gap:12px;margin-top:12px}
-    .col{flex:1}
-    .dpad{display:grid;grid-template-columns:60px 60px 60px;grid-template-rows:60px 60px 60px;gap:8px;justify-content:center}
+    .actions{margin-top:12px}
+    .dpad{display:grid;grid-template-columns:60px 60px 60px;grid-template-rows:60px 60px 60px;gap:8px;justify-content:center;margin-top:12px}
     .dpad .sp{visibility:hidden}
     button{padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.12);color:#fff;font-weight:600;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
     button:active{transform:scale(.98)}
@@ -552,44 +551,45 @@ function appHtml(): string {
     #reconnect{margin-top:10px;width:100%;background:#2d6cdf;border-color:#2d6cdf}
     .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
     .emotes{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:8px}
+    @media (max-width: 420px){
+      .card{max-width: 360px; width: 94%;}
+      .dpad{grid-template-columns: 54px 54px 54px; grid-template-rows: 54px 54px 54px}
+      button{padding:12px}
+    }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>ぬりえもん - コントローラ</h1>
     <div id="status">初期化中...</div>
-    <div class="preview"><img id="thumb" alt="preview"/></div>
-    <div class="row">
-      <div class="col">
-        <div class="dpad">
-          <div class="sp"></div>
-          <button onclick="dir('up')">▲</button>
-          <div class="sp"></div>
-          <button onclick="dir('left')">◀</button>
-          <div class="sp"></div>
-          <button onclick="dir('right')">▶</button>
-          <div class="sp"></div>
-          <button onclick="dir('down')">▼</button>
-          <div class="sp"></div>
-        </div>
+    <div class="preview"><img id="thumb" alt=""/></div>
+    <div class="actions">
+      <div class="grid2">
+        <button onclick="action('jump')">ジャンプ</button>
+        <button onclick="action('spin')">回転</button>
+        <button onclick="action('shake')">ふるえる</button>
+        <button onclick="action('grow')">おおきく</button>
+        <button onclick="action('shrink')">ちいさく</button>
+        <button onclick="emote('good')">👍</button>
       </div>
-      <div class="col">
-        <div class="grid2">
-          <button onclick="action('jump')">ジャンプ</button>
-          <button onclick="action('spin')">回転</button>
-          <button onclick="action('shake')">ふるえる</button>
-          <button onclick="action('grow')">おおきく</button>
-          <button onclick="action('shrink')">ちいさく</button>
-          <button onclick="emote('good')">👍</button>
-        </div>
-        <div class="emotes">
-          <button onclick="emote('😊')">😊</button>
-          <button onclick="emote('😂')">😂</button>
-          <button onclick="emote('❤️')">❤️</button>
-          <button onclick="emote('⭐')">⭐</button>
-          <button onclick="emote('✨')">✨</button>
-        </div>
+      <div class="emotes">
+        <button onclick="emote('😊')">😊</button>
+        <button onclick="emote('😂')">😂</button>
+        <button onclick="emote('❤️')">❤️</button>
+        <button onclick="emote('⭐')">⭐</button>
+        <button onclick="emote('✨')">✨</button>
       </div>
+    </div>
+    <div class="dpad">
+      <div class="sp"></div>
+      <button onclick="dir('up')">▲</button>
+      <div class="sp"></div>
+      <button onclick="dir('left')">◀</button>
+      <div class="sp"></div>
+      <button onclick="dir('right')">▶</button>
+      <div class="sp"></div>
+      <button onclick="dir('down')">▼</button>
+      <div class="sp"></div>
     </div>
     <button id="reconnect" style="display:none" onclick="manualReconnect()">再接続</button>
   </div>
