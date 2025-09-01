@@ -119,8 +119,10 @@ const AnimationView: React.FC<AnimationViewProps> = ({
                   img.specialMovement = { ...base, type: 1 };
                   break;
                 case 'grow':
+                  img.specialMovement = { ...base, type: 2, scaleDir: 1 };
+                  break;
                 case 'shrink':
-                  img.specialMovement = { ...base, type: 2 };
+                  img.specialMovement = { ...base, type: 2, scaleDir: -1 };
                   break;
                 default:
                   img.specialMovement = { ...base, type: 0 };
@@ -186,19 +188,21 @@ const AnimationView: React.FC<AnimationViewProps> = ({
         case 0: // 急回転
           image.rotation += 360 * Math.sin(progress * Math.PI);
           break;
-        case 1: // 加速と減速
-          const maxSpeedMultiplier = 1.3;
-          const speedCurve = Math.sin(progress * Math.PI);
-          const currentSpeedMultiplier = 1 + (maxSpeedMultiplier - 1) * speedCurve;
-          image.velocityX = image.specialMovement.originalVelocityX * currentSpeedMultiplier;
-          image.velocityY = image.specialMovement.originalVelocityY * currentSpeedMultiplier;
-          break;
-        case 2: // サイズ変化
-          const peakScale = 2;
-          const sharpness = 1;
-          const sizeChange = 1 + (peakScale - 1) * Math.sin(progress * Math.PI) ** sharpness;
-          image.specialScale = sizeChange;
-          break;
+        case 1: { // ふるえる（シェイク）
+          const amp = 1.5; // 振幅[%]
+          const freq = 0.05; // 周期
+          image.x += Math.sin(currentTime * freq) * amp;
+          image.y += Math.cos(currentTime * freq * 1.3) * amp;
+          break; }
+        case 2: { // サイズ変化（grow/shrink）
+          const peakScale = 1.6;
+          const minScale = 0.6;
+          const wave = Math.sin(progress * Math.PI);
+          const dir = (image.specialMovement as any).scaleDir === -1 ? -1 : 1;
+          image.specialScale = dir === 1
+            ? 1 + (peakScale - 1) * wave
+            : 1 - (1 - minScale) * wave;
+          break; }
         case 3: // Z軸回転
           const rotationProgress = Math.sin(progress * Math.PI);
           image.zRotation = 360 * rotationProgress;

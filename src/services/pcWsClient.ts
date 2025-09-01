@@ -3,6 +3,7 @@ import { currentRelayEnvAsSecretEnv, getEventSetupSecret } from './secureSecrets
 import { resolveBaseUrl } from './relayClient';
 import { registerPc, retryWithBackoff } from './relayClient';
 import { loadImage } from './imageStorage';
+import { DatabaseService } from './database';
 
 function b64url(bytes: Uint8Array): string {
   let b64 = btoa(String.fromCharCode(...bytes));
@@ -204,7 +205,25 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
   async function handlePreviewRequest(sid: string, imageId: string) {
     try {
       // Load full image as data URL, then downscale to ~256px (max side) and encode as WebP/JPEG
-      const dataUrl = await loadImage({ id: imageId } as any);
+      // Ensure we have saved_file_name/type for fallback path building
+      let dataUrl = '';
+      try {
+        const all = await DatabaseService.getAllImages();
+        const rec = all.find((m: any) => m.id === imageId);
+        if (rec) {
+          dataUrl = await loadImage({
+            id: imageId,
+            savedFileName: rec.saved_file_name,
+            type: (rec.image_type === 'processed' ? 'processed' : 'original'),
+            originalFileName: rec.original_file_name,
+          } as any);
+        } else {
+          dataUrl = await loadImage({ id: imageId } as any);
+        }
+      } catch (e) {
+        // fallback
+        dataUrl = await loadImage({ id: imageId } as any);
+      }
       const thumb = await downscaleDataUrl(dataUrl, 256, 0.7);
       if (ws && ws.readyState === ws.OPEN) {
         ws.send(JSON.stringify({ v: 1, type: 'evt', sid, evt: 'preview', data: { imageId, thumb } }));

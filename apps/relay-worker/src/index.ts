@@ -582,13 +582,13 @@ function appHtml(): string {
     </div>
     <div class="dpad">
       <div class="sp"></div>
-      <button onclick="dir('up')">▲</button>
+          <button onclick="dir('up')" onpointerdown="dir('up')">▲</button>
       <div class="sp"></div>
-      <button onclick="dir('left')">◀</button>
+          <button onclick="dir('left')" onpointerdown="dir('left')">◀</button>
       <div class="sp"></div>
-      <button onclick="dir('right')">▶</button>
+          <button onclick="dir('right')" onpointerdown="dir('right')">▶</button>
       <div class="sp"></div>
-      <button onclick="dir('down')">▼</button>
+          <button onclick="dir('down')" onpointerdown="dir('down')">▼</button>
       <div class="sp"></div>
     </div>
     <button id="reconnect" style="display:none" onclick="manualReconnect()">再接続</button>
