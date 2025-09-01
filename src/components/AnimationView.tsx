@@ -86,26 +86,18 @@ const AnimationView: React.FC<AnimationViewProps> = ({
           case 'move': {
             const dir = payload.direction as string | undefined;
             apply((img) => {
-              // 小さな“ちょい動かし”（即時オフセット）＋ごく弱い速度ブースト
-              const nudge = 1.5; // % 単位の微小移動
-              const accel = 0.4; // 速度ブーストを小さく
-              if (dir === 'left') {
-                img.x = Math.max(-5, Math.min(95, img.x - nudge));
-                img.velocityX = -Math.abs(img.velocityX) - accel;
-              }
-              if (dir === 'right') {
-                img.x = Math.max(-5, Math.min(95, img.x + nudge));
-                img.velocityX = Math.abs(img.velocityX) + accel;
-              }
-              if (dir === 'up') {
-                img.y = Math.max(0, img.y - nudge);
-                img.velocityY = -Math.abs(img.velocityY) - accel;
-              }
-              if (dir === 'down') {
-                img.y = Math.min(100, img.y + nudge);
-                img.velocityY = Math.abs(img.velocityY) + accel;
-              }
-              img.directionChangeTimer = 10; // 維持時間も短く
+              // スムーズな操作: 即時位置変更はせず、なだらかに速度へ加算
+              const accel = 0.25;
+              if (dir === 'left') { img.velocityX += -accel; }
+              if (dir === 'right') { img.velocityX += accel; }
+              if (dir === 'up') { img.velocityY += -accel; }
+              if (dir === 'down') { img.velocityY += accel; }
+              // 速度の過度な増加を抑制
+              const clamp = (v: number, a: number) => Math.max(-a, Math.min(a, v));
+              img.velocityX = clamp(img.velocityX, 2);
+              img.velocityY = clamp(img.velocityY, 2);
+              // ランダム方向切替を短く抑えて、操作の方向性を少し維持
+              img.directionChangeTimer = 18;
             });
             break;
           }

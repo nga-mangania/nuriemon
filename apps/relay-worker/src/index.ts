@@ -540,23 +540,23 @@ function appHtml(): string {
     .card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:12px;max-width:420px;width:94%;box-shadow:0 8px 24px rgba(0,0,0,.08)}
     h1{font-size:18px;margin:0 0 4px;color:#0b1324}
     #status{opacity:.8;margin-bottom:6px}
-    .preview{width:100%;height:110px;border-radius:10px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid #e5e7eb}
+    .preview{width:100%;height:120px;border-radius:10px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid #e5e7eb}
     .preview img{max-width:100%;max-height:100%;display:block}
     .actions{margin-top:8px}
-    .dpad{display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px 56px;gap:6px;justify-content:center;margin-top:8px}
+    .dpad{display:grid;grid-template-columns:64px 64px 64px;grid-template-rows:64px 64px 64px;gap:8px;justify-content:center;margin-top:8px}
     .dpad .sp{visibility:hidden}
-    button{padding:12px;border-radius:12px;border:1px solid #dbeafe;background:#eef2ff;color:#0b1324;font-weight:600;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+    button{padding:14px;border-radius:12px;border:1px solid #dbeafe;background:#eef2ff;color:#0b1324;font-weight:600;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
     button:active{transform:scale(.98)}
     .ok{color:#16a34a}
     .err{color:#dc2626}
     #reconnect{margin-top:8px;width:100%;background:#2563eb;border-color:#2563eb;color:#fff}
-    .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
-    .emotes{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:6px}
+    .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+    .emotes{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:8px}
     @media (max-width: 420px){
       .card{max-width: 360px;}
-      .preview{height:96px}
-      .dpad{grid-template-columns: 48px 48px 48px; grid-template-rows: 48px 48px 48px}
-      button{padding:10px}
+      .preview{height:104px}
+      .dpad{grid-template-columns: 56px 56px 56px; grid-template-rows: 56px 56px 56px}
+      button{padding:12px}
     }
   </style>
 </head>
