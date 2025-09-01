@@ -1,0 +1,15 @@
+export type ErrorCode =
+  | 'E_MISSING_HEADERS'
+  | 'E_BAD_JSON'
+  | 'E_BAD_FIELD'
+  | 'E_CLOCK_SKEW'
+  | 'E_NONCE_REPLAY'
+  | 'E_BAD_SIGNATURE'
+  | 'E_PC_NOT_REGISTERED'
+  | 'E_EVENT_CLOSED'
+  | 'E_SID_EXISTS'
+  | 'E_RATE_LIMITED'
+  | 'E_OVERLOADED';
+
+export const EMPTY_SHA256_HEX = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+

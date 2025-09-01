@@ -6,8 +6,16 @@ import App from "./App";
 import AnimationWindow from "./windows/AnimationWindow";
 import { QrDisplayWindow } from "./windows/QrDisplayWindow";
 import "./styles/reset.scss";
+import { listen } from '@tauri-apps/api/event';
 
 console.log('[main.tsx] Imports completed');
+
+// Bridge status logs (visible in any window's console)
+try {
+  listen('pc-bridge-status', (e) => {
+    try { console.log('[pc-bridge]', e.payload); } catch {}
+  });
+} catch {}
 
 // ウィンドウタイプの判定
 const hash = window.location.hash;

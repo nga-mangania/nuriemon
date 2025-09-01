@@ -1,4 +1,4 @@
-use std::process::{Command, Stdio};
+use std::process::{Command, Stdio, ChildStdin, ChildStdout};
 use std::io::{Write, BufRead, BufReader};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -14,6 +14,7 @@ mod web_server;
 mod websocket;
 mod qr_manager;
 mod server_state;
+use keyring::Entry;
 use db::{ImageMetadata, UserSettings, MovementSettings, generate_id, current_timestamp};
 use events::{DataChangeEvent, emit_data_change};
 use workspace::{WorkspaceState, WorkspaceConnection};
@@ -43,18 +44,112 @@ enum PythonOutput {
 }
 
 
-// Pythonプロセスの状態を管理
-// TODO: 将来的にPythonプロセスを永続化して起動時間を短縮する
-#[allow(dead_code)]  // 将来の使用のために保持
+// 常駐Pythonプロセスの状態を管理
 struct PythonProcess {
-    child: Option<std::process::Child>,
+    child: std::process::Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
 }
 
-// グローバルなPythonプロセス
-// TODO: アプリ起動時に一度だけPythonプロセスを起動し、使い回すことで
-// モデルの読み込み時間を削減し、連続処理を高速化する
-#[allow(dead_code)]  // 将来の使用のために保持
 static PYTHON_PROCESS: Mutex<Option<PythonProcess>> = Mutex::new(None);
+
+fn spawn_python_process() -> Result<PythonProcess, String> {
+    // Pythonスクリプトのパスを取得
+    let python_script = std::env::current_dir()
+        .map_err(|e| e.to_string())?
+        .join("../python-sidecar/main.py");
+
+    if !python_script.exists() {
+        return Err(format!("Python script not found at: {:?}", python_script));
+    }
+
+    let mut child = Command::new("python3")
+        .arg(&python_script)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start Python process: {}", e))?;
+
+    let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+    let reader = BufReader::new(stdout);
+
+    Ok(PythonProcess { child, stdin, stdout: reader })
+}
+
+fn ensure_python_process() -> Result<(), String> {
+    let mut guard = PYTHON_PROCESS.lock().map_err(|_| "PYTHON_PROCESS lock error".to_string())?;
+    let need_spawn = match guard.as_ref() {
+        Some(_) => false,
+        None => true,
+    };
+    if need_spawn {
+        let proc = spawn_python_process()?;
+        *guard = Some(proc);
+    }
+    Ok(())
+}
+
+fn python_send_and_wait(
+    app_handle: Option<&tauri::AppHandle>,
+    msg: serde_json::Value,
+) -> Result<ProcessResult, String> {
+    ensure_python_process()?;
+    let mut guard = PYTHON_PROCESS.lock().map_err(|_| "PYTHON_PROCESS lock error".to_string())?;
+    let proc = guard.as_mut().ok_or("python process not available".to_string())?;
+
+    // 送信
+    let line = format!("{}\n", msg.to_string());
+    proc.stdin.write_all(line.as_bytes()).map_err(|e| format!("Failed to write to stdin: {}", e))?;
+    proc.stdin.flush().ok();
+
+    // 受信（progress/result）
+    let reader = &mut proc.stdout;
+    let mut final_result: Option<ProcessResult> = None;
+    loop {
+        let mut buf = String::new();
+        let n = reader.read_line(&mut buf).map_err(|e| format!("Failed to read stdout: {}", e))?;
+        if n == 0 { break; } // EOF
+        let line = buf.trim();
+        if line.is_empty() { continue; }
+        // base64 を含む行は短縮ログ
+        let log_line = if line.contains("data:image") || line.contains("\"image\":") {
+            if line.len() > 100 { format!("{}...(rest {})", &line[..100], line.len()-100) } else { line.to_string() }
+        } else { line.to_string() };
+        println!("[Rust] python <= {}", log_line);
+
+        if let Ok(output) = serde_json::from_str::<PythonOutput>(line) {
+            match output {
+                PythonOutput::Progress { value } => {
+                    if let Some(handle) = app_handle {
+                        let _ = handle.emit("image-processing-progress", ImageProcessingProgress { value });
+                    }
+                }
+                PythonOutput::Result(result) => {
+                    final_result = Some(result);
+                    break;
+                }
+            }
+        }
+    }
+
+    match final_result {
+        Some(r) => Ok(r),
+        None => Err("Failed to get final result from Python process".to_string()),
+    }
+}
+
+// 非同期応答を待たずに送信だけ行う（warmup等に使用）
+fn python_send_nowait(msg: serde_json::Value) -> Result<(), String> {
+    ensure_python_process()?;
+    let mut guard = PYTHON_PROCESS.lock().map_err(|_| "PYTHON_PROCESS lock error".to_string())?;
+    let proc = guard.as_mut().ok_or("python process not available".to_string())?;
+    let line = format!("{}\n", msg.to_string());
+    proc.stdin.write_all(line.as_bytes()).map_err(|e| format!("Failed to write to stdin: {}", e))?;
+    proc.stdin.flush().ok();
+    Ok(())
+}
 
 // アプリケーション状態管理構造体
 pub struct AppState {
@@ -69,178 +164,20 @@ fn greet(name: &str) -> String {
 
 // 同期版のprocess_image（内部使用向け）
 pub fn process_image_sync(image_data: String) -> Result<ProcessResult, String> {
-    use std::process::{Command, Stdio};
-    use std::io::{Write, BufRead, BufReader};
-    
-    // Pythonスクリプトのパスを取得
-    let python_script = std::env::current_dir()
-        .map_err(|e| e.to_string())?
-        .join("../python-sidecar/main.py");
-    
-    println!("[Rust] Python script path: {:?}", python_script);
-    
-    // スクリプトが存在するか確認
-    if !python_script.exists() {
-        return Err(format!("Python script not found at: {:?}", python_script));
-    }
-    
-    // Pythonコマンドを実行
-    let mut child = Command::new("python3")
-        .arg(&python_script)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to start Python process: {}", e))?;
-    
-    // 標準入力に画像データを送信
-    let stdin = child.stdin.as_mut()
-        .ok_or("Failed to get stdin")?;
-    
     let command = serde_json::json!({
         "command": "process",
-        "image": image_data
+        "image": image_data,
     });
-    
-    writeln!(stdin, "{}", command.to_string())
-        .map_err(|e| format!("Failed to write to stdin: {}", e))?;
-    
-    // 結果を読み取る
-    let stdout = child.stdout.as_mut()
-        .ok_or("Failed to get stdout")?;
-    let reader = BufReader::new(stdout);
-    
-    let mut final_result: Option<ProcessResult> = None;
-
-    for line in reader.lines() {
-        if let Ok(line) = line {
-            if let Ok(output) = serde_json::from_str::<PythonOutput>(&line) {
-                match output {
-                    PythonOutput::Progress { value } => {
-                        println!("[Rust] Progress: {}", value);
-                    },
-                    PythonOutput::Result(result) => {
-                        println!("[Rust] Result received: success={}", result.success);
-                        final_result = Some(result);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    
-    // プロセスが正常に終了するのを待つ
-    let status = child.wait().map_err(|e| format!("Failed to wait on child: {}", e))?;
-    if !status.success() {
-        let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
-        let err_reader = BufReader::new(stderr);
-        let err_lines: Vec<String> = err_reader.lines().filter_map(Result::ok).collect();
-        return Err(format!("Python process exited with error: {}", err_lines.join("\n")));
-    }
-    
-    match final_result {
-        Some(result) => Ok(result),
-        None => Err("Failed to get final result from Python process".to_string()),
-    }
+    python_send_and_wait(None, command)
 }
 
 #[tauri::command]
 async fn process_image(app_handle: tauri::AppHandle, image_data: String) -> Result<ProcessResult, String> {
-    // Pythonスクリプトのパスを取得
-    let python_script = std::env::current_dir()
-        .map_err(|e| e.to_string())?
-        .join("../python-sidecar/main.py");
-    
-    println!("[Rust] Python script path: {:?}", python_script);
-    
-    // スクリプトが存在するか確認
-    if !python_script.exists() {
-        return Err(format!("Python script not found at: {:?}", python_script));
-    }
-    
-    // Pythonコマンドを実行
-    let mut child = Command::new("python3")
-        .arg(&python_script)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to start Python process: {}", e))?;
-    
-    // 標準入力に画像データを送信
-    let stdin = child.stdin.as_mut()
-        .ok_or("Failed to get stdin")?;
-    
     let command = serde_json::json!({
         "command": "process",
-        "image": image_data
+        "image": image_data,
     });
-    
-    writeln!(stdin, "{}", command.to_string())
-        .map_err(|e| format!("Failed to write to stdin: {}", e))?;
-    
-    // 結果を読み取る
-    let stdout = child.stdout.as_mut()
-        .ok_or("Failed to get stdout")?;
-    let reader = BufReader::new(stdout);
-    
-    let mut final_result: Option<ProcessResult> = None;
-
-    for line in reader.lines() {
-        if let Ok(line) = line {
-            // base64データを含む行は短縮して表示
-            let log_line = if line.contains("data:image") || line.contains("\"image\":") {
-                let preview = if line.len() > 100 {
-                    format!("{}...(残り{}文字)", &line[..100], line.len() - 100)
-                } else {
-                    line.clone()
-                };
-                preview
-            } else {
-                line.clone()
-            };
-            println!("[Rust] Received from Python: {}", log_line);
-            if let Ok(output) = serde_json::from_str::<PythonOutput>(&line) {
-                match output {
-                    PythonOutput::Progress { value } => {
-                        println!("[Rust] Progress: {}", value);
-                        app_handle.emit("image-processing-progress", ImageProcessingProgress { value }).unwrap();
-                    },
-                    PythonOutput::Result(result) => {
-                        println!("[Rust] Result received: success={}", result.success);
-                        final_result = Some(result);
-                        break; // 結果を受け取ったらループを抜ける
-                    }
-                }
-            } else {
-                println!("[Rust] Failed to parse Python output: {}", line);
-            }
-        }
-    }
-    
-    // プロセスが正常に終了するのを待つ
-    let status = child.wait().map_err(|e| format!("Failed to wait on child: {}", e))?;
-    if !status.success() {
-        // エラーストリームを読み取る
-        let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
-        let err_reader = BufReader::new(stderr);
-        let err_lines: Vec<String> = err_reader.lines().filter_map(Result::ok).collect();
-        println!("[Rust] Python process stderr: {}", err_lines.join("\n"));
-        return Err(format!("Python process exited with error: {}", err_lines.join("\n")));
-    }
-
-    // 結果が取得できた場合、プロセスを強制終了
-    if final_result.is_some() {
-        let _ = child.kill();
-    }
-    
-    match final_result {
-        Some(result) => {
-            println!("[Rust] Returning result to frontend");
-            Ok(result)
-        },
-        None => Err("Failed to get final result from Python process".to_string()),
-    }
+    python_send_and_wait(Some(&app_handle), command)
 }
 
 // カスタムディレクトリへのファイル操作コマンド
@@ -293,6 +230,7 @@ async fn delete_file_absolute(path: String) -> Result<(), String> {
     if file_path.exists() {
         fs::remove_file(&file_path)
             .map_err(|e| format!("Failed to delete file: {}", e))?;
+        println!("[delete_file_absolute] deleted path={}", path);
     }
     
     Ok(())
@@ -342,8 +280,17 @@ async fn get_all_images(workspace: State<'_, WorkspaceState>) -> Result<Vec<Imag
 async fn delete_image(
     state: State<'_, AppState>,
     workspace: State<'_, WorkspaceState>,
-    id: String
+    server_state: State<'_, ServerState>,
+    id: String,
+    reason: Option<String>,
 ) -> Result<(), String> {
+    let reason_str = reason.unwrap_or_else(|| "unknown".to_string());
+    println!("[delete_image] requested id={} reason={}", id, reason_str);
+    // No-DeleteモードならDB削除をスキップ
+    if *server_state.no_delete_mode.lock().unwrap() {
+        println!("[delete_image] no_delete_mode=true; skip DB delete for id={}", id);
+        return Ok(());
+    }
     let conn = workspace.lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
@@ -574,20 +521,38 @@ async fn start_web_server(
     if let Some(port) = server_state.get_server_port() {
         return Ok(port);
     }
-    
+
+    // 起動中フラグで同時起動を防止
+    if !server_state.begin_starting() {
+        // 先行の起動完了を少し待ってから再取得
+        for _ in 0..30 {
+            if let Some(port) = server_state.get_server_port() {
+                return Ok(port);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        // まだ未設定ならエラーで返す
+        return Err("Webサーバー起動中です。少し待って再試行してください".to_string());
+    }
+
     // Webサーバーを起動
-    let port = web_server::start_web_server(state.app_handle.clone())
-        .await
-        .map_err(|e| format!("Webサーバーの起動に失敗しました: {}", e))?;
-    
-    // QRマネージャーを初期化
-    let qr_manager = Arc::new(QrManager::new(port));
-    server_state.set_qr_manager(qr_manager);
-    
-    // ポート番号を保存
-    server_state.set_server_port(port);
-    
-    Ok(port)
+    let result = web_server::start_web_server(state.app_handle.clone()).await;
+
+    match result {
+        Ok(port) => {
+            // QRマネージャーを初期化
+            let qr_manager = Arc::new(QrManager::new(port));
+            server_state.set_qr_manager(qr_manager);
+            // ポート番号を保存
+            server_state.set_server_port(port);
+            server_state.finish_starting();
+            Ok(port)
+        }
+        Err(e) => {
+            server_state.finish_starting();
+            Err(format!("Webサーバーの起動に失敗しました: {}", e))
+        }
+    }
 }
 
 // QRコードの生成
@@ -627,6 +592,33 @@ fn get_qr_session_status(
     }
 }
 
+// 任意文字列からQRコード（data URI）を生成（Relay用のURL等）
+#[tauri::command]
+fn generate_qr_from_text(text: String) -> Result<String, String> {
+    use qrcode::{QrCode, Color};
+    use base64::{engine::general_purpose, Engine as _};
+
+    let code = QrCode::new(text).map_err(|e| format!("QR_ENCODE_ERROR: {}", e))?;
+    let size = code.width();
+    let mut svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {} {}" shape-rendering="crispEdges">"#,
+        size, size
+    );
+    for y in 0..size {
+        for x in 0..size {
+            if code[(x, y)] == Color::Dark {
+                svg.push_str(&format!(
+                    "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"#000\"/>",
+                    x, y
+                ));
+            }
+        }
+    }
+    svg.push_str("</svg>");
+    let encoded = general_purpose::STANDARD.encode(svg);
+    Ok(format!("data:image/svg+xml;base64,{}", encoded))
+}
+
 // QRコード表示ウィンドウを開く
 #[tauri::command]
 async fn open_animation_window(app: tauri::AppHandle) -> Result<(), String> {
@@ -641,12 +633,18 @@ async fn open_animation_window(app: tauri::AppHandle) -> Result<(), String> {
     }
     
     // 新しいウィンドウを作成
-    let _window = WebviewWindowBuilder::new(&app, "animation", WebviewUrl::App("#/animation".into()))
+    let window = WebviewWindowBuilder::new(&app, "animation", WebviewUrl::App("#/animation".into()))
         .inner_size(1024.0, 768.0)
         .title("ぬりえもん - アニメーション")
         .resizable(true)
         .build()
         .map_err(|e| format!("アニメーションウィンドウの作成に失敗しました: {}", e))?;
+    
+    // 開発ビルドでは自動でDevToolsを開く（検証を容易に）
+    #[cfg(debug_assertions)]
+    {
+        window.open_devtools();
+    }
     
     Ok(())
 }
@@ -664,7 +662,7 @@ async fn open_qr_window(app: tauri::AppHandle) -> Result<(), String> {
     }
     
     // 新しいウィンドウを作成
-    let window = WebviewWindowBuilder::new(
+    let _window = WebviewWindowBuilder::new(
         &app,
         "qr-display",
         WebviewUrl::App("qr-display.html".into())
@@ -675,11 +673,7 @@ async fn open_qr_window(app: tauri::AppHandle) -> Result<(), String> {
     .build()
     .map_err(|e| format!("ウィンドウの作成に失敗しました: {}", e))?;
     
-    // 開発モードの場合、開発者ツールを自動的に開く
-    #[cfg(debug_assertions)]
-    {
-        window.open_devtools();
-    }
+    // 開発モードでも自動でDevToolsは開かない（パフォーマンス配慮）
     
     Ok(())
 }
@@ -702,26 +696,38 @@ pub fn run() {
             
             // サーバー状態の初期化
             let server_state = ServerState::new();
+            // 永続化された no_delete_mode を読み込む
+            if let Ok(app_data_dir) = app.path().app_data_dir() {
+                let settings_path = app_data_dir.join("global_settings.json");
+                if settings_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&settings_path) {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                            if let Some(v) = json.get("no_delete_mode").and_then(|v| v.as_bool()) {
+                                *server_state.no_delete_mode.lock().unwrap() = v;
+                                println!("[no_delete_mode] loaded persisted value = {}", v);
+                            }
+                        }
+                    }
+                }
+            }
             
             app.manage(app_state);
             app.manage(workspace_connection);
             app.manage(server_state);
-            
-            // デバッグビルド時は開発者ツールを開く
+            // Dev build: auto-open DevTools for main window, to ease debugging
             #[cfg(debug_assertions)]
-            {
-                use tauri::Manager;
-                for (label, window) in app.webview_windows() {
-                    println!("[Debug] Opening devtools for window: {}", label);
-                    window.open_devtools();
-                }
+            if let Some(win) = app.get_webview_window("main") {
+                win.open_devtools();
             }
+            
+            // デバッグビルドでもDevToolsの自動オープンは無効化
             
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             greet, 
             process_image,
+            warmup_python,
             ensure_directory,
             write_file_absolute,
             read_file_absolute,
@@ -754,10 +760,107 @@ pub fn run() {
             // Webサーバーとスマホ連携
             start_web_server,
             generate_qr_code,
+            generate_qr_from_text,
             get_qr_session_status,
             open_qr_window,
             open_animation_window
+            ,save_event_secret
+            ,load_event_secret
+            ,delete_event_secret
+            ,open_devtools
+            ,set_no_delete_mode
+            ,get_no_delete_mode
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+fn set_no_delete_mode(server_state: State<'_, ServerState>, enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
+    *server_state.no_delete_mode.lock().unwrap() = enabled;
+    println!("[no_delete_mode] set to {}", enabled);
+    // 永続化
+    let app_data_dir = app.path().app_data_dir().map_err(|e| format!("app_data_dir error: {}", e))?;
+    let settings_path = app_data_dir.join("global_settings.json");
+    let mut settings: serde_json::Value = if settings_path.exists() {
+        let content = std::fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".to_string());
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+    } else { serde_json::json!({}) };
+    settings["no_delete_mode"] = serde_json::Value::Bool(enabled);
+    if let Some(parent) = settings_path.parent() { let _ = std::fs::create_dir_all(parent); }
+    std::fs::write(&settings_path, serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("persist no_delete_mode failed: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_no_delete_mode(server_state: State<'_, ServerState>) -> Result<bool, String> {
+    Ok(*server_state.no_delete_mode.lock().unwrap())
+}
+
+// Pythonウォームアップ
+#[tauri::command]
+fn warmup_python() -> Result<(), String> {
+    // 起動してhealth/warmupを送る（エラーは返す）
+    ensure_python_process()?;
+    // 応答は待たずに即時戻す（レンダラをブロックしない）
+    python_send_nowait(serde_json::json!({"command":"warmup"}))?;
+    Ok(())
+}
+
+// ================== Secure Secrets (OS Keychain) ==================
+
+fn keychain_account(env: &str) -> (String, String) {
+    let service = "nuriemon".to_string();
+    let account = format!("event_setup_secret:{}", env);
+    (service, account)
+}
+
+#[tauri::command]
+fn save_event_secret(env: String, secret: String) -> Result<(), String> {
+    let (service, account) = keychain_account(env.trim());
+    Entry::new(&service, &account)
+        .map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?
+        .set_password(&secret)
+        .map_err(|e| format!("KEYCHAIN_WRITE_ERROR: {}", e))
+}
+
+#[tauri::command]
+fn load_event_secret(env: String) -> Result<Option<String>, String> {
+    let (service, account) = keychain_account(env.trim());
+    let entry = Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
+    match entry.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("KEYCHAIN_READ_ERROR: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn delete_event_secret(env: String) -> Result<(), String> {
+    let (service, account) = keychain_account(env.trim());
+    let entry = Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
+    match entry.delete_password() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("KEYCHAIN_DELETE_ERROR: {}", e)),
+    }
+}
+
+// 開発用: 指定ウィンドウのDevToolsを開く
+#[tauri::command]
+fn open_devtools(window_label: Option<String>, app: tauri::AppHandle) -> Result<(), String> {
+    let label = window_label.unwrap_or_else(|| "qr-display".to_string());
+    if let Some(win) = app.get_webview_window(&label) {
+        #[cfg(debug_assertions)]
+        {
+            win.open_devtools();
+            return Ok(());
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            return Err("DevTools disabled in release build".into());
+        }
+    }
+    Err(format!("window not found: {}", label))
 }

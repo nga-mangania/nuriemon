@@ -1,0 +1,35 @@
+name = "nuriemon-relay"
+main = "src/index.ts"
+account_id = "7154b1ae0818f393c2c49e9ff67c5b74"
+compatibility_date = "2025-08-01"
+
+# --------- Production (default) ----------
+[vars]
+ALLOWED_ORIGINS = "https://ctrl.nuriemon.jp,tauri://localhost"
+
+[durable_objects]
+bindings = [
+  { name = "EVENT_DO", class_name = "EventDO" }
+  # { name = "PC_DO", class_name = "PcDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["EventDO"]
+
+# --------- Staging (separate worker) ----------
+[env.staging]
+name = "nuriemon-relay-stg"
+
+[env.staging.vars]
+ALLOWED_ORIGINS = "https://stg.ctrl.nuriemon.jp,tauri://localhost,http://localhost:1420"
+
+[env.staging.durable_objects]
+bindings = [
+  { name = "EVENT_DO", class_name = "EventDO" }
+  # { name = "PC_DO", class_name = "PcDO" }
+]
+
+[[env.staging.migrations]]
+tag = "stg-v1"
+new_sqlite_classes = ["EventDO"]

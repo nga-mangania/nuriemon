@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { open, confirm } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { AudioSettings } from './AudioSettings';
 import { GroundSetting } from './GroundSetting';
@@ -10,6 +11,9 @@ import { emit, listen } from '@tauri-apps/api/event';
 import { getAllMetadata, loadImage, deleteImage, saveBackgroundFile } from '../services/imageStorage';
 import { WorkspaceManager } from '../services/workspaceManager';
 import { useWorkspaceStore } from '../stores/workspaceStore';
+import { AppSettingsService } from '../services/database';
+import { GlobalSettingsService } from '../services/globalSettings';
+import { currentRelayEnvAsSecretEnv, deleteEventSetupSecret, getEventSetupSecret, isUsingMemoryFallback, setEventSetupSecret } from '../services/secureSecrets';
 import styles from './SettingsPage.module.scss';
 
 console.log('[SettingsPage] All imports completed');
@@ -29,6 +33,19 @@ export function SettingsPage() {
   
   const [isAnimationWindowOpen, setIsAnimationWindowOpen] = useState(false);
   const [isChangingWorkspace, setIsChangingWorkspace] = useState(false);
+  const [operationMode, setOperationMode] = useState<'auto' | 'relay' | 'local'>('auto');
+  const [relayBaseUrl, setRelayBaseUrl] = useState<string>('https://ctrl.nuriemon.jp');
+  const [relayEventId, setRelayEventId] = useState<string>('');
+  const [pcId, setPcId] = useState<string>('');
+  const [eventSetupSecretInput, setEventSetupSecretInput] = useState<string>('');
+  const [storedSecretPreview, setStoredSecretPreview] = useState<string>('');
+  const [revealSecret, setRevealSecret] = useState<boolean>(false);
+  const [secretFallback, setSecretFallback] = useState<boolean>(false);
+  const [relayEnv, setRelayEnv] = useState<'prod'|'stg'>('prod');
+  const [relayBaseUrlProd, setRelayBaseUrlProd] = useState<string>('https://ctrl.nuriemon.jp');
+  const [relayBaseUrlStg, setRelayBaseUrlStg] = useState<string>('https://stg.ctrl.nuriemon.jp');
+  const [noDeleteMode, setNoDeleteMode] = useState<boolean>(false);
+  const [pcBridgeStatus, setPcBridgeStatus] = useState<string>('idle');
   
   // 背景アップロード関連のstate
   const [uploadingBackground, setUploadingBackground] = useState(false);
@@ -41,6 +58,78 @@ export function SettingsPage() {
       deletionTime,
       currentWorkspace
     });
+
+    // 動作モードの読み込み（デフォルト: auto）
+    try {
+      const mode = await AppSettingsService.getAppSetting('operation_mode');
+      if (mode === 'relay' || mode === 'local' || mode === 'auto') {
+        setOperationMode(mode);
+      } else {
+        setOperationMode('auto');
+      }
+    } catch (_) {
+      setOperationMode('auto');
+    }
+
+    // Relay設定の読み込み
+    try {
+      // グローバル接続先設定
+      const env = (await GlobalSettingsService.get('relay_env')) as 'prod'|'stg' | null;
+      if (env === 'prod' || env === 'stg') setRelayEnv(env);
+      const prod = await GlobalSettingsService.get('relay_base_url_prod');
+      if (prod) setRelayBaseUrlProd(prod);
+      const stg = await GlobalSettingsService.get('relay_base_url_stg');
+      if (stg) setRelayBaseUrlStg(stg);
+      // 互換: relay_base_url があれば現在のenvの値として扱う
+      const legacy = await GlobalSettingsService.get('relay_base_url');
+      if (legacy) setRelayBaseUrl(legacy);
+      const eid = await AppSettingsService.getAppSetting('relay_event_id');
+      if (eid) setRelayEventId(eid);
+      // pcid（後方互換として pc_id も読んで移行）
+      let pid = await AppSettingsService.getAppSetting('pcid');
+      if (!pid) {
+        const legacy = await AppSettingsService.getAppSetting('pc_id');
+        if (legacy) {
+          pid = legacy;
+          try { await AppSettingsService.saveAppSetting('pcid', pid); } catch {}
+        }
+      }
+      if (pid) {
+        setPcId(pid);
+      } else {
+        // なければ一度だけ生成
+        const generated = generateDefaultPcid();
+        setPcId(generated);
+        try { await AppSettingsService.saveAppSetting('pcid', generated); } catch {}
+      }
+      // 秘密鍵は OS キーチェーンから取得
+      try {
+        const envForSecret = await currentRelayEnvAsSecretEnv();
+        const secret = await getEventSetupSecret(envForSecret);
+        if (secret) setStoredSecretPreview(maskSecret(secret));
+        setSecretFallback(isUsingMemoryFallback());
+      } catch (_) {
+        setSecretFallback(isUsingMemoryFallback());
+      }
+    } catch (_) {}
+
+    // （生成は上で一度だけ行う）
+
+    // レガシー移行（旧: ワークスペースJSONに平文保存）
+    try {
+      const legacy = await AppSettingsService.getAppSetting('event_setup_secret');
+      if (legacy && legacy.trim()) {
+        const envForSecret = await currentRelayEnvAsSecretEnv();
+        await setEventSetupSecret(envForSecret, legacy.trim());
+        try { await AppSettingsService.saveAppSetting('event_setup_secret', ''); } catch {}
+        console.log('[SettingsPage] EVENT_SETUP_SECRET migrated to OS keychain');
+        const s = await getEventSetupSecret(envForSecret);
+        if (s) setStoredSecretPreview(maskSecret(s));
+        setSecretFallback(isUsingMemoryFallback());
+      }
+    } catch (e) {
+      console.warn('[SettingsPage] legacy secret migration failed/ignored:', e);
+    }
     
     // 背景画像の読み込み
     try {
@@ -62,32 +151,37 @@ export function SettingsPage() {
 
   useEffect(() => {
     const init = async () => {
-      // 初回起動時に統合的な初期化処理を実行
       try {
-        // まずマイグレーションを実行（file_pathを確保）
-        const { migrateFilePaths } = await import('../services/migration');
-        await migrateFilePaths();
-        console.log('[SettingsPage] マイグレーション完了');
-        
-        // 次にクリーンアップを実行
-        const { removeDuplicateFiles, cleanupDatabase } = await import('../services/cleanupDatabase');
-        console.log('[SettingsPage] removeDuplicateFilesを開始...');
-        await removeDuplicateFiles();
-        console.log('[SettingsPage] removeDuplicateFiles完了');
-        // ファイルパスの不整合を修正
-        console.log('[SettingsPage] cleanupDatabaseを開始...');
-        await cleanupDatabase();
-        console.log('[SettingsPage] データベースのクリーンアップ完了');
-        
-        // 最後に設定を読み込み
+        // 旧設定の移行（安全）
+        try {
+          const { migrateLegacySettingsToWorkspace } = await import('../services/legacyMigration');
+          await migrateLegacySettingsToWorkspace();
+        } catch (_) {}
         await loadSettings();
+        try { setNoDeleteMode(await invoke<boolean>('get_no_delete_mode')); } catch {}
       } catch (error) {
         console.error('[SettingsPage] 初期化エラー:', error);
-        // エラー時でも設定は読み込む
         await loadSettings();
       }
     };
     init();
+  }, []);
+
+  // PCブリッジ状態の購読（トップレベルで）
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        const un = await listen('pc-bridge-status', (e) => {
+          const p: any = e.payload || {};
+          const s = typeof p === 'string' ? p : (p.state || JSON.stringify(p));
+          setPcBridgeStatus(s);
+        });
+        cleanup = un;
+      } catch {}
+    })();
+    return () => { if (cleanup) cleanup(); };
   }, []);
 
   // ワークスペース変更を監視
@@ -297,6 +391,212 @@ export function SettingsPage() {
     <div className={styles.settingsPage}>
       <h1>初期設定</h1>
 
+      {/* ステップ0: 動作モード選択 */}
+      <section className={styles.section}>
+        <h2>ステップ0: 動作モード</h2>
+        <div>
+          <label style={{ display: 'inline-flex', alignItems: 'center', marginRight: 16 }}>
+            <input
+              type="radio"
+              name="operation-mode"
+              value="auto"
+              checked={operationMode === 'auto'}
+              onChange={async () => {
+                setOperationMode('auto');
+                try { 
+                  await AppSettingsService.saveAppSetting('operation_mode', 'auto'); 
+                  emit('app-settings-changed', { key: 'operation_mode', value: 'auto' });
+                } catch {}
+              }}
+            />
+            <span style={{ marginLeft: 8 }}>Auto（推奨）</span>
+          </label>
+          <label style={{ display: 'inline-flex', alignItems: 'center', marginRight: 16 }}>
+            <input
+              type="radio"
+              name="operation-mode"
+              value="relay"
+              checked={operationMode === 'relay'}
+              onChange={async () => {
+                setOperationMode('relay');
+                try { 
+                  await AppSettingsService.saveAppSetting('operation_mode', 'relay'); 
+                  emit('app-settings-changed', { key: 'operation_mode', value: 'relay' });
+                } catch {}
+              }}
+            />
+            <span style={{ marginLeft: 8 }}>オンライン（Relay）</span>
+          </label>
+          <label style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <input
+              type="radio"
+              name="operation-mode"
+              value="local"
+              checked={operationMode === 'local'}
+              onChange={async () => {
+                setOperationMode('local');
+                try { 
+                  await AppSettingsService.saveAppSetting('operation_mode', 'local'); 
+                  emit('app-settings-changed', { key: 'operation_mode', value: 'local' });
+                } catch {}
+              }}
+            />
+            <span style={{ marginLeft: 8 }}>オフライン（Local）</span>
+          </label>
+        </div>
+        <div className={styles.note}>
+          <p>Auto: Relayを自動試行し不可時はLocalに案内。Relay: 4G/5Gのまま中継経由。Local: 会場Wi‑Fi/PCホットスポットでPCに直接接続。</p>
+        </div>
+      </section>
+
+      {/* Relay設定 */}
+      <section className={styles.section}>
+        <h2>Relay設定</h2>
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>PCブリッジ状態: {pcBridgeStatus}</div>
+        <div style={{ display: 'grid', gap: 12, maxWidth: 640 }}>
+          <label>
+            接続先
+            <select
+              value={relayEnv}
+              onChange={async (e) => {
+                const v = (e.target.value === 'stg' ? 'stg' : 'prod') as 'prod'|'stg';
+                setRelayEnv(v);
+                try {
+                  await GlobalSettingsService.save('relay_env', v);
+                  const chosen = v === 'stg' ? relayBaseUrlStg : relayBaseUrlProd;
+                  await GlobalSettingsService.save('relay_base_url', chosen);
+                  emit('app-settings-changed', { key: 'relay_env', value: v });
+                } catch {}
+              }}
+            >
+              <option value="prod">本番</option>
+              <option value="stg">検証（stg）</option>
+            </select>
+          </label>
+          <label>
+            本番ベースURL
+            <input
+              type="text"
+              value={relayBaseUrlProd}
+              onChange={async (e) => {
+                const v = e.target.value;
+                setRelayBaseUrlProd(v);
+                try {
+                  await GlobalSettingsService.save('relay_base_url_prod', v);
+                  if (relayEnv === 'prod') await GlobalSettingsService.save('relay_base_url', v);
+                  setRelayBaseUrl(v);
+                  emit('app-settings-changed', { key: 'relay_base_url_prod', value: v });
+                } catch {}
+              }}
+              placeholder="https://ctrl.nuriemon.jp"
+              style={{ width: '100%' }}
+            />
+          </label>
+          <label>
+            検証(stg)ベースURL
+            <input
+              type="text"
+              value={relayBaseUrlStg}
+              onChange={async (e) => {
+                const v = e.target.value;
+                setRelayBaseUrlStg(v);
+                try {
+                  await GlobalSettingsService.save('relay_base_url_stg', v);
+                  if (relayEnv === 'stg') await GlobalSettingsService.save('relay_base_url', v);
+                  if (relayEnv === 'stg') setRelayBaseUrl(v);
+                  emit('app-settings-changed', { key: 'relay_base_url_stg', value: v });
+                } catch {}
+              }}
+              placeholder="https://stg.ctrl.nuriemon.jp"
+              style={{ width: '100%' }}
+            />
+          </label>
+          <label>
+            Event ID
+            <input
+              type="text"
+              value={relayEventId}
+              onChange={async (e) => {
+                const vRaw = e.target.value.trim().toLowerCase();
+                const v = sanitizeId(vRaw);
+                setRelayEventId(v);
+                if (isValidId(v)) {
+                  try { 
+                    await AppSettingsService.saveAppSetting('relay_event_id', v); 
+                    emit('app-settings-changed', { key: 'relay_event_id', value: v });
+                  } catch {}
+                }
+              }}
+              placeholder="例: demo"
+              style={{ width: '100%' }}
+            />
+          </label>
+          <label>
+            PC ID（任意、空なら自動）
+            <input
+              type="text"
+              value={pcId}
+              onChange={async (e) => {
+                const vRaw = e.target.value.trim().toLowerCase();
+                const v = sanitizeId(vRaw);
+                setPcId(v);
+                if (isValidId(v)) {
+                  try { 
+                    await AppSettingsService.saveAppSetting('pcid', v); 
+                    emit('app-settings-changed', { key: 'pcid', value: v });
+                  } catch {}
+                }
+              }}
+              placeholder="例: booth-01"
+              style={{ width: '100%' }}
+            />
+          </label>
+          <fieldset style={{ border: '1px solid #eee', padding: 12, borderRadius: 6 }}>
+            <legend>EVENT_SETUP_SECRET（安全保存）</legend>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <div>
+                <label>現在（保存済み）: <span style={{ fontFamily: 'monospace' }}>{storedSecretPreview || '(未設定)'}</span></label>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type={revealSecret ? 'text' : 'password'}
+                  value={eventSetupSecretInput}
+                  onChange={(e) => setEventSetupSecretInput(e.target.value)}
+                  placeholder="イベント登録用シークレット（base64url推奨）"
+                  style={{ width: '100%' }}
+                />
+                <button onClick={() => setRevealSecret(s => !s)}>{revealSecret ? 'Hide' : 'Reveal'}</button>
+                <button onClick={async () => {
+                  const envForSecret = await currentRelayEnvAsSecretEnv();
+                  await setEventSetupSecret(envForSecret, eventSetupSecretInput.trim());
+                  const s = await getEventSetupSecret(envForSecret);
+                  setStoredSecretPreview(s ? maskSecret(s) : '');
+                  setEventSetupSecretInput('');
+                  setSecretFallback(isUsingMemoryFallback());
+                  alert(isUsingMemoryFallback() ? '秘密鍵をメモリに保存しました（この環境では再起動で消えます）' : '秘密鍵を安全領域に保存しました');
+                }}>Save</button>
+                <button onClick={async () => {
+                  if (await confirm('保存済みの秘密鍵を削除しますか？')) {
+                    const envForSecret = await currentRelayEnvAsSecretEnv();
+                    await deleteEventSetupSecret(envForSecret);
+                    setStoredSecretPreview('');
+                    setSecretFallback(isUsingMemoryFallback());
+                  }
+                }}>Delete</button>
+              </div>
+              <div className={styles.note}>
+                <p>鍵はOSの安全領域に保存され、平文ファイルには保存されません。stg/prodで別々に管理されます。</p>
+                {secretFallback && <p style={{ color: '#a60' }}>この環境では安全領域が利用できないため、メモリに一時保存します（再起動で消えます）。</p>}
+              </div>
+            </div>
+          </fieldset>
+        </div>
+        <div className={styles.note}>
+          <p>QRは `e` と `sid` のみを含み、WS用トークンはPOSTで取得します（URLにトークンは載せません）。</p>
+          <p>EventID/PCIDの形式: 英小文字・数字・ハイフンのみ（3–32文字）。</p>
+        </div>
+      </section>
+
       {/* ステップ1: ワークスペース */}
       <section className={styles.section}>
         <h2>ステップ1: 現在のワークスペース</h2>
@@ -445,6 +745,17 @@ export function SettingsPage() {
       {/* デバッグセクション */}
       <section className={styles.section}>
         <h2>データベース管理</h2>
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" checked={noDeleteMode} onChange={async (e) => {
+              const v = e.target.checked;
+              setNoDeleteMode(v);
+              try { await invoke('set_no_delete_mode', { enabled: v }); } catch {}
+            }} />
+            No-Deleteモード（削除APIを無効化）
+          </label>
+          <button onClick={() => { try { invoke('open_devtools', { window_label: 'main' } as any); } catch {} }} style={{ marginLeft: 12 }}>DevTools</button>
+        </div>
         <button 
           onClick={async () => {
             const confirmed = await confirm('データベースをクリーンアップしますか？\n\n重複ファイルや存在しないファイルへの参照が削除されます。');
@@ -478,3 +789,20 @@ export function SettingsPage() {
   );
 }
 
+// ========= helpers =========
+function sanitizeId(input: string): string {
+  // 小文字英数とハイフンのみ、最大32
+  return input.replace(/[^a-z0-9-]/g, '').slice(0, 32);
+}
+
+function isValidId(input: string): boolean {
+  return /^[a-z0-9-]{3,32}$/.test(input);
+}
+
+function generateDefaultPcid(): string {
+  // pc- + base32(6)
+  const alphabet = '0123456789abcdefghjkmnpqrstvwxyz'; // 小文字/除外セット
+  let s = '';
+  for (let i = 0; i < 6; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return `pc-${s}`;
+}

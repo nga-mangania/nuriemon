@@ -5,6 +5,8 @@ use crate::qr_manager::QrManager;
 pub struct ServerState {
     pub web_server_port: Arc<Mutex<Option<u16>>>,
     pub qr_manager: Arc<Mutex<Option<Arc<QrManager>>>>,
+    pub is_starting: Arc<Mutex<bool>>,
+    pub no_delete_mode: Arc<Mutex<bool>>,
 }
 
 impl ServerState {
@@ -12,6 +14,8 @@ impl ServerState {
         Self {
             web_server_port: Arc::new(Mutex::new(None)),
             qr_manager: Arc::new(Mutex::new(None)),
+            is_starting: Arc::new(Mutex::new(false)),
+            no_delete_mode: Arc::new(Mutex::new(false)),
         }
     }
     
@@ -29,5 +33,19 @@ impl ServerState {
     
     pub fn get_qr_manager(&self) -> Option<Arc<QrManager>> {
         self.qr_manager.lock().unwrap().clone()
+    }
+
+    pub fn begin_starting(&self) -> bool {
+        let mut guard = self.is_starting.lock().unwrap();
+        if *guard {
+            false
+        } else {
+            *guard = true;
+            true
+        }
+    }
+
+    pub fn finish_starting(&self) {
+        *self.is_starting.lock().unwrap() = false;
     }
 }

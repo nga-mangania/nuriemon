@@ -38,23 +38,39 @@ interface WorkspaceState {
 
 // --- 手動同期のためのヘルパー関数 ---
 // この関数はストアの外部にあるため、どのストアのアクションからも呼び出せる
+let lastSaveTs = 0;
+let saveTimer: number | null = null as any;
 async function saveStateToFile() {
   try {
-    const store = await getStore();
-    const state = useWorkspaceStore.getState();
-    
-    await store.set('workspace', {
-      currentWorkspace: state.currentWorkspace,
-      images: state.images,
-      groundPosition: state.groundPosition,
-      deletionTime: state.deletionTime,
-    });
-    
-    await store.save();
-    console.log('[saveStateToFile] State saved to store.');
+    const now = Date.now();
+    // 1秒以内の連続保存はまとめる
+    if (saveTimer) {
+      return;
+    }
+    if (now - lastSaveTs < 1000) {
+      saveTimer = window.setTimeout(async () => {
+        saveTimer = null as any;
+        await doSave();
+      }, 1000 - (now - lastSaveTs));
+      return;
+    }
+    await doSave();
   } catch (error) {
     console.error('Failed to save state to store:', error);
   }
+}
+
+async function doSave() {
+  const store = await getStore();
+  const state = useWorkspaceStore.getState();
+  await store.set('workspace', {
+    currentWorkspace: state.currentWorkspace,
+    images: state.images,
+    groundPosition: state.groundPosition,
+    deletionTime: state.deletionTime,
+  });
+  await store.save();
+  lastSaveTs = Date.now();
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set) => ({

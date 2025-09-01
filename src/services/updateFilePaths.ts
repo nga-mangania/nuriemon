@@ -9,7 +9,7 @@ export async function updateAllFilePaths(): Promise<void> {
   try {
     console.log('[updateFilePaths] ファイルパスの更新を開始します...');
     
-    // 現在の保存ディレクトリを取得
+    // 現在のワークスペースディレクトリを取得
     const currentSaveDir = await AppSettingsService.getSaveDirectory();
     console.log('[updateFilePaths] 現在の保存ディレクトリ:', currentSaveDir);
     
@@ -34,12 +34,12 @@ export async function updateAllFilePaths(): Promise<void> {
         
         // 新しいファイルパスを構築
         if (imageType === 'bgm' || imageType === 'soundEffect') {
-          newFilePath = await join(currentSaveDir, 'nuriemon', 'audio', fileName);
+          newFilePath = await join(currentSaveDir, 'audio', fileName);
         } else if (imageType === 'background') {
-          newFilePath = await join(currentSaveDir, 'nuriemon', 'images', 'backgrounds', fileName);
+          newFilePath = await join(currentSaveDir, 'images', 'backgrounds', fileName);
         } else {
           const subDir = item.type === 'original' ? 'originals' : 'processed';
-          newFilePath = await join(currentSaveDir, 'nuriemon', 'images', subDir, fileName);
+          newFilePath = await join(currentSaveDir, 'images', subDir, fileName);
         }
         
         // データベースを更新

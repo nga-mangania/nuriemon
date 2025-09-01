@@ -72,12 +72,12 @@ export async function cleanupDatabase(): Promise<void> {
             // 実際のファイル検索は Rust 側で実装が必要なため、
             // ここでは単純に削除
             console.log(`[cleanupDatabase] エントリを削除: ${item.id}`);
-            await DatabaseService.deleteImage(item.id);
+            await DatabaseService.deleteImage(item.id, 'cleanup');
             deletedCount++;
           } else {
             // 通常の画像ファイル
             console.log(`[cleanupDatabase] 通常画像を削除: ${item.id}, パス: ${filePath}`);
-            await DatabaseService.deleteImage(item.id);
+            await DatabaseService.deleteImage(item.id, 'cleanup');
             deletedCount++;
             console.log(`[cleanupDatabase] 削除完了: ${item.id}`);
           }
@@ -144,7 +144,7 @@ export async function removeDuplicateFiles(): Promise<void> {
       // 最新のものを残して、古いものを削除
       for (let i = 1; i < files.length; i++) {
         console.log(`[removeDuplicateFiles] 古い${type}を削除: ${files[i].id}`);
-        await DatabaseService.deleteImage(files[i].id);
+        await DatabaseService.deleteImage(files[i].id, 'duplicate');
       }
     };
     

@@ -1,4 +1,4 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Error, middleware};
+use actix_web::{web, App, HttpResponse, HttpServer, Error, middleware, HttpRequest};
 use actix_web::http::header;
 use rust_embed::RustEmbed;
 use std::sync::Arc;
@@ -10,7 +10,6 @@ use crate::workspace::WorkspaceState;
 
 #[derive(RustEmbed)]
 #[folder = "../mobile-ui/dist"]
-#[prefix = "/"]
 struct MobileAssets;
 
 pub struct WebServerState {
@@ -36,12 +35,6 @@ pub async fn start_web_server(app_handle: AppHandle) -> Result<u16, Box<dyn std:
             App::new()
                 .app_data(web::Data::new(state))
                 .wrap(middleware::Logger::default())
-                .wrap(
-                    middleware::DefaultHeaders::new()
-                        .add((header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"))
-                        .add((header::ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, OPTIONS"))
-                        .add((header::ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type"))
-                )
                 .service(web::resource("/").route(web::get().to(serve_index)))
                 .service(web::resource("/mobile").route(web::get().to(serve_mobile)))
                 .service(web::resource("/image/{id}").route(web::get().to(serve_image_by_id)))
@@ -71,29 +64,45 @@ pub async fn start_web_server(app_handle: AppHandle) -> Result<u16, Box<dyn std:
     Err(format!("利用可能なポートが見つかりません: {:?}", last_error).into())
 }
 
-async fn serve_index() -> Result<HttpResponse, Error> {
+async fn serve_index(req: HttpRequest) -> Result<HttpResponse, Error> {
+    println!("[web_server] GET / from {:?}", req.peer_addr());
     serve_embedded_file("index.html")
 }
 
-async fn serve_mobile() -> Result<HttpResponse, Error> {
+async fn serve_mobile(req: HttpRequest) -> Result<HttpResponse, Error> {
+    println!("[web_server] GET /mobile from {:?}", req.peer_addr());
     serve_embedded_file("mobile.html")
 }
 
-async fn serve_static(path: web::Path<String>) -> Result<HttpResponse, Error> {
+async fn serve_static(req: HttpRequest, path: web::Path<String>) -> Result<HttpResponse, Error> {
+    println!("[web_server] GET /{} from {:?}", path, req.peer_addr());
     serve_embedded_file(&path.into_inner())
 }
 
 fn serve_embedded_file(path: &str) -> Result<HttpResponse, Error> {
     let path = path.trim_start_matches('/');
     
-    match MobileAssets::get(path) {
+    // プレフィックス有無の両方を試す（後方互換）
+    let asset = MobileAssets::get(path).or_else(|| MobileAssets::get(&format!("/{}", path)));
+
+    match asset {
         Some(content) => {
             let mime = mime_guess::from_path(path).first_or_octet_stream();
-            Ok(HttpResponse::Ok()
-                .content_type(mime.to_string())
-                .body(content.data.into_owned()))
+            let body = content.data.into_owned();
+            // HTMLは文字化け回避のためUTF-8を明示
+            if mime.type_() == mime::TEXT && mime.subtype() == mime::HTML {
+                Ok(HttpResponse::Ok()
+                    .insert_header((header::CONTENT_TYPE, "text/html; charset=utf-8"))
+                    .body(body))
+            } else {
+                Ok(HttpResponse::Ok()
+                    .content_type(mime.to_string())
+                    .body(body))
+            }
         }
-        None => Ok(HttpResponse::NotFound().body("ファイルが見つかりません")),
+        None => Ok(HttpResponse::NotFound()
+            .insert_header((header::CONTENT_TYPE, "text/plain; charset=utf-8"))
+            .body("ファイルが見つかりません")),
     }
 }
 
@@ -103,6 +112,7 @@ async fn serve_image_by_id(
     path: web::Path<String>,
 ) -> Result<HttpResponse, Error> {
     let image_id = path.into_inner();
+    println!("[web_server] GET /image/{}", image_id);
 
     // ワークスペースDBにアクセスしてメタデータを取得
     let state: tauri::State<WorkspaceState> = data.app_handle.state();
@@ -154,6 +164,7 @@ async fn handle_connect(
     data: web::Data<WebServerState>,
     body: web::Json<serde_json::Value>,
 ) -> Result<HttpResponse, Error> {
+    println!("[web_server] POST /api/connect body={}", body);
     // 接続リクエストの処理
     let session_id = body.get("sessionId")
         .and_then(|v| v.as_str())

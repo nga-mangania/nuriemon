@@ -64,8 +64,8 @@ export class DatabaseService {
   }
 
   // 画像の削除
-  static async deleteImage(id: string): Promise<void> {
-    await invoke('delete_image', { id });
+  static async deleteImage(id: string, reason?: string): Promise<void> {
+    await invoke('delete_image', { id, reason });
   }
 
   // 画像の存在確認

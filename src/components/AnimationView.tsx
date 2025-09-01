@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { createNoise2D } from 'simplex-noise';
 import {
   SPEED_SETTINGS,
@@ -47,7 +48,119 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   useEffect(() => {
     console.log('[AnimationView] 地面位置が変更されました:', groundPosition);
   }, [groundPosition]);
-  console.log('[AnimationView] 削除時間:', deletionTime);
+
+  // モバイル操作の受信（move/action/emote）
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setup = async () => {
+      unlisten = await listen<any>('mobile-control', (event) => {
+        const payload: any = event.payload || {};
+        const type = payload.type as string;
+        const imageId = payload.imageId as string | undefined;
+        try { console.log('[AnimationView] mobile-control:', { type, imageId, count: Object.keys(animatedImagesRef.current).length }); } catch {}
+
+        const apply = (handler: (img: AnimatedImage) => void) => {
+          if (imageId) {
+            const img = animatedImagesRef.current[imageId];
+            if (!img) {
+              // 到達はしているが紐付け不一致の場合、可視性重視で全体適用
+              try { console.warn('[AnimationView] target imageId not found; applying to all', imageId); } catch {}
+              const ids = Object.keys(animatedImagesRef.current);
+              ids.forEach((id) => {
+                const g = animatedImagesRef.current[id];
+                if (!g) return;
+                handler(g);
+              });
+              setAnimatedImages((prev) => prev.map((i) => ({ ...animatedImagesRef.current[i.id] })));
+              return;
+            }
+            handler(img);
+            setAnimatedImages((prev) => prev.map((i) => (i.id === imageId ? { ...img } as any : i)));
+          } else {
+            // imageIdが無い場合は、全画像に適用（視覚的に分かりやすくする）
+            const ids = Object.keys(animatedImagesRef.current);
+            ids.forEach((id) => {
+              const img = animatedImagesRef.current[id];
+              if (!img) return;
+              handler(img);
+            });
+            setAnimatedImages((prev) => prev.map((i) => ({ ...animatedImagesRef.current[i.id] })));
+          }
+        };
+
+        switch (type) {
+          case 'move': {
+            const dir = payload.direction as string | undefined;
+            apply((img) => {
+              const accel = 2.0; // 体感しやすいブースト
+              if (dir === 'left') img.velocityX = -Math.abs(img.velocityX) - accel;
+              if (dir === 'right') img.velocityX = Math.abs(img.velocityX) + accel;
+              if (dir === 'up') img.velocityY = -Math.abs(img.velocityY) - accel;
+              if (dir === 'down') img.velocityY = Math.abs(img.velocityY) + accel;
+              img.directionChangeTimer = 30; // しばらく方向を維持
+            });
+            break;
+          }
+          case 'action': {
+            const action = payload.actionType as string | undefined;
+            const effective = (action && ['jump','spin','shake','grow','shrink'].includes(action)) ? action : 'jump';
+            apply((img) => {
+              const now = Date.now();
+              // 特殊動作の上書き
+              const base = {
+                startTime: now,
+                duration: 400,
+                originalVelocityX: img.velocityX,
+                originalVelocityY: img.velocityY,
+                originalY: img.y,
+              } as any;
+              switch (effective) {
+                case 'jump':
+                  img.specialMovement = { ...base, type: 4 };
+                  break;
+                case 'spin':
+                  img.specialMovement = { ...base, type: 3 };
+                  break;
+                case 'shake':
+                  img.specialMovement = { ...base, type: 1 };
+                  break;
+                case 'grow':
+                case 'shrink':
+                  img.specialMovement = { ...base, type: 2 };
+                  break;
+                default:
+                  img.specialMovement = { ...base, type: 0 };
+                  break;
+              }
+            });
+            break;
+          }
+          case 'emote': {
+            const emoteType = payload.emoteType as string | undefined;
+            apply((img) => {
+              if (!emoteType) return;
+              // 既存SVGのみにフォールバック（存在しない場合はテキストに）
+              const allowed = new Set(svgEmotes);
+              if (allowed.has(emoteType)) {
+                img.emote = { type: 'svg', content: emoteType } as any;
+              } else {
+                img.emote = { type: 'text', content: '😊' } as any;
+              }
+              img.emoteTimer = 150;
+            });
+            break;
+          }
+        }
+      });
+    };
+
+    setup();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+  // 削除時間のログは毎フレームの再レンダでノイズになるため削除
   
   // Zustandストアが削除時間を管理しているため、読み込みとイベントリスナーは不要
   
@@ -98,7 +211,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
           image.scale = 1 - 0.5 * Math.abs(rotationProgress);
           break;
         case 4: // ジャンプ
-          const jumpHeight = 20;
+          const jumpHeight = 35; // より分かりやすく高く
           const jumpProgress = Math.sin(progress * Math.PI);
           const verticalOffset = jumpHeight * jumpProgress;
           image.y = image.specialMovement.originalY - verticalOffset;

@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { UploadPage } from "./components/UploadPage";
 import { GalleryPage } from "./components/GalleryPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { Sidebar } from "./components/Sidebar/Sidebar";
 import { initializeStorage } from "./services/imageStorage";
 import { startAutoDeleteService, stopAutoDeleteService } from "./services/autoDelete";
+import { AppSettingsService } from "./services/database";
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useWorkspace } from "./hooks/useWorkspace";
@@ -13,6 +14,7 @@ import { TauriEventListener } from "./events/tauriEventListener";
 import { rehydrateStore, saveStateToFile, useWorkspaceStore } from "./stores/workspaceStore";
 import { emit } from '@tauri-apps/api/event';
 import styles from "./App.module.scss";
+import { createPcWsClient } from "./services/pcWsClient";
 
 console.log('[App.tsx] Module loaded');
 
@@ -32,6 +34,7 @@ function App() {
   console.log('[App] Component rendering');
   const [activeTab, setActiveTab] = useState<'settings' | 'upload' | 'gallery' | 'animation'>('upload');
   const { isLoading, needsWorkspace, isReady, currentWorkspace } = useWorkspace();
+  const relayBridgeRef = useRef<ReturnType<typeof createPcWsClient> | null>(null);
   
   console.log('[App] State:', { isLoading, needsWorkspace, isReady, currentWorkspace });
 
@@ -54,7 +57,15 @@ function App() {
           // ストアを再水和
           await rehydrateStore();
           await initializeStorage();
-          startAutoDeleteService();
+          // Python サイドカーをウォームアップ（モデル読み込みを先行）
+          try { await invoke('warmup_python'); } catch (_) {}
+          // 自動削除は『無制限』以外のときのみ開始
+          try {
+            const del = await AppSettingsService.getDeletionTime();
+            if (del && del !== 'unlimited') {
+              startAutoDeleteService();
+            }
+          } catch (_) {}
           
           // Tauriイベントリスナーをセットアップ
           const eventListener = TauriEventListener.getInstance();
@@ -71,6 +82,10 @@ function App() {
       return () => {
         const eventListener = TauriEventListener.getInstance();
         eventListener.cleanup();
+        if (relayBridgeRef.current) {
+          try { relayBridgeRef.current.stop(); } catch {}
+          relayBridgeRef.current = null;
+        }
       };
     }
   }, [isReady, currentWorkspace]);
@@ -89,8 +104,13 @@ function App() {
         // ストレージを再初期化
         try {
           await initializeStorage();
-          // 自動削除サービスを再起動
-          startAutoDeleteService();
+          // 自動削除サービスを再起動（無制限でない場合のみ）
+          try {
+            const del = await AppSettingsService.getDeletionTime();
+            if (del && del !== 'unlimited') {
+              startAutoDeleteService();
+            }
+          } catch (_) {}
           console.log('[App] 自動削除サービスを再起動しました');
         } catch (error) {
           console.error('[App] 自動削除サービスの再起動エラー:', error);
@@ -107,6 +127,33 @@ function App() {
     return () => {
       cleanupPromise.then(cleanup => cleanup && cleanup());
     };
+  }, [isReady]);
+
+  // Relayブリッジをグローバルで起動
+  useEffect(() => {
+    if (!isReady) return;
+    const run = async () => {
+      try {
+        const mode = await AppSettingsService.getAppSetting('operation_mode');
+        const eid = await AppSettingsService.getAppSetting('relay_event_id');
+        const pcid = await AppSettingsService.getAppSetting('pcid');
+        const relayActive = mode === 'relay' || mode === 'auto';
+        if (relayActive && eid && pcid) {
+          if (relayBridgeRef.current) { relayBridgeRef.current.stop(); relayBridgeRef.current = null; }
+          const client = createPcWsClient({ eventId: eid, pcid });
+          relayBridgeRef.current = client;
+          await client.start();
+        } else {
+          if (relayBridgeRef.current) { relayBridgeRef.current.stop(); relayBridgeRef.current = null; }
+        }
+      } catch (e) {
+        console.warn('[App] pcWsClient start failed:', e);
+      }
+    };
+    run();
+    // 設定変更時にも再評価
+    const sub = listen('app-settings-changed', () => run());
+    return () => { sub.then(un => un()); };
   }, [isReady]);
 
   const handleAnimationClick = async () => {
@@ -160,7 +207,12 @@ useWorkspaceStore.subscribe(
   (images) => {
     console.log('[App] Images changed in store, emitting store-updated event');
     // 画像リストが変更されたら他のウィンドウに通知
-    emit('store-updated');
+    try {
+      const p = emit('store-updated');
+      if (p && typeof (p as any).catch === 'function') {
+        (p as any).catch(() => {});
+      }
+    } catch (_) {}
   }
 );
 

@@ -117,23 +117,28 @@ def process_image(base64_image):
         }
 
 def main():
-    # 標準入力からJSONを読み込む
-    for line in sys.stdin:
+    # 標準入力からJSONを読み込み、常駐で処理
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
         try:
             data = json.loads(line.strip())
-            
-            if data.get("command") == "process":
+            cmd = data.get("command")
+
+            if cmd == "process":
                 result = process_image(data.get("image", ""))
                 print(json.dumps(result), flush=True)
                 sys.stdout.flush()
-                break  # 処理完了後、ループを抜ける
-            elif data.get("command") == "health":
+            elif cmd == "health" or cmd == "warmup":
                 print(json.dumps({"success": True, "status": "ready"}), flush=True)
-                
+            elif cmd == "shutdown":
+                print(json.dumps({"success": True, "status": "bye"}), flush=True)
+                sys.stdout.flush()
+                break
         except Exception as e:
             print(json.dumps({"type": "result", "success": False, "error": str(e)}), flush=True)
             sys.stdout.flush()
-            break
 
 if __name__ == "__main__":
     main()

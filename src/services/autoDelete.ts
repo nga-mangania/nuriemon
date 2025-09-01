@@ -4,7 +4,7 @@
  */
 
 import { getAllMetadata, deleteImage } from './imageStorage';
-import { loadSettings } from './settings';
+import { AppSettingsService } from './database';
 
 let autoDeleteInterval: number | null = null;
 
@@ -13,8 +13,7 @@ let autoDeleteInterval: number | null = null;
  */
 async function checkAutoDelete() {
   try {
-    const settings = await loadSettings();
-    const deletionTime = settings?.deletionTime;
+    const deletionTime = await AppSettingsService.getDeletionTime();
     
     // 無制限の場合は何もしない
     if (!deletionTime || deletionTime === 'unlimited') {

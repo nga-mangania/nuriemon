@@ -4,12 +4,15 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use std::fs;
 use base64::{Engine as _, engine::general_purpose};
 use once_cell::sync::Lazy;
+use crate::workspace::WorkspaceState;
+use crate::db::{ImageMetadata as DbImageMetadata, current_timestamp};
+use crate::events::{emit_data_change, DataChangeEvent};
 
 // グローバルなwatcher管理
 struct WatcherState {
@@ -201,7 +204,7 @@ fn process_new_image(
 }
 
 fn process_image_async(
-    _app_handle: AppHandle,
+    app_handle: AppHandle,
     image_path: PathBuf,
     image_id: String,
     workspace_path: String,
@@ -264,9 +267,43 @@ fn process_image_async(
     let save_path = processed_dir.join(&filename);
     
     // ファイルを保存
-    fs::write(&save_path, processed_data)
+    fs::write(&save_path, processed_data.clone())
         .map_err(|e| format!("Failed to save processed image: {}", e))?;
     
+    // DBへメタデータ登録
+    // 現在のワークスペースDBに接続している前提
+    let state: tauri::State<WorkspaceState> = app_handle.state();
+    let conn = state
+        .lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let db = conn.get().map_err(|e| e)?;
+
+    let original_file_name = Path::new(&image_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let metadata = DbImageMetadata {
+        id: image_id.clone(),
+        original_file_name,
+        saved_file_name: filename.clone(),
+        image_type: "processed".to_string(),
+        created_at: current_timestamp(),
+        size: processed_data.len() as i64,
+        width: None,
+        height: None,
+        storage_location: workspace_path.clone(),
+        file_path: Some(save_path.to_string_lossy().to_string()),
+    };
+
+    db.save_image_metadata(&metadata)
+        .map_err(|e| format!("Failed to save image metadata: {}", e))?;
+
+    // イベント発火（ギャラリー等へ反映）
+    emit_data_change(&app_handle, DataChangeEvent::ImageAdded { id: image_id.clone() })
+        .map_err(|e| format!("Failed to emit data change: {}", e))?;
+
     Ok(save_path.to_string_lossy().to_string())
 }
 

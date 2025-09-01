@@ -1,0 +1,12 @@
+{
+  "name": "relay-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --env=staging",
+    "deploy:stg": "wrangler deploy --env=staging",
+    "deploy:prod": "wrangler deploy",
+    "smoke:stg": "node ./scripts/signedSmokeTest.mjs --base=https://stg.ctrl.nuriemon.jp --event=$EVENT_ID --pcid=$PCID --ttl=${TTL:-90}",
+    "smoke:prod": "node ./scripts/signedSmokeTest.mjs --base=https://ctrl.nuriemon.jp --event=$EVENT_ID --pcid=$PCID --ttl=${TTL:-90}"
+  }
+}
