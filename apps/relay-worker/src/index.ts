@@ -584,13 +584,13 @@ function appHtml(): string {
     </div>
     <div class="dpad">
       <div class="sp"></div>
-      <button onclick="sendCmd('up')" ontouchstart="sendCmd('up')" onmousedown="sendCmd('up')">▲</button>
+      <button onmousedown="startHold('up')" ontouchstart="startHold('up')" onmouseup="stopHold()" ontouchend="stopHold()" ontouchcancel="stopHold()">▲</button>
       <div class="sp"></div>
-      <button onclick="sendCmd('left')" ontouchstart="sendCmd('left')" onmousedown="sendCmd('left')">◀</button>
+      <button onmousedown="startHold('left')" ontouchstart="startHold('left')" onmouseup="stopHold()" ontouchend="stopHold()" ontouchcancel="stopHold()">◀</button>
       <div class="sp"></div>
-      <button onclick="sendCmd('right')" ontouchstart="sendCmd('right')" onmousedown="sendCmd('right')">▶</button>
+      <button onmousedown="startHold('right')" ontouchstart="startHold('right')" onmouseup="stopHold()" ontouchend="stopHold()" ontouchcancel="stopHold()">▶</button>
       <div class="sp"></div>
-      <button onclick="sendCmd('down')" ontouchstart="sendCmd('down')" onmousedown="sendCmd('down')">▼</button>
+      <button onmousedown="startHold('down')" ontouchstart="startHold('down')" onmouseup="stopHold()" ontouchend="stopHold()" ontouchcancel="stopHold()">▼</button>
       <div class="sp"></div>
     </div>
     <button id="reconnect" style="display:none" onclick="manualReconnect()">再接続</button>
@@ -643,6 +643,11 @@ function appHtml(): string {
       }
       window.manualReconnect = ()=>{ attempt=0; if(ws){ try{ ws.close(); }catch{} } connect(); };
       function send(cmd){ try{ if(ws && ws.readyState===1){ ws.send(JSON.stringify({ v:1, type:'cmd', payload:{ cmd, imageId } })); } }catch{} }
+      // Hold-to-repeat for D-pad
+      let holdTimer = null;
+      function startHold(c){ try{ send(c); if(holdTimer) clearInterval(holdTimer); holdTimer=setInterval(()=>send(c), 120); }catch{} }
+      function stopHold(){ if(holdTimer){ try{ clearInterval(holdTimer); }catch{} holdTimer=null; } }
+      try { document.addEventListener('mouseup', stopHold); document.addEventListener('touchend', stopHold); document.addEventListener('touchcancel', stopHold); } catch {}
       window.sendCmd = (c)=> send(c);
       window.dir = (d)=> send(d);
       window.action = (a)=> send(a);
