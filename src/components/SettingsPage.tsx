@@ -44,7 +44,6 @@ export function SettingsPage() {
   const [relayEnv, setRelayEnv] = useState<'prod'|'stg'>('prod');
   const [relayBaseUrlProd, setRelayBaseUrlProd] = useState<string>('https://ctrl.nuriemon.jp');
   const [relayBaseUrlStg, setRelayBaseUrlStg] = useState<string>('https://stg.ctrl.nuriemon.jp');
-  const [noDeleteMode, setNoDeleteMode] = useState<boolean>(false);
   const [pcBridgeStatus, setPcBridgeStatus] = useState<string>('idle');
   
   // 背景アップロード関連のstate
@@ -158,7 +157,6 @@ export function SettingsPage() {
           await migrateLegacySettingsToWorkspace();
         } catch (_) {}
         await loadSettings();
-        try { setNoDeleteMode(await invoke<boolean>('get_no_delete_mode')); } catch {}
       } catch (error) {
         console.error('[SettingsPage] 初期化エラー:', error);
         await loadSettings();
@@ -746,15 +744,7 @@ export function SettingsPage() {
       <section className={styles.section}>
         <h2>データベース管理</h2>
         <div style={{ marginBottom: 12 }}>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <input type="checkbox" checked={noDeleteMode} onChange={async (e) => {
-              const v = e.target.checked;
-              setNoDeleteMode(v);
-              try { await invoke('set_no_delete_mode', { enabled: v }); } catch {}
-            }} />
-            No-Deleteモード（削除APIを無効化）
-          </label>
-          <button onClick={() => { try { invoke('open_devtools', { window_label: 'main' } as any); } catch {} }} style={{ marginLeft: 12 }}>DevTools</button>
+          <button onClick={() => { try { invoke('open_devtools', { window_label: 'main' } as any); } catch {} }}>DevTools</button>
         </div>
         <button 
           onClick={async () => {

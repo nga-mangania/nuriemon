@@ -4,7 +4,6 @@ import { GalleryPage } from "./components/GalleryPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { Sidebar } from "./components/Sidebar/Sidebar";
 import { initializeStorage } from "./services/imageStorage";
-import { startAutoDeleteService, stopAutoDeleteService } from "./services/autoDelete";
 import { AppSettingsService } from "./services/database";
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -59,13 +58,7 @@ function App() {
           await initializeStorage();
           // Python サイドカーをウォームアップ（モデル読み込みを先行）
           try { await invoke('warmup_python'); } catch (_) {}
-          // 自動削除は『無制限』以外のときのみ開始
-          try {
-            const del = await AppSettingsService.getDeletionTime();
-            if (del && del !== 'unlimited') {
-              startAutoDeleteService();
-            }
-          } catch (_) {}
+          // 自動削除は廃止（起動しない）
           
           // Tauriイベントリスナーをセットアップ
           const eventListener = TauriEventListener.getInstance();
@@ -98,19 +91,9 @@ function App() {
       const unlisten = await listen('workspace-data-loaded', async (_event) => {
         console.log('[App] ワークスペース変更検出、自動削除サービスを再起動します');
         
-        // 既存の自動削除サービスを停止
-        stopAutoDeleteService();
-        
         // ストレージを再初期化
         try {
           await initializeStorage();
-          // 自動削除サービスを再起動（無制限でない場合のみ）
-          try {
-            const del = await AppSettingsService.getDeletionTime();
-            if (del && del !== 'unlimited') {
-              startAutoDeleteService();
-            }
-          } catch (_) {}
           console.log('[App] 自動削除サービスを再起動しました');
         } catch (error) {
           console.error('[App] 自動削除サービスの再起動エラー:', error);

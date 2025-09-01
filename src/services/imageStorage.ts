@@ -441,15 +441,6 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
  */
 export async function deleteImage(metadata: ImageMetadata): Promise<void> {
   try {
-    // No-Deleteモードなら何もしない
-    try {
-      const enabled = await invoke<boolean>('get_no_delete_mode');
-      if (enabled) {
-        console.warn('[deleteImage] no_delete_mode=true; skip deletion for', metadata.id);
-        return;
-      }
-    } catch {}
-
     // SQLiteから保存場所を取得
     const dbMetadataList = await DatabaseService.getAllImages();
     const dbMetadata = dbMetadataList.find(m => m.id === metadata.id);

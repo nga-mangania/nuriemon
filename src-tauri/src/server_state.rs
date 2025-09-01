@@ -6,7 +6,6 @@ pub struct ServerState {
     pub web_server_port: Arc<Mutex<Option<u16>>>,
     pub qr_manager: Arc<Mutex<Option<Arc<QrManager>>>>,
     pub is_starting: Arc<Mutex<bool>>,
-    pub no_delete_mode: Arc<Mutex<bool>>,
 }
 
 impl ServerState {
@@ -15,7 +14,6 @@ impl ServerState {
             web_server_port: Arc::new(Mutex::new(None)),
             qr_manager: Arc::new(Mutex::new(None)),
             is_starting: Arc::new(Mutex::new(false)),
-            no_delete_mode: Arc::new(Mutex::new(false)),
         }
     }
     

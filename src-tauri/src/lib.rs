@@ -280,17 +280,11 @@ async fn get_all_images(workspace: State<'_, WorkspaceState>) -> Result<Vec<Imag
 async fn delete_image(
     state: State<'_, AppState>,
     workspace: State<'_, WorkspaceState>,
-    server_state: State<'_, ServerState>,
     id: String,
     reason: Option<String>,
 ) -> Result<(), String> {
     let reason_str = reason.unwrap_or_else(|| "unknown".to_string());
     println!("[delete_image] requested id={} reason={}", id, reason_str);
-    // No-DeleteモードならDB削除をスキップ
-    if *server_state.no_delete_mode.lock().unwrap() {
-        println!("[delete_image] no_delete_mode=true; skip DB delete for id={}", id);
-        return Ok(());
-    }
     let conn = workspace.lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
@@ -696,20 +690,6 @@ pub fn run() {
             
             // サーバー状態の初期化
             let server_state = ServerState::new();
-            // 永続化された no_delete_mode を読み込む
-            if let Ok(app_data_dir) = app.path().app_data_dir() {
-                let settings_path = app_data_dir.join("global_settings.json");
-                if settings_path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&settings_path) {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                            if let Some(v) = json.get("no_delete_mode").and_then(|v| v.as_bool()) {
-                                *server_state.no_delete_mode.lock().unwrap() = v;
-                                println!("[no_delete_mode] loaded persisted value = {}", v);
-                            }
-                        }
-                    }
-                }
-            }
             
             app.manage(app_state);
             app.manage(workspace_connection);
@@ -768,35 +748,12 @@ pub fn run() {
             ,load_event_secret
             ,delete_event_secret
             ,open_devtools
-            ,set_no_delete_mode
-            ,get_no_delete_mode
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
-#[tauri::command]
-fn set_no_delete_mode(server_state: State<'_, ServerState>, enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
-    *server_state.no_delete_mode.lock().unwrap() = enabled;
-    println!("[no_delete_mode] set to {}", enabled);
-    // 永続化
-    let app_data_dir = app.path().app_data_dir().map_err(|e| format!("app_data_dir error: {}", e))?;
-    let settings_path = app_data_dir.join("global_settings.json");
-    let mut settings: serde_json::Value = if settings_path.exists() {
-        let content = std::fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".to_string());
-        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
-    } else { serde_json::json!({}) };
-    settings["no_delete_mode"] = serde_json::Value::Bool(enabled);
-    if let Some(parent) = settings_path.parent() { let _ = std::fs::create_dir_all(parent); }
-    std::fs::write(&settings_path, serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("persist no_delete_mode failed: {}", e))?;
-    Ok(())
-}
-
-#[tauri::command]
-fn get_no_delete_mode(server_state: State<'_, ServerState>) -> Result<bool, String> {
-    Ok(*server_state.no_delete_mode.lock().unwrap())
-}
+// set_no_delete_mode / get_no_delete_mode は廃止
 
 // Pythonウォームアップ
 #[tauri::command]
