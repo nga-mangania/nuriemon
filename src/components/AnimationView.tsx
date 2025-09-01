@@ -138,7 +138,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
               if (allowed.has(emoteType)) {
                 img.emote = { type: 'svg', content: emoteType } as any;
               } else {
-                img.emote = { type: 'text', content: '😊' } as any;
+                // 受信した文字列をそのままテキストエモートとして表示（例: 😊, ❤️ など）
+                img.emote = { type: 'text', content: emoteType } as any;
               }
               img.emoteTimer = 150;
             });

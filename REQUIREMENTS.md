@@ -498,3 +498,35 @@ Rust Backend → Tauriイベント → 中央リスナー → Zustandストア �
 - - Content-Security-Policy: `default-src 'self'; connect-src 'self' wss://ctrl.nuriemon.jp`
 - - Referrer-Policy: `no-referrer`
 - - Strict-Transport-Security: `max-age=15552000`（preload/IncludeSubDomainsは当面オフ）
+
+## 最近の変更（2025-09-01）
+
+Relay/WS 安定化とコントローラーUXの改善、および削除ポリシーの整理を実施。
+
+- Relay/DO（Durable Object）
+  - 25s間隔のpush型ハートビートを全WSへ送信（`{v:1,type:'hb'}`）。モバイルは任意で`hb-ack`応答。
+  - PC認証完了時/切断時にイベント通知（`pc-online`/`pc-offline`）。PC切断後45秒以内に復帰がない場合、当該PCに紐づくモバイルWSをサーバ側で強制`close(1012)`して整理。
+  - これにより中間ネットワークのアイドル切断や“ゾンビ”化を抑止しつつ、短時間のPC再起動では接続体験を維持。
+
+- モバイルUI（/app）
+  - 自動再接続（指数バックオフ）＋手動「再接続」ボタンを追加。`pc-offline`/`pc-online`イベントを表示に反映。
+  - 受信`hb`に対して`hb-ack`を返送し、接続生存の観測性を向上。
+
+- 画像ごとのコントローラー割当（per-image control）
+  - QRに`img=<imageId>`を追加。モバイルは各コマンドに`payload.imageId`を同梱。PC→DO→モバイルの経路で透過的に保持。
+  - AnimationView側は`imageId`が指定された場合、その画像のみに適用。指定`imageId`が見つからない場合は“無視”（他画像へは適用しない）。
+  - レガシーUI互換として、`imageId`未指定時のみ全体適用のフォールバックを維持。
+  - 修正: A削除後にAのコントローラーをリロードしてもBが動く問題を解消（未検出`imageId`時の全体適用を撤廃）。
+
+- 削除ポリシーの整理
+  - No-Deleteモード（削除API無効化）を廃止。手動削除は常に許可。
+  - 自動削除（autoDelete.ts）は停止。起動時/時間経過による物理削除は行わない。
+  - 「非表示までの時間」は画面上の表示ロジックのみ（DB/ファイルは残す）。
+
+- 影響範囲/運用
+  - tailログは従来どおり（HBはログ抑制）。不通時は`close`や`pc-offline`/`pc-timeout`で把握可能。
+  - 既存ワークスペース/設定に互換。旧`no_delete_mode`キーは読み捨て。
+
+- 今後の候補
+  - 容量アラート（閾値下回りで通知＋一括削除導線）。
+  - コントローラーUIの本格実装（シンプル/アドバンス切替、エモート、感度調整 等）。

@@ -2,6 +2,7 @@ import { emit } from '@tauri-apps/api/event';
 import { currentRelayEnvAsSecretEnv, getEventSetupSecret } from './secureSecrets';
 import { resolveBaseUrl } from './relayClient';
 import { registerPc, retryWithBackoff } from './relayClient';
+import { loadImage } from './imageStorage';
 
 function b64url(bytes: Uint8Array): string {
   let b64 = btoa(String.fromCharCode(...bytes));
@@ -124,6 +125,12 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
           normalizeAndEmit(msg);
         } else if (t === 'evt' && msg.echo && msg.echo.type === 'cmd') {
           normalizeAndEmit(msg.echo);
+        } else if (t === 'req' && msg.req === 'preview') {
+          const sid: string | undefined = msg.sid;
+          const imageId: string | undefined = msg.imageId;
+          if (sid && imageId) {
+            handlePreviewRequest(sid, imageId).catch(() => {});
+          }
         }
       } catch {}
     };
@@ -193,4 +200,43 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
   }
 
   return { start, stop, isConnected: () => connected };
+
+  async function handlePreviewRequest(sid: string, imageId: string) {
+    try {
+      // Load full image as data URL, then downscale to ~256px (max side) and encode as WebP/JPEG
+      const dataUrl = await loadImage({ id: imageId } as any);
+      const thumb = await downscaleDataUrl(dataUrl, 256, 0.7);
+      if (ws && ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ v: 1, type: 'evt', sid, evt: 'preview', data: { imageId, thumb } }));
+      }
+    } catch (e) {
+      console.warn('[pcWsClient] preview generation failed:', e);
+    }
+  }
+
+  async function downscaleDataUrl(src: string, maxSize = 256, quality = 0.7): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const w = img.width, h = img.height;
+          const scale = Math.min(1, maxSize / Math.max(w, h));
+          const dstW = Math.max(1, Math.round(w * scale));
+          const dstH = Math.max(1, Math.round(h * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = dstW; canvas.height = dstH;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { resolve(src); return; }
+          ctx.drawImage(img, 0, 0, dstW, dstH);
+          let out = '';
+          try { out = canvas.toDataURL('image/webp', quality); } catch { out = canvas.toDataURL('image/jpeg', quality); }
+          // Safety fallback
+          if (!out || out.length < 20) out = src;
+          resolve(out);
+        } catch (e) { reject(e); }
+      };
+      img.onerror = () => resolve(src);
+      img.src = src;
+    });
+  }
 }

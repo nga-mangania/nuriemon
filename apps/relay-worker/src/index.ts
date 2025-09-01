@@ -110,7 +110,7 @@ export default {
 export class EventDO {
   private pcByPcid = new Map<string, WebSocket>();
   private mobilesBySid = new Map<string, Set<WebSocket>>();
-  private meta = new Map<WebSocket, { role?: 'pc'|'mobile'; pcid?: string; sid?: string; lastSeen?: number }>();
+  private meta = new Map<WebSocket, { role?: 'pc'|'mobile'; pcid?: string; sid?: string; lastSeen?: number; imageId?: string }>();
   private eventId: string | null = null;
   private hbTimer: any = null;
   private offlineTimers = new Map<string, any>(); // pcid -> timeout
@@ -311,13 +311,19 @@ export class EventDO {
     if (!entry || !entry.pcid) {
       return this.safeSend(ws, { v: 1, type: 'error', code: 'E_BAD_SID' });
     }
-    this.meta.set(ws, { role: 'mobile', pcid: entry.pcid, sid, lastSeen: Date.now() });
+    const imageId: string | undefined = typeof msg.imageId === 'string' && msg.imageId ? String(msg.imageId) : undefined;
+    this.meta.set(ws, { role: 'mobile', pcid: entry.pcid, sid, lastSeen: Date.now(), imageId });
     let set = this.mobilesBySid.get(sid);
     if (!set) { set = new Set<WebSocket>(); this.mobilesBySid.set(sid, set); }
     set.add(ws);
     try { await this.state.storage.put(k, { ...entry, claimed: true }); } catch {}
     try { console.log(`[bridge/do] mobile join sid=${sid} -> pc=${entry.pcid}`); } catch {}
     this.safeSend(ws, { v: 1, type: 'ack', ok: true });
+    // Ask PC to provide a preview for this sid (one-shot)
+    const pc = this.pcByPcid.get(entry.pcid);
+    if (pc) {
+      try { this.safeSend(pc, { v: 1, type: 'req', req: 'preview', sid, imageId }); } catch {}
+    }
   }
 
   private cleanup(ws: WebSocket) {
@@ -524,44 +530,82 @@ function appHtml(): string {
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>ぬりえもん コントローラ (stg)</title>
   <style>
-    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b1020;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center}
-    .card{background:rgba(255,255,255,.06);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:20px;max-width:420px;width:92%;box-shadow:0 10px 30px rgba(0,0,0,.35)}
-    h1{font-size:20px;margin:0 0 8px}
-    #status{opacity:.85;margin-bottom:14px}
-    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}
-    button{padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.12);color:#fff;font-weight:600}
+    :root { color-scheme: dark; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b1020;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;-webkit-user-select:none;user-select:none}
+    .card{background:rgba(255,255,255,.06);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;max-width:480px;width:94%;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    h1{font-size:18px;margin:0 0 6px}
+    #status{opacity:.85;margin-bottom:10px}
+    .preview{width:100%;height:140px;border-radius:12px;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid rgba(255,255,255,.12)}
+    .preview img{max-width:100%;max-height:100%;display:block}
+    .row{display:flex;gap:12px;margin-top:12px}
+    .col{flex:1}
+    .dpad{display:grid;grid-template-columns:60px 60px 60px;grid-template-rows:60px 60px 60px;gap:8px;justify-content:center}
+    .dpad .sp{visibility:hidden}
+    button{padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.12);color:#fff;font-weight:600;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
     button:active{transform:scale(.98)}
     .ok{color:#9f9}
     .err{color:#f99}
-    .log{margin-top:12px;font-size:12px;max-height:110px;overflow:auto;background:rgba(0,0,0,.25);padding:8px;border-radius:8px}
-    #reconnect{margin-top:12px;width:100%;background:#2d6cdf;border-color:#2d6cdf}
+    #reconnect{margin-top:10px;width:100%;background:#2d6cdf;border-color:#2d6cdf}
+    .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+    .emotes{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:8px}
   </style>
 </head>
 <body>
   <div class="card">
     <h1>ぬりえもん - コントローラ</h1>
     <div id="status">初期化中...</div>
-    <div class="grid">
-      <button onclick="sendCmd('left')">◀ 左</button>
-      <button onclick="sendCmd('right')">右 ▶</button>
-      <button onclick="sendCmd('jump')">ジャンプ</button>
-      <button onclick="sendCmd('emote:happy')">😊 ニコ</button>
+    <div class="preview"><img id="thumb" alt="preview"/></div>
+    <div class="row">
+      <div class="col">
+        <div class="dpad">
+          <div class="sp"></div>
+          <button onclick="dir('up')">▲</button>
+          <div class="sp"></div>
+          <button onclick="dir('left')">◀</button>
+          <div class="sp"></div>
+          <button onclick="dir('right')">▶</button>
+          <div class="sp"></div>
+          <button onclick="dir('down')">▼</button>
+          <div class="sp"></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="grid2">
+          <button onclick="action('jump')">ジャンプ</button>
+          <button onclick="action('spin')">回転</button>
+          <button onclick="action('shake')">ふるえる</button>
+          <button onclick="action('grow')">おおきく</button>
+          <button onclick="action('shrink')">ちいさく</button>
+          <button onclick="emote('good')">👍</button>
+        </div>
+        <div class="emotes">
+          <button onclick="emote('😊')">😊</button>
+          <button onclick="emote('😂')">😂</button>
+          <button onclick="emote('❤️')">❤️</button>
+          <button onclick="emote('⭐')">⭐</button>
+          <button onclick="emote('✨')">✨</button>
+        </div>
+      </div>
     </div>
     <button id="reconnect" style="display:none" onclick="manualReconnect()">再接続</button>
-    <div class="log" id="log"></div>
   </div>
   <script>
-    const logEl = document.getElementById('log');
-    function log(s){ const p=document.createElement('div'); p.textContent=s; logEl.prepend(p); }
+    // iOS Safari zoom prevention
+    (function(){
+      let lastTouchEnd=0;document.addEventListener('touchend',function(e){const now=Date.now();if(now-lastTouchEnd<=300){e.preventDefault();}lastTouchEnd=now;},{passive:false});
+      ['gesturestart','gesturechange','gestureend'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault()));
+    })();
     const params = (()=>{ const hash = location.hash.startsWith('#')?location.hash.slice(1):''; const h = new URLSearchParams(hash); if(h.has('e')&&h.has('sid')) return h; return new URLSearchParams(location.search.slice(1)); })();
     const e = params.get('e');
     const sid = params.get('sid');
     const imageId = params.get('img') || undefined;
     const status = document.getElementById('status');
     const reconnectBtn = document.getElementById('reconnect');
+    const thumbImg = document.getElementById('thumb');
     let ws = null;
     let attempt = 0;
     let connecting = false;
@@ -570,11 +614,13 @@ function appHtml(): string {
     else {
       const wsUrl = (location.protocol==='https:'?'wss://':'ws://') + location.host + '/e/' + encodeURIComponent(e) + '/ws';
       function setStatus(text, cls){ status.className=''; if(cls) status.classList.add(cls); status.innerHTML = text; }
+      // show cached preview immediately
+      try{ if(imageId){ const cached = localStorage.getItem('thumb:'+imageId); if(cached) thumbImg.src = cached; } }catch{}
       function connect(){
         if(connecting) return; connecting = true; connected = false;
         setStatus('接続中...', ''); reconnectBtn.style.display='none';
         try{ ws = new WebSocket(wsUrl, 'v1'); }catch(e){ setStatus('<span class="err">接続失敗</span>', 'err'); reconnectBtn.style.display=''; scheduleReconnect(); connecting=false; return; }
-        ws.onopen = ()=>{ try{ ws.send(JSON.stringify({ v:1, type:'join', sid })); }catch{} };
+        ws.onopen = ()=>{ try{ ws.send(JSON.stringify({ v:1, type:'join', sid, imageId })); }catch{} };
         let pcOnline = true;
         ws.onmessage = (ev)=>{
           try{ const msg = JSON.parse(ev.data);
@@ -582,8 +628,8 @@ function appHtml(): string {
             if(msg.type==='hb'){ try{ ws && ws.send(JSON.stringify({ v:1, type:'hb-ack', t: Date.now() })); }catch{}; return; }
             if(msg.type==='evt' && msg.evt==='pc-offline'){ pcOnline=false; setStatus('<span class="err">PCが切断されました</span>', 'err'); reconnectBtn.style.display=''; return; }
             if(msg.type==='evt' && msg.evt==='pc-online'){ pcOnline=true; setStatus('<span class="ok">接続OK</span>', 'ok'); reconnectBtn.style.display='none'; return; }
-            log('recv: '+ev.data);
-          }catch{ log('recv(raw): '+ev.data); }
+            if(msg.type==='evt' && msg.evt==='preview' && msg.data && msg.data.imageId===imageId && msg.data.thumb){ try{ thumbImg.src = msg.data.thumb; localStorage.setItem('thumb:'+imageId, msg.data.thumb); }catch{}; return; }
+          }catch{}
         };
         ws.onclose = ()=>{ connecting=false; connected=false; setStatus('<span class="err">切断されました</span>', 'err'); reconnectBtn.style.display=''; scheduleReconnect(); };
         ws.onerror = ()=>{ setStatus('<span class="err">エラー</span>', 'err'); };
@@ -594,7 +640,10 @@ function appHtml(): string {
         setTimeout(()=>{ if(!connected) connect(); }, d);
       }
       window.manualReconnect = ()=>{ attempt=0; if(ws){ try{ ws.close(); }catch{} } connect(); };
-      window.sendCmd = (cmd)=>{ try{ if(ws && ws.readyState===1){ ws.send(JSON.stringify({ v:1, type:'cmd', payload:{ cmd, imageId } })); log('send cmd: '+cmd+(imageId?(' (img='+imageId+')'):'')); } else { log('未接続: '+cmd); } }catch{} };
+      function send(cmd){ try{ if(ws && ws.readyState===1){ ws.send(JSON.stringify({ v:1, type:'cmd', payload:{ cmd, imageId } })); } }catch{} }
+      window.dir = (d)=> send(d);
+      window.action = (a)=> send(a);
+      window.emote = (t)=> send('emote:'+t);
       connect();
     }
   </script>
