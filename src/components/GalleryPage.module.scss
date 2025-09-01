@@ -198,6 +198,33 @@ $bg-color: #eaf0f2;
   }
 }
 
+// 明示的なボタンスタイル
+.editButton {
+  background-color: $secondary-color !important;
+  color: #fff !important;
+
+  &:hover {
+    background-color: color.adjust($secondary-color, $lightness: -10%);
+  }
+}
+
+.restartButton {
+  background-color: #22c55e;
+  color: #fff;
+  &:hover { background-color: color.adjust(#22c55e, $lightness: -10%); }
+}
+
+.hideButton {
+  background-color: #64748b;
+  color: #fff;
+  &:hover { background-color: color.adjust(#64748b, $lightness: -10%); }
+}
+
+.remainingTime {
+  font-weight: 600;
+  color: $primary-color;
+}
+
 .checkmark {
   position: absolute;
   top: 10px;

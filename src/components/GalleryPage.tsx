@@ -4,6 +4,7 @@ import { getAllMetadata, loadImage, deleteImage, ImageMetadata } from '../servic
 import { MovementSettings } from './MovementSettings';
 import { getAllMovementSettings, updateMovementSettings } from '../services/movementStorage';
 import styles from './GalleryPage.module.scss';
+import { useWorkspaceStore } from '../stores/workspaceStore';
 
 interface GalleryImage extends Omit<ImageMetadata, 'size'> {
   thumbnailUrl?: string;
@@ -51,10 +52,23 @@ const formatSpeed = (speed?: number) => {
   return '不明';
 };
 
+function renderRemaining(image: any, deletionTime: string) {
+  if (deletionTime === 'unlimited') return '無制限';
+  const minutes = parseInt(deletionTime);
+  if (!minutes || isNaN(minutes)) return '無制限';
+  const started = (image as any).display_started_at ? Date.parse((image as any).display_started_at) : undefined;
+  if (!started) return '未表示';
+  const deadline = started + minutes * 60 * 1000;
+  const left = Math.max(0, deadline - Date.now());
+  const mm = Math.floor(left / 60000);
+  const ss = Math.floor((left % 60000) / 1000);
+  return `${mm}:${ss.toString().padStart(2, '0')}`;
+}
+
 export function GalleryPage() {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'processed' | 'original' | 'all' | 'delete' | 'hidden'>('processed');
+  const [activeTab, setActiveTab] = useState<'processed' | 'original' | 'delete' | 'hidden'>('processed');
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [editingImage, setEditingImage] = useState<GalleryImage | null>(null);
   const [tempSettings, setTempSettings] = useState({
@@ -64,6 +78,13 @@ export function GalleryPage() {
     size: 'medium'
   });
   const [isDeleting, setIsDeleting] = useState(false);
+  const { deletionTime } = useWorkspaceStore();
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => setTick(v => v + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   // タブに応じて画像をフィルタリング
   const getFilteredImages = () => {
@@ -72,7 +93,6 @@ export function GalleryPage() {
         return images.filter(img => img.type === 'processed');
       case 'original':
         return images.filter(img => img.type === 'original');
-      case 'all':
       case 'delete':
         return images;
       case 'hidden':
@@ -368,12 +388,7 @@ export function GalleryPage() {
         >
           切り抜き前
         </button>
-        <button
-          className={`${styles.tabButton} ${activeTab === 'all' ? styles.active : ''}`}
-          onClick={() => setActiveTab('all')}
-        >
-          全て表示
-        </button>
+        {/* 全て表示タブは削除 */}
         <button
           className={`${styles.tabButton} ${activeTab === 'hidden' ? styles.active : ''}`}
           onClick={() => setActiveTab('hidden')}
@@ -456,19 +471,20 @@ export function GalleryPage() {
                       <p>動き: {getMovementName(image.movementPattern)}</p>
                       <p>速度: {formatSpeed(image.speed)}</p>
                       <p>サイズ: {getSizeName(image.movementSize)}</p>
+                      <p className={styles.remainingTime}>残り: {renderRemaining(image, deletionTime)}</p>
                     </>
                   )}
                   <p>アップロード: {new Date(image.createdAt).toLocaleString('ja-JP')}</p>
                 </div>
                 <div className={styles.imageActions}>
                   {image.type === 'processed' && (image as any).is_hidden !== 1 && (
-                    <button onClick={() => handleHideImage(image)}>非表示</button>
+                    <button className={styles.hideButton} onClick={() => handleHideImage(image)}>非表示</button>
                   )}
                   {(image as any).is_hidden === 1 && (
-                    <button onClick={() => handleRestartDisplay(image)}>再表示</button>
+                    <button className={styles.restartButton} onClick={() => handleRestartDisplay(image)}>再表示</button>
                   )}
                   {image.type === 'processed' && (
-                    <button onClick={() => openEditModal(image)}>編集</button>
+                    <button className={styles.editButton} onClick={() => openEditModal(image)}>編集</button>
                   )}
                   <button onClick={() => handleDeleteImage(image)}>削除</button>
                 </div>
@@ -480,7 +496,7 @@ export function GalleryPage() {
 
       {/* 一括操作ボタン */}
       <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-        {activeTab === 'processed' || activeTab === 'all' ? (
+        {activeTab === 'processed' ? (
           <button onClick={handleHideAll}>すべて非表示</button>
         ) : null}
         {activeTab === 'hidden' ? (
