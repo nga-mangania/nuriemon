@@ -64,21 +64,14 @@ const AnimationView: React.FC<AnimationViewProps> = ({
           if (imageId) {
             const img = animatedImagesRef.current[imageId];
             if (!img) {
-              // 到達はしているが紐付け不一致の場合、可視性重視で全体適用
-              try { console.warn('[AnimationView] target imageId not found; applying to all', imageId); } catch {}
-              const ids = Object.keys(animatedImagesRef.current);
-              ids.forEach((id) => {
-                const g = animatedImagesRef.current[id];
-                if (!g) return;
-                handler(g);
-              });
-              setAnimatedImages((prev) => prev.map((i) => ({ ...animatedImagesRef.current[i.id] })));
+              // 明示的なimageId指定で対象が存在しない場合は無視（他画像へ適用しない）
+              try { console.warn('[AnimationView] target imageId not found; ignore command', imageId); } catch {}
               return;
             }
             handler(img);
             setAnimatedImages((prev) => prev.map((i) => (i.id === imageId ? { ...img } as any : i)));
           } else {
-            // imageIdが無い場合は、全画像に適用（視覚的に分かりやすくする）
+            // imageIdが無い場合のみ、全画像に適用（レガシー/簡易UI互換）
             const ids = Object.keys(animatedImagesRef.current);
             ids.forEach((id) => {
               const img = animatedImagesRef.current[id];
