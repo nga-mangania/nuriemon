@@ -1,0 +1,22 @@
+{
+  "version": "1",
+  "relay": {
+    "baseUrl": "https://stg.ctrl.nuriemon.jp",
+    "eventId": "demo",
+    "pcId": "", 
+    "wsProtocol": "v1"
+  },
+  "defaults": {
+    "operationMode": "auto"
+  },
+  "ui": {
+    "hideRelaySettings": false,
+    "lockRelaySettings": false
+  },
+  "features": {
+    "noDelete": false
+  },
+  "meta": {
+    "note": "Provisioning sample. Copy to user app config dir as global_settings.json to override."
+  }
+}

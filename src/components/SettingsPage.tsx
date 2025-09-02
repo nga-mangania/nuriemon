@@ -459,7 +459,7 @@ export function SettingsPage() {
       <section className={styles.section}>
         <h2>Relay設定</h2>
         <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>PCブリッジ状態: {pcBridgeStatus}</div>
-        {!hideRelaySettings && (
+        {!hideRelaySettings && (<>
         <div style={{ display: 'grid', gap: 12, maxWidth: 640 }}>
           <label>
             接続先
@@ -606,7 +606,7 @@ export function SettingsPage() {
           <p>QRは `e` と `sid` のみを含み、WS用トークンはPOSTで取得します（URLにトークンは載せません）。</p>
           <p>EventID/PCIDの形式: 英小文字・数字・ハイフンのみ（3–32文字）。</p>
         </div>
-        )}
+        </>)}
         <div style={{ marginTop: 12 }}>
           <details>
             <summary>有効設定（effective）を表示</summary>

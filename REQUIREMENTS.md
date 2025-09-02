@@ -529,3 +529,49 @@ Relay/WS 安定化とコントローラーUXの改善、および削除ポリシ
 - 今後の候補
   - 容量アラート（閾値下回りで通知＋一括削除導線）。
   - コントローラーUIの本格実装（シンプル/アドバンス切替、エモート、感度調整 等）。
+
+## アセット配置ガイド（画像/音源など）
+
+- UI画像（フロント側で直接参照）: `public/`
+  - ウェルカムページ用: `public/welcome/`（例: `/welcome/hero.png`）
+  - エモートSVG: `public/emotes/`（既存: `good.svg`, `hi.svg` 等）
+  - 汎用画像: `public/img/`
+- バンドル管理（ビルド時最適化）: `src/assets/`
+  - 例: `import hero from '@/assets/welcome/hero.png'` → `<img src={hero} />`
+- バックエンド固定リソース（Tauri同梱）: `src-tauri/resources/`
+  - 例: `global_settings.json`（プロビジョニング既定）
+  - Rustからは `app.path().resource_dir()?.join("global_settings.json")` で参照
+- ユーザーデータ（ワークスペース）: `<workspace>/images/*`, `<workspace>/audio/*`
+  - 背景や取り込み画像はここに保存（UIから変更可能）
+
+エモート追加のルール
+- SVGとして表示: `public/emotes/xxx.svg` を追加し、`src/services/animationSettings.ts` の `svgEmotes` に `"xxx"` を追加。
+- 絵文字として表示: テキストで送信（`😊` など）。`textEmotes` に候補を追加可。
+
+参照方法の例
+- 直リンク: `<img src="/welcome/hero.png" />`
+- CSS: `background-image: url('/welcome/hero.png');`
+- import（アセット）: `import logo from '@/assets/img/logo.png'` → `<img src={logo} />`
+
+## グローバル設定/プロビジョニング（Relay）
+
+- 優先順位（上ほど強い）
+  1) 環境変数JSONパス: `NURIEMON_GLOBAL_SETTINGS_PATH`
+  2) ユーザー設定（プロビジョニング）: AppConfig 配下 `global_settings.json`
+     - macOS: `~/Library/Application Support/Nuriemon/global_settings.json`
+     - Windows: `%APPDATA%/Nuriemon/global_settings.json`
+     - Linux: `~/.config/nuriemon/global_settings.json`
+  3) バンドル既定: `src-tauri/resources/global_settings.json`
+  4) 内部保存（GlobalSettingsService）
+  5) 個別環境変数オーバーライド（その回のみ）:
+     - `NURIEMON_RELAY_BASE_URL`, `NURIEMON_RELAY_EVENT_ID`, `NURIEMON_PCID`, `NURIEMON_OPERATION_MODE`
+
+- JSON形式（v1）サンプル: `src-tauri/resources/global_settings.json.example`
+  - `relay.baseUrl`/`eventId`/`pcId`/`wsProtocol`
+  - `defaults.operationMode`: `auto` | `relay` | `local`（画面の初期値）
+  - `ui.hideRelaySettings`/`ui.lockRelaySettings`: 設定画面を隠す/読取専用化
+  - `features.noDelete`: 既定はfalse（自動削除は無効、手動は可）
+
+- 注意
+  - 秘密鍵（EVENT_SETUP_SECRET）はJSONに含めず、OSキーチェーンに保存（既存の `save_event_secret` 系）
+  - ロック有効時（`lockRelaySettings: true`）は Relay 設定はUIで変更不可

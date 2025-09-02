@@ -17,17 +17,38 @@
   padding: 60px;
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  max-width: 500px;
+  max-width: 600px;
+
+  .logoBox {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .logoMain {
+    max-width: 80%;
+    width: 230px;
+    height: auto;
+  }
+
+  .logoSub {
+    max-width: 70%;
+    width: 200px;
+    height: auto;
+    opacity: 0.95;
+  }
 
   h1 {
-    font-size: 2rem;
+    font-size: 1.8rem;
     margin-bottom: 20px;
     color: #333;
   }
 
   p {
     font-size: 1.1rem;
-    margin-bottom: 30px;
+    margin-bottom: 12px;
     color: #666;
   }
 }
@@ -41,6 +62,7 @@
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.3s ease;
+  margin-bottom: 12px;
 
   &:hover {
     background: #ff5252;
