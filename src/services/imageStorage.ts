@@ -63,7 +63,9 @@ export async function saveBackgroundFile(dataUrl: string, fileName: string): Pro
     created_at: timestamp,
     size: binaryData.length,
     storage_location: saveDir,
-    file_path: filePath
+    file_path: filePath,
+    is_hidden: 0,
+    display_started_at: null
   };
   
   // データベースに保存
@@ -116,7 +118,9 @@ export async function saveAudioFile(dataUrl: string, fileName: string, type: 'bg
     created_at: timestamp,
     size: binaryData.length,
     storage_location: saveDir,
-    file_path: filePath
+    file_path: filePath,
+    is_hidden: 0,
+    display_started_at: null
   };
   
   // データベースに保存

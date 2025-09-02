@@ -149,7 +149,9 @@ export class AutoImportService {
         created_at: new Date().toISOString(),
         size: 0, // TODO: 実際のファイルサイズを取得
         storage_location: 'workspace',
-        file_path: processed_path
+        file_path: processed_path,
+        is_hidden: 0,
+        display_started_at: null
       });
 
       // アニメーションタイプから動きタイプを判定
