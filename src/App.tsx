@@ -117,10 +117,12 @@ function App() {
     if (!isReady) return;
     const run = async () => {
       try {
-        const mode = await AppSettingsService.getAppSetting('operation_mode');
         const { GlobalSettingsService } = await import('./services/globalSettings');
-        const eid = await GlobalSettingsService.get('relay_event_id');
-        const pcid = await GlobalSettingsService.get('pcid');
+        await GlobalSettingsService.loadEffective();
+        const mode = await AppSettingsService.getAppSetting('operation_mode');
+        const eff = GlobalSettingsService.getEffective();
+        const eid = eff?.relay?.eventId || null;
+        const pcid = eff?.relay?.pcId || null;
         const relayActive = mode === 'relay' || mode === 'auto';
         if (relayActive && eid && pcid) {
           if (relayBridgeRef.current) { relayBridgeRef.current.stop(); relayBridgeRef.current = null; }

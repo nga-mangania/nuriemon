@@ -94,8 +94,9 @@ export const QrDisplayWindow: React.FC = () => {
   useEffect(() => {
     console.log('[QrDisplayWindow] Loading state from file...');
     loadStateFromFile();
-    // 設定読み込み
+    // 設定読み込み（effectiveを優先）
     (async () => {
+      await GlobalSettingsService.loadEffective();
       await reloadAppSettings();
     })();
   }, []);

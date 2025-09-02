@@ -773,6 +773,9 @@ pub fn run() {
             workspace::close_workspace_db,
             workspace::save_global_setting,
             workspace::get_global_setting,
+            read_bundle_global_settings,
+            read_user_provisioning_settings,
+            read_env_provisioning_settings,
             // フォルダ監視
             start_folder_watching,
             stop_folder_watching,
@@ -810,6 +813,42 @@ fn keychain_account(env: &str) -> (String, String) {
     let service = "nuriemon".to_string();
     let account = format!("event_setup_secret:{}", env);
     (service, account)
+}
+
+// ===== Global settings readers =====
+#[tauri::command]
+fn read_bundle_global_settings(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    match app.path().resolve_resource("global_settings.json") {
+        Ok(Some(path)) => {
+            if path.exists() {
+                let s = std::fs::read_to_string(&path).map_err(|e| format!("read bundle failed: {}", e))?;
+                Ok(Some(s))
+            } else { Ok(None) }
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("resolve_resource error: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn read_user_provisioning_settings(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let dir = app.path().app_config_dir().map_err(|e| format!("app_config_dir error: {}", e))?;
+    let path = dir.join("global_settings.json");
+    if !path.exists() { return Ok(None); }
+    let s = std::fs::read_to_string(&path).map_err(|e| format!("read provisioning failed: {}", e))?;
+    Ok(Some(s))
+}
+
+#[tauri::command]
+fn read_env_provisioning_settings() -> Result<Option<String>, String> {
+    if let Ok(p) = std::env::var("NURIEMON_GLOBAL_SETTINGS_PATH") {
+        let path = std::path::PathBuf::from(p);
+        if path.exists() {
+            let s = std::fs::read_to_string(&path).map_err(|e| format!("read env provisioning failed: {}", e))?;
+            return Ok(Some(s));
+        }
+    }
+    Ok(None)
 }
 
 #[tauri::command]
