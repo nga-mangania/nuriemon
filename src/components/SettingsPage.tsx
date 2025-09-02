@@ -45,6 +45,9 @@ export function SettingsPage() {
   const [relayBaseUrlProd, setRelayBaseUrlProd] = useState<string>('https://ctrl.nuriemon.jp');
   const [relayBaseUrlStg, setRelayBaseUrlStg] = useState<string>('https://stg.ctrl.nuriemon.jp');
   const [pcBridgeStatus, setPcBridgeStatus] = useState<string>('idle');
+  const [effectiveJson, setEffectiveJson] = useState<string>('');
+  const [hideRelaySettings, setHideRelaySettings] = useState<boolean>(false);
+  const [lockRelaySettings, setLockRelaySettings] = useState<boolean>(false);
   
   // 背景アップロード関連のstate
   const [uploadingBackground, setUploadingBackground] = useState(false);
@@ -82,10 +85,15 @@ export function SettingsPage() {
       // 互換: relay_base_url があれば現在のenvの値として扱う
       const legacy = await GlobalSettingsService.get('relay_base_url');
       if (legacy) setRelayBaseUrl(legacy);
-      const eid = await GlobalSettingsService.get('relay_event_id');
+      await GlobalSettingsService.loadEffective();
+      const eff = GlobalSettingsService.getEffective();
+      setHideRelaySettings(!!eff?.ui?.hideRelaySettings);
+      setLockRelaySettings(!!eff?.ui?.lockRelaySettings);
+      try { setEffectiveJson(JSON.stringify(eff, null, 2)); } catch {}
+      const eid = eff?.relay?.eventId || await GlobalSettingsService.get('relay_event_id');
       if (eid) setRelayEventId(eid);
       // pcid はGlobalから取得（後方互換として workspace のpc_id を読んで移行）
-      let pid = await GlobalSettingsService.get('pcid');
+      let pid = eff?.relay?.pcId || await GlobalSettingsService.get('pcid');
       if (!pid) {
         const legacy = await AppSettingsService.getAppSetting('pc_id') || await AppSettingsService.getAppSetting('pcid');
         if (legacy) {
@@ -451,6 +459,7 @@ export function SettingsPage() {
       <section className={styles.section}>
         <h2>Relay設定</h2>
         <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>PCブリッジ状態: {pcBridgeStatus}</div>
+        {!hideRelaySettings && (
         <div style={{ display: 'grid', gap: 12, maxWidth: 640 }}>
           <label>
             接続先
@@ -466,7 +475,7 @@ export function SettingsPage() {
                   emit('app-settings-changed', { key: 'relay_env', value: v });
                 } catch {}
               }}
-            >
+            disabled={lockRelaySettings}>
               <option value="prod">本番</option>
               <option value="stg">検証（stg）</option>
             </select>
@@ -488,6 +497,7 @@ export function SettingsPage() {
               }}
               placeholder="https://ctrl.nuriemon.jp"
               style={{ width: '100%' }}
+              disabled={lockRelaySettings}
             />
           </label>
           <label>
@@ -507,6 +517,7 @@ export function SettingsPage() {
               }}
               placeholder="https://stg.ctrl.nuriemon.jp"
               style={{ width: '100%' }}
+              disabled={lockRelaySettings}
             />
           </label>
           <label>
@@ -527,6 +538,7 @@ export function SettingsPage() {
               }}
               placeholder="例: demo"
               style={{ width: '100%' }}
+              disabled={lockRelaySettings}
             />
           </label>
           <label>
@@ -562,6 +574,7 @@ export function SettingsPage() {
                   onChange={(e) => setEventSetupSecretInput(e.target.value)}
                   placeholder="イベント登録用シークレット（base64url推奨）"
                   style={{ width: '100%' }}
+                  disabled={lockRelaySettings}
                 />
                 <button onClick={() => setRevealSecret(s => !s)}>{revealSecret ? 'Hide' : 'Reveal'}</button>
                 <button onClick={async () => {
@@ -592,6 +605,18 @@ export function SettingsPage() {
         <div className={styles.note}>
           <p>QRは `e` と `sid` のみを含み、WS用トークンはPOSTで取得します（URLにトークンは載せません）。</p>
           <p>EventID/PCIDの形式: 英小文字・数字・ハイフンのみ（3–32文字）。</p>
+        </div>
+        )}
+        <div style={{ marginTop: 12 }}>
+          <details>
+            <summary>有効設定（effective）を表示</summary>
+            <pre style={{ whiteSpace: 'pre-wrap', background: '#f6f8fa', padding: 8, borderRadius: 6, overflowX: 'auto' }}>{effectiveJson}</pre>
+          </details>
+          {lockRelaySettings && (
+            <div className={styles.note}>
+              <p>Relay設定はプロビジョニングでロックされています。変更できません。</p>
+            </div>
+          )}
         </div>
       </section>
 

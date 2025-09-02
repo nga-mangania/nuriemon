@@ -64,11 +64,13 @@ export class GlobalSettingsService {
     // 1) read bundle/user/env provisioning JSONs
     const bundleStr = await invoke<string | null>('read_bundle_global_settings').catch(() => null) as any as string | null;
     const userStr = await invoke<string | null>('read_user_provisioning_settings').catch(() => null) as any as string | null;
-    const envStr = await invoke<string | null>('read_env_provisioning_settings').catch(() => null) as any as string | null;
+    const envProvStr = await invoke<string | null>('read_env_provisioning_settings').catch(() => null) as any as string | null;
+    const envOverridesStr = await invoke<string | null>('read_env_overrides').catch(() => null) as any as string | null;
     let bundle = safeJson(bundleStr);
     let user = safeJson(userStr);
-    let envp = safeJson(envStr);
-    // 2) merge: codeDefaults <- bundle <- user <- env path
+    let envp = safeJson(envProvStr);
+    let envk = safeJson(envOverridesStr);
+    // 2) merge: codeDefaults <- bundle <- user <- env provisioning file <- internal saved <- env key overrides (highest)
     let eff = deepMerge<EffectiveSettings>(codeDefaults, bundle);
     eff = deepMerge<EffectiveSettings>(eff, user);
     eff = deepMerge<EffectiveSettings>(eff, envp);
@@ -85,6 +87,8 @@ export class GlobalSettingsService {
       if (!eff.relay.eventId && savedEventId) eff.relay.eventId = savedEventId;
       if (!eff.relay.pcId && savedPcid) eff.relay.pcId = savedPcid;
     }
+    // env key overrides are last
+    eff = deepMerge<EffectiveSettings>(eff, envk);
     // 4) pcId 未設定なら生成して保存
     if (!eff.relay.pcId) {
       const pid = generateDefaultPcid();

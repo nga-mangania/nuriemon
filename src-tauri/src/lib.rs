@@ -776,6 +776,7 @@ pub fn run() {
             read_bundle_global_settings,
             read_user_provisioning_settings,
             read_env_provisioning_settings,
+            read_env_overrides,
             // フォルダ監視
             start_folder_watching,
             stop_folder_watching,
@@ -818,16 +819,16 @@ fn keychain_account(env: &str) -> (String, String) {
 // ===== Global settings readers =====
 #[tauri::command]
 fn read_bundle_global_settings(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    match app.path().resolve_resource("global_settings.json") {
-        Ok(Some(path)) => {
-            if path.exists() {
-                let s = std::fs::read_to_string(&path).map_err(|e| format!("read bundle failed: {}", e))?;
-                Ok(Some(s))
-            } else { Ok(None) }
-        }
-        Ok(None) => Ok(None),
-        Err(e) => Err(format!("resolve_resource error: {}", e)),
+    let dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("resource_dir error: {}", e))?;
+    let path = dir.join("global_settings.json");
+    if !path.exists() {
+        return Ok(None);
     }
+    let s = std::fs::read_to_string(&path).map_err(|e| format!("read bundle failed: {}", e))?;
+    Ok(Some(s))
 }
 
 #[tauri::command]
@@ -849,6 +850,27 @@ fn read_env_provisioning_settings() -> Result<Option<String>, String> {
         }
     }
     Ok(None)
+}
+
+#[tauri::command]
+fn read_env_overrides() -> Result<Option<String>, String> {
+    use std::env;
+    let mut obj = serde_json::json!({});
+    if let Ok(v) = env::var("NURIEMON_RELAY_BASE_URL") {
+        obj["relay"]["baseUrl"] = serde_json::Value::String(v);
+    }
+    if let Ok(v) = env::var("NURIEMON_RELAY_EVENT_ID") {
+        obj["relay"]["eventId"] = serde_json::Value::String(v);
+    }
+    if let Ok(v) = env::var("NURIEMON_PCID") {
+        obj["relay"]["pcId"] = serde_json::Value::String(v);
+    }
+    if let Ok(v) = env::var("NURIEMON_OPERATION_MODE") {
+        obj["defaults"]["operationMode"] = serde_json::Value::String(v);
+    }
+    let s = serde_json::to_string(&obj).map_err(|e| format!("json error: {}", e))?;
+    if s == "{}" { return Ok(None); }
+    Ok(Some(s))
 }
 
 #[tauri::command]
