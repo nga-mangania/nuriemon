@@ -82,15 +82,15 @@ export function SettingsPage() {
       // 互換: relay_base_url があれば現在のenvの値として扱う
       const legacy = await GlobalSettingsService.get('relay_base_url');
       if (legacy) setRelayBaseUrl(legacy);
-      const eid = await AppSettingsService.getAppSetting('relay_event_id');
+      const eid = await GlobalSettingsService.get('relay_event_id');
       if (eid) setRelayEventId(eid);
-      // pcid（後方互換として pc_id も読んで移行）
-      let pid = await AppSettingsService.getAppSetting('pcid');
+      // pcid はGlobalから取得（後方互換として workspace のpc_id を読んで移行）
+      let pid = await GlobalSettingsService.get('pcid');
       if (!pid) {
-        const legacy = await AppSettingsService.getAppSetting('pc_id');
+        const legacy = await AppSettingsService.getAppSetting('pc_id') || await AppSettingsService.getAppSetting('pcid');
         if (legacy) {
           pid = legacy;
-          try { await AppSettingsService.saveAppSetting('pcid', pid); } catch {}
+          try { await GlobalSettingsService.save('pcid', pid); } catch {}
         }
       }
       if (pid) {
@@ -99,7 +99,7 @@ export function SettingsPage() {
         // なければ一度だけ生成
         const generated = generateDefaultPcid();
         setPcId(generated);
-        try { await AppSettingsService.saveAppSetting('pcid', generated); } catch {}
+        try { await GlobalSettingsService.save('pcid', generated); } catch {}
       }
       // 秘密鍵は OS キーチェーンから取得
       try {
@@ -515,15 +515,15 @@ export function SettingsPage() {
               type="text"
               value={relayEventId}
               onChange={async (e) => {
-                const vRaw = e.target.value.trim().toLowerCase();
-                const v = sanitizeId(vRaw);
-                setRelayEventId(v);
-                if (isValidId(v)) {
-                  try { 
-                    await AppSettingsService.saveAppSetting('relay_event_id', v); 
-                    emit('app-settings-changed', { key: 'relay_event_id', value: v });
-                  } catch {}
-                }
+            const vRaw = e.target.value.trim().toLowerCase();
+            const v = sanitizeId(vRaw);
+            setRelayEventId(v);
+            if (isValidId(v)) {
+              try { 
+                await GlobalSettingsService.save('relay_event_id', v); 
+                emit('app-settings-changed', { key: 'relay_event_id', value: v });
+              } catch {}
+            }
               }}
               placeholder="例: demo"
               style={{ width: '100%' }}
@@ -535,15 +535,15 @@ export function SettingsPage() {
               type="text"
               value={pcId}
               onChange={async (e) => {
-                const vRaw = e.target.value.trim().toLowerCase();
-                const v = sanitizeId(vRaw);
-                setPcId(v);
-                if (isValidId(v)) {
-                  try { 
-                    await AppSettingsService.saveAppSetting('pcid', v); 
-                    emit('app-settings-changed', { key: 'pcid', value: v });
-                  } catch {}
-                }
+            const vRaw = e.target.value.trim().toLowerCase();
+            const v = sanitizeId(vRaw);
+            setPcId(v);
+            if (isValidId(v)) {
+              try { 
+                await GlobalSettingsService.save('pcid', v); 
+                emit('app-settings-changed', { key: 'pcid', value: v });
+              } catch {}
+            }
               }}
               placeholder="例: booth-01"
               style={{ width: '100%' }}

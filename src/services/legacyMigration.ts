@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { WorkspaceManager } from './workspaceManager';
+import { GlobalSettingsService } from './globalSettings';
 
 // 旧 app_settings（DB）/settings.json 由来の設定を
 // ワークスペース settings.json + GlobalSettings に移行する
@@ -29,18 +30,23 @@ export async function migrateLegacySettingsToWorkspace(): Promise<void> {
 
     const partial: any = {};
     if (map['operation_mode']) partial.operation_mode = map['operation_mode'];
-    if (map['relay_event_id']) partial.relay_event_id = map['relay_event_id'];
-    if (map['pcid'] || map['pc_id']) partial.pcid = (map['pcid'] || map['pc_id']);
     if (map['auto_import_path']) partial.auto_import_path = map['auto_import_path'];
     if (map['auto_import_enabled']) partial.auto_import_enabled = map['auto_import_enabled'];
 
     if (Object.keys(partial).length > 0) {
       await manager.saveWorkspaceSettings(partial);
-      console.log('[legacyMigration] migrated settings to workspace:', partial);
+      console.log('[legacyMigration] migrated workspace settings:', partial);
+    }
+
+    // Relay系はグローバルへ移行
+    if (map['relay_event_id']) {
+      try { await GlobalSettingsService.save('relay_event_id', map['relay_event_id']); } catch {}
+    }
+    if (map['pcid'] || map['pc_id']) {
+      try { await GlobalSettingsService.save('pcid', (map['pcid'] || map['pc_id'])); } catch {}
     }
     // 旧データの削除は安全性のため後続フェーズで実施（ここでは移行のみ）
   } catch (e) {
     console.warn('[legacyMigration] skip migration:', e);
   }
 }
-

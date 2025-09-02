@@ -70,13 +70,13 @@ export const QrDisplayWindow: React.FC = () => {
       if (mode === 'relay' || mode === 'local' || mode === 'auto') setOperationMode(mode);
       const base = await resolveBaseUrl();
       if (base) setRelayBaseUrl(base);
-      const eid = await AppSettingsService.getAppSetting('relay_event_id');
+      const eid = await GlobalSettingsService.get('relay_event_id');
       if (eid) setRelayEventId(eid);
-      let pid = (await AppSettingsService.getAppSetting('pcid')) || (await AppSettingsService.getAppSetting('pc_id'));
+      let pid = (await GlobalSettingsService.get('pcid'));
       if (!pid) {
         // 新しいワークスペースなどで未設定なら自動生成して保存
         pid = generateDefaultPcid();
-        try { await AppSettingsService.saveAppSetting('pcid', pid); } catch {}
+        try { await GlobalSettingsService.save('pcid', pid); } catch {}
       }
       if (pid) setPcId(pid);
       debug(`settings: mode=${mode} base=${base} eid=${eid} pcid=${pid}`);
@@ -138,7 +138,7 @@ export const QrDisplayWindow: React.FC = () => {
         await reloadAppSettings();
         // 状態更新の反映を待たずに、直近の値を直接取得して判定する
         const mode = (await AppSettingsService.getAppSetting('operation_mode')) as 'auto'|'relay'|'local' | null;
-        const eid = await AppSettingsService.getAppSetting('relay_event_id');
+        const eid = await GlobalSettingsService.get('relay_event_id');
         const base = await resolveBaseUrl();
         if (base) setRelayBaseUrl(base);
         if (eid) setRelayEventId(eid);

@@ -118,8 +118,9 @@ function App() {
     const run = async () => {
       try {
         const mode = await AppSettingsService.getAppSetting('operation_mode');
-        const eid = await AppSettingsService.getAppSetting('relay_event_id');
-        const pcid = await AppSettingsService.getAppSetting('pcid');
+        const { GlobalSettingsService } = await import('./services/globalSettings');
+        const eid = await GlobalSettingsService.get('relay_event_id');
+        const pcid = await GlobalSettingsService.get('pcid');
         const relayActive = mode === 'relay' || mode === 'auto';
         if (relayActive && eid && pcid) {
           if (relayBridgeRef.current) { relayBridgeRef.current.stop(); relayBridgeRef.current = null; }
