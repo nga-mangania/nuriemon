@@ -44,11 +44,18 @@
 
 .imageGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 20px;
   padding: 20px;
   overflow-y: auto;
   flex: 1;
+}
+
+.controls {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 20px;
+  margin-bottom: 8px;
 }
 
 .noImages {
@@ -82,7 +89,7 @@
   img {
     width: 120px;
     height: 120px;
-    object-fit: cover;
+    object-fit: contain;
     border-radius: 8px;
     margin-bottom: 8px;
   }
@@ -106,8 +113,8 @@
 }
 
 .qrLoading {
-  width: 150px;
-  height: 150px;
+  width: 100px;
+  height: 100px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -118,8 +125,8 @@
 }
 
 .qrCode {
-  width: 150px;
-  height: 150px;
+  width: 100px;
+  height: 100px;
   display: flex;
   justify-content: center;
   align-items: center;

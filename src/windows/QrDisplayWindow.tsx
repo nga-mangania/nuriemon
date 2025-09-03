@@ -547,10 +547,10 @@ export const QrDisplayWindow: React.FC = () => {
         <>
           {/* Debug overlay and server port display removed for cleaner QR scanning */}
 
+          <div className={styles.controls}>
+            <button onClick={regenerateAll} style={{ fontSize: 12 }}>すべて再生成</button>
+          </div>
           <div className={styles.imageGrid}>
-            <div style={{ width: '100%', display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-              <button onClick={regenerateAll} style={{ fontSize: 12 }}>すべて再生成</button>
-            </div>
             {processedImages.length === 0 ? (
               <div className={styles.noImages}>
                 画像がありません

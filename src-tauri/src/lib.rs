@@ -703,7 +703,7 @@ async fn open_qr_window(app: tauri::AppHandle) -> Result<(), String> {
         WebviewUrl::App("qr-display.html".into())
     )
     .title("QRコード - ぬりえもん")
-    .inner_size(600.0, 700.0)
+    .inner_size(900.0, 700.0)
     .resizable(true)
     .build()
     .map_err(|e| format!("ウィンドウの作成に失敗しました: {}", e))?;
