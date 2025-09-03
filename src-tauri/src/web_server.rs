@@ -37,6 +37,7 @@ pub async fn start_web_server(app_handle: AppHandle) -> Result<u16, Box<dyn std:
                 .wrap(middleware::Logger::default())
                 .service(web::resource("/").route(web::get().to(serve_index)))
                 .service(web::resource("/mobile").route(web::get().to(serve_mobile)))
+                .service(web::resource("/app").route(web::get().to(serve_mobile)))
                 .service(web::resource("/image/{id}").route(web::get().to(serve_image_by_id)))
                 .service(web::resource("/api/connect").route(web::post().to(handle_connect)))
                 .service(web::resource("/ws").route(web::get().to(crate::websocket::websocket_handler)))

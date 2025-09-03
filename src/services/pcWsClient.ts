@@ -151,12 +151,31 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
   }
 
   function normalizeAndEmit(msg: any) {
+    const mapEmote = (s: string): string => {
+      const t = s.toLowerCase();
+      switch (t) {
+        case 'happy': return '😊';
+        case 'heart': return '❤️';
+        case 'rock':
+        case 'gu':
+        case '✊': return '✊';
+        case 'scissors':
+        case 'choki':
+        case '✌':
+        case '✌️': return '✌️';
+        case 'paper':
+        case 'hand':
+        case 'pa':
+        case '🖐': return '🖐';
+        default: return s; // 既に絵文字ならそのまま
+      }
+    };
     const payload = msg?.payload || (typeof msg?.cmd === 'string' ? { cmd: msg.cmd, args: msg.args, imageId: msg.imageId } : {});
     const cmd: string | undefined = payload.cmd;
     const imageId = payload.imageId;
     if (!cmd) return;
     if (cmd.startsWith('emote:')) {
-      const emoteType = cmd.slice('emote:'.length);
+      const emoteType = mapEmote(cmd.slice('emote:'.length));
       emit('mobile-control', { type: 'emote', emoteType, imageId });
       return;
     }

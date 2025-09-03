@@ -81,7 +81,7 @@ impl QrManager {
         // QRコード用のURLを生成
         let host = Self::choose_preferred_host();
         let url = format!(
-            "http://{}:{}/mobile?session={}&image={}",
+            "http://{}:{}/app?session={}&image={}",
             host,
             self.server_port,
             session_id,

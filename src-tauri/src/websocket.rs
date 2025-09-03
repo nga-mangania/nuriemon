@@ -166,7 +166,17 @@ async fn handle_websocket_message(
         }
         "emote" => {
             // エモートコマンドの処理
-            if let Some(emote_type) = msg.payload.get("emoteType").and_then(|v| v.as_str()) {
+            if let Some(mut emote_type) = msg.payload.get("emoteType").and_then(|v| v.as_str()) {
+                // コントローラーの別名を絵文字へ正規化
+                let lower = emote_type.to_lowercase();
+                emote_type = match lower.as_str() {
+                    "happy" => "😊",
+                    "heart" => "❤️",
+                    "rock" | "gu" | "✊" => "✊",
+                    "scissors" | "choki" | "✌" | "✌️" => "✌️",
+                    "paper" | "hand" | "pa" | "🖐" => "🖐",
+                    _ => emote_type,
+                };
                 println!("[websocket] emote received: {:?} for imageId={:?}", emote_type, msg.payload.get("imageId"));
                 let _ = app_handle.emit("mobile-control", serde_json::json!({
                     "type": "emote",
