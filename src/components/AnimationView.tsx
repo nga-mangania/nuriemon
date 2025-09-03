@@ -39,10 +39,15 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     backgroundType
   } = useWorkspaceStore();
   
+  // 表示用のリスト（追加/削除のときだけ更新し、毎フレームは更新しない）
   const [animatedImages, setAnimatedImages] = useState<AnimatedImage[]>([]);
   const animatedImagesRef = useRef<Record<string, AnimatedImage>>({});
   const animationRef = useRef<number>();
   const canvasRef = useRef<HTMLDivElement>(null);
+  // DOM 直更新用の参照
+  const containerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const imgRefs = useRef<Map<string, HTMLImageElement>>(new Map());
+  const emoteRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   
   // デバッグログ：地面位置の確認
   useEffect(() => {
@@ -69,7 +74,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
               return;
             }
             handler(img);
-            setAnimatedImages((prev) => prev.map((i) => (i.id === imageId ? { ...img } as any : i)));
+            // React再レンダは不要（RAFでDOM直更新）
           } else {
             // imageIdが無い場合のみ、全画像に適用（レガシー/簡易UI互換）
             const ids = Object.keys(animatedImagesRef.current);
@@ -78,7 +83,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
               if (!img) return;
               handler(img);
             });
-            setAnimatedImages((prev) => prev.map((i) => ({ ...animatedImagesRef.current[i.id] })));
+            // React再レンダは不要（RAFでDOM直更新）
           }
         };
 
@@ -161,6 +166,19 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     return () => {
       if (unlisten) unlisten();
     };
+  }, []);
+
+  // エモートSVGの事前読み込み（同時デコードのスパイクを抑制）
+  useEffect(() => {
+    const cache: HTMLImageElement[] = [];
+    try {
+      svgEmotes.forEach(name => {
+        const img = new Image();
+        img.src = `/emotes/${name}.svg`;
+        cache.push(img);
+      });
+    } catch {}
+    return () => { cache.splice(0, cache.length); };
   }, []);
   // 削除時間のログは毎フレームの再レンダでノイズになるため削除
   
@@ -416,7 +434,44 @@ const AnimationView: React.FC<AnimationViewProps> = ({
         }
 
         // 画像の移動処理
-        updatedImages.push(moveImage(image));
+        const moved = moveImage(image);
+        updatedImages.push(moved);
+        // DOMへスタイル反映（transform移動＋回転・スケール）
+        const div = containerRefs.current.get(moved.id);
+        if (div) {
+          const t = `translate(${moved.x}vw, ${moved.y}vh) translate(-50%, -50%) perspective(500px) ${moved.zRotation ? `rotateY(${moved.zRotation}deg)` : ''}`;
+          if (div.style.transform !== t) div.style.transform = t;
+          if (div.style.display !== '') div.style.display = '';
+        }
+        const imgEl = imgRefs.current.get(moved.id);
+        if (imgEl) {
+          const sx = (moved.scaleX || 1) * (moved.specialScale || 1);
+          const sy = (moved.scaleY || 1) * (moved.specialScale || 1);
+          const st = `scale(${sx}, ${sy}) rotate(${moved.rotation}deg) scaleX(${moved.flipped ? -1 : 1})`;
+          if (imgEl.style.transform !== st) imgEl.style.transform = st;
+        }
+        const em = emoteRefs.current.get(moved.id);
+        if (em) {
+          if (moved.emote) {
+            if (em.style.display !== 'block') em.style.display = 'block';
+            if (moved.emote.type === 'text') {
+              if (em.textContent !== moved.emote.content) {
+                em.textContent = moved.emote.content as any;
+              }
+            } else {
+              const src = `/emotes/${moved.emote.content}.svg`;
+              // シンプルに入れ替え（XSSリスクは限定的: 固定ディレクトリ）
+              if (!em.firstChild || (em.firstChild as HTMLImageElement).getAttribute('src') !== src) {
+                em.innerHTML = '';
+                const im = document.createElement('img');
+                im.src = src;
+                em.appendChild(im);
+              }
+            }
+          } else {
+            if (em.style.display !== 'none') em.style.display = 'none';
+          }
+        }
       }
 
       // 参照(ref)と状態(state)を更新
@@ -426,15 +481,18 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       }, {} as Record<string, AnimatedImage>);
 
       animatedImagesRef.current = newImageMap;
-      setAnimatedImages(updatedImages);
+      // 毎フレームの再レンダリングは行わない
 
-      // 非表示の永続化をバックグラウンドで実行
+      // 非表示の永続化をバックグラウンドで実行し、画面からは即時非表示
       if (toHide.length > 0) {
         (async () => {
           const { DatabaseService } = await import('../services/database');
           try {
             for (const id of toHide) {
               await DatabaseService.hideImage(id);
+              // DOMからは即座に見えなくする
+              const div = containerRefs.current.get(id);
+              if (div) div.style.display = 'none';
             }
           } catch (e) { console.warn('[AnimationView] hideImage failed', e); }
         })();
@@ -452,7 +510,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     };
   }, [moveImage, deletionTime]);
 
-  // 入力画像が変更されたら初期化
+  // 入力画像が変更されたら初期化（DOMは直更新のため、配列はマウント/アンマウント目的に使用）
   useEffect(() => {
     const newImages = inputImages.map(img => {
       const existing = animatedImagesRef.current[img.id];
@@ -478,6 +536,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       }
       return acc;
     }, {} as Record<string, AnimatedImage>);
+    // レンダー用の配列を更新（DOMノードの生成/破棄のため）
+    setAnimatedImages(newImages);
   }, [inputImages, initializeImage]);
 
   // 地面位置が変更されたら歩くタイプの画像の位置を更新
@@ -537,39 +597,29 @@ const AnimationView: React.FC<AnimationViewProps> = ({
           <div
             key={image.id}
             className={styles.imageContainer}
-            style={{
-              left: `${image.x}%`,
-              top: `${image.y}%`,
-              transform: `
-                translate(-50%, -50%) 
-                perspective(500px)
-                ${image.zRotation ? `rotateY(${image.zRotation}deg)` : ''}
-              `,
+            ref={(el) => {
+              if (el) containerRefs.current.set(image.id, el);
+              else containerRefs.current.delete(image.id);
             }}
           >
             <img
+              ref={(el) => {
+                if (el) imgRefs.current.set(image.id, el);
+                else imgRefs.current.delete(image.id);
+              }}
               src={image.imageUrl}
               alt={image.originalFileName}
               className={`${styles.animatedImage} ${image.movement} ${image.size}`}
-              style={{
-                transform: `scale(${(image.scaleX || 1) * (image.specialScale || 1)}, ${(image.scaleY || 1) * (image.specialScale || 1)}) rotate(${ 
-                  image.rotation
-                }deg) scaleX(${image.flipped ? -1 : 1})`,
-              }}
               onClick={() => onImageClick?.(image.id)}
             />
-            {image.emote && (
-              <div className={styles.emote}>
-                {image.emote.type === "text" ? (
-                  image.emote.content
-                ) : (
-                  <img
-                    src={`/emotes/${image.emote.content}.svg`}
-                    alt="Emote"
-                  />
-                )}
-              </div>
-            )}
+            <div
+              className={styles.emote}
+              ref={(el) => {
+                if (el) emoteRefs.current.set(image.id, el);
+                else emoteRefs.current.delete(image.id);
+              }}
+              style={{ display: 'none' }}
+            />
           </div>
         ))}
       </div>
