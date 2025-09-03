@@ -51,8 +51,14 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   // ブロードキャスト用エモートキュー
   const emoteBroadcastRef = useRef<null | { type: 'text'|'svg', content: string, pending: string[] }>(null);
   
-  // ノイズ簡易キャッシュ（補間用）
-  const noiseIntervalMs = 66; // 約15Hz
+  // ノイズ簡易キャッシュ・負荷制御用の可変パラメータ
+  const noiseIntervalMsRef = useRef(66);   // 約15Hz（重い時は100msへ）
+  const emoteBatchSizeRef = useRef(8);     // 1フレームあたりのエモート適用数
+  const specialProbRef = useRef(0.0995);   // 特殊動作の発火確率
+  const perfModeRef = useRef<'normal'|'degraded'>('normal');
+  const emaRef = useRef(0);                // フレーム時間のEMA
+  const aboveRef = useRef(0);              // 閾値上超過カウンタ
+  const belowRef = useRef(0);              // 閾値下回復カウンタ
   
   // 線形補間
   const lerp = useCallback((a: number, b: number, t: number) => a + (b - a) * Math.max(0, Math.min(1, t)), []);
@@ -64,7 +70,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       const sY = noise2D(now * 0.001 + img.offset + 1000, 0);
       img.noisePrevX = sX; img.noisePrevY = sY;
       img.noiseNextX = sX; img.noiseNextY = sY;
-      img.noisePrevT = now; img.noiseNextT = now + noiseIntervalMs;
+      const interval = noiseIntervalMsRef.current;
+      img.noisePrevT = now; img.noiseNextT = now + interval;
     }
     if (now >= img.noiseNextT) {
       img.noisePrevX = img.noiseNextX; img.noisePrevY = img.noiseNextY;
@@ -72,7 +79,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       const t = now * 0.001;
       img.noiseNextX = noise2D(t + img.offset, 0);
       img.noiseNextY = noise2D(t + img.offset + 1000, 0);
-      img.noiseNextT = img.noisePrevT + noiseIntervalMs;
+      const interval = noiseIntervalMsRef.current;
+      img.noiseNextT = img.noisePrevT + interval;
     }
     const u = (now - img.noisePrevT) / (img.noiseNextT - img.noisePrevT);
     return {

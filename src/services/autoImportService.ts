@@ -140,19 +140,24 @@ export class AutoImportService {
         this.processingImages.delete(image_id);
       }
       
-      // 画像メタデータを保存
-      await ImageMetadataService.saveImageMetadata({
-        id: image_id,
-        original_file_name: original_path.split('/').pop() || 'unknown',
-        saved_file_name: processed_path.split('/').pop() || 'unknown',
-        image_type: 'processed',
-        created_at: new Date().toISOString(),
-        size: 0, // TODO: 実際のファイルサイズを取得
-        storage_location: 'workspace',
-        file_path: processed_path,
-        is_hidden: 0,
-        display_started_at: null
-      });
+      // 画像メタデータを保存（既存IDは上書きせず、file_pathのみ更新）
+      const exists = await ImageMetadataService.imageExists(image_id);
+      if (!exists) {
+        await ImageMetadataService.saveImageMetadata({
+          id: image_id,
+          original_file_name: original_path.split('/').pop() || 'unknown',
+          saved_file_name: processed_path.split('/').pop() || 'unknown',
+          image_type: 'processed',
+          created_at: new Date().toISOString(),
+          size: 0, // TODO: 実際のファイルサイズを取得
+          storage_location: 'workspace',
+          file_path: processed_path,
+          is_hidden: 0,
+          display_started_at: null
+        });
+      } else {
+        try { await ImageMetadataService.updateImageFilePath(image_id, processed_path); } catch {}
+      }
 
       // アニメーションタイプから動きタイプを判定
       const walkTypes = ['normal', 'slow', 'fast'];
