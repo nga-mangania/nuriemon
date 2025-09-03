@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getAllMetadata, loadImage } from '../services/imageStorage';
+import { downscaleDataUrl } from '../utils/image';
 import { getAllMovementSettings } from '../services/movementStorage';
 import { listen } from '@tauri-apps/api/event';
 import { useWorkspaceStore } from '../stores/workspaceStore';
@@ -11,9 +12,20 @@ export const useAnimationData = () => {
   const [newImageAdded, setNewImageAdded] = useState(false);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
 
+  // 表示用キャッシュ（起動中のみ）
+  const displayUrlCache = (useAnimationData as any)._displayUrlCache || new Map<string, string>();
+  (useAnimationData as any)._displayUrlCache = displayUrlCache;
+
   const transformImageData = async (metadata: any, movementSettingsMap: Map<string, any>) => {
     try {
-      const imageUrl = await loadImage(metadata);
+      // フルサイズを読み込み
+      const fullUrl = await loadImage(metadata);
+      // 表示用に縮小（キャッシュ）
+      let imageUrl = displayUrlCache.get(metadata.id);
+      if (!imageUrl) {
+        imageUrl = await downscaleDataUrl(fullUrl, 800, 0.8);
+        displayUrlCache.set(metadata.id, imageUrl);
+      }
       const savedSettings = movementSettingsMap.get(metadata.id);
       const settings = savedSettings || {
         type: 'fly',

@@ -154,6 +154,13 @@ export interface AnimatedImage {
   lastUpdateTime?: number;
   createdAt?: number; // 画像が追加された時刻
   deletionTime?: string; // 削除時間設定（'unlimited', '1', '2', etc.）
+  // noise smoothing (sampled at intervals)
+  noisePrevX?: number;
+  noisePrevY?: number;
+  noiseNextX?: number;
+  noiseNextY?: number;
+  noisePrevT?: number;
+  noiseNextT?: number;
 }
 
 export interface SpecialMovement {

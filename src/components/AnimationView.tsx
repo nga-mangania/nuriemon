@@ -48,6 +48,11 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   const containerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const imgRefs = useRef<Map<string, HTMLImageElement>>(new Map());
   const emoteRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  // ブロードキャスト用エモートキュー
+  const emoteBroadcastRef = useRef<null | { type: 'text'|'svg', content: string, pending: string[] }>(null);
+  
+  // ノイズ簡易キャッシュ（補間用）
+  const noiseIntervalMs = 66; // 約15Hz
   
   // デバッグログ：地面位置の確認
   useEffect(() => {
@@ -144,18 +149,19 @@ const AnimationView: React.FC<AnimationViewProps> = ({
           }
           case 'emote': {
             const emoteType = payload.emoteType as string | undefined;
-            apply((img) => {
-              if (!emoteType) return;
-              // 既存SVGのみにフォールバック（存在しない場合はテキストに）
-              const allowed = new Set(svgEmotes);
-              if (allowed.has(emoteType)) {
-                img.emote = { type: 'svg', content: emoteType } as any;
-              } else {
-                // 受信した文字列をそのままテキストエモートとして表示（例: 😊, ❤️ など）
-                img.emote = { type: 'text', content: emoteType } as any;
-              }
-              img.emoteTimer = 150;
-            });
+            if (!emoteType) break;
+            const allowed = new Set(svgEmotes);
+            const asType: 'svg'|'text' = allowed.has(emoteType) ? 'svg' : 'text';
+            if (imageId) {
+              apply((img) => {
+                img.emote = { type: asType, content: emoteType } as any;
+                img.emoteTimer = 150;
+              });
+            } else {
+              // 全体へ負荷分散で適用（1フレームあたり最大12件）
+              const ids = Object.keys(animatedImagesRef.current);
+              emoteBroadcastRef.current = { type: asType, content: emoteType, pending: ids.slice() };
+            }
             break;
           }
         }
@@ -329,8 +335,9 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     const scaledVelocityY = image.velocityY * baseVelocity * currentSpeed;
 
     const noiseScale = 0.05;
-    const noiseX = noise2D(currentTime * 0.001 + image.offset, 0) * noiseScale * currentSpeed;
-    const noiseY = noise2D(currentTime * 0.001 + image.offset + 1000, 0) * noiseScale * currentSpeed;
+    const sm = getSmoothedNoise(image as any, currentTime);
+    const noiseX = sm.x * noiseScale * currentSpeed;
+    const noiseY = sm.y * noiseScale * currentSpeed;
 
     if (image.type === "walk") {
       image.y = groundPosition;
@@ -416,6 +423,21 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   useEffect(() => {
     function animate() {
       const currentTime = Date.now();
+      // エモートのブロードキャストを分割して適用
+      const bc = emoteBroadcastRef.current;
+      if (bc && bc.pending.length > 0) {
+        const batchSize = 12;
+        const batch = bc.pending.splice(0, batchSize);
+        for (const id of batch) {
+          const img = animatedImagesRef.current[id];
+          if (!img) continue;
+          (img as any).emote = { type: bc.type, content: bc.content } as any;
+          (img as any).emoteTimer = 150;
+        }
+        if (bc.pending.length === 0) {
+          emoteBroadcastRef.current = null;
+        }
+      }
       const updatedImages: AnimatedImage[] = [];
       
       const deletionTimeMs = (deletionTime !== 'unlimited')
@@ -465,6 +487,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
                 em.innerHTML = '';
                 const im = document.createElement('img');
                 im.src = src;
+                im.decoding = 'async';
+                im.loading = 'eager';
                 em.appendChild(im);
               }
             }
@@ -614,6 +638,33 @@ const AnimationView: React.FC<AnimationViewProps> = ({
             />
             <div
               className={styles.emote}
+  // 線形補間
+  const lerp = useCallback((a: number, b: number, t: number) => a + (b - a) * Math.max(0, Math.min(1, t)), []);
+
+  // ノイズを一定間隔でサンプリングし補間して返す
+  const getSmoothedNoise = useCallback((img: any, now: number) => {
+    if (img.noisePrevT == null) {
+      const sX = noise2D(now * 0.001 + img.offset, 0);
+      const sY = noise2D(now * 0.001 + img.offset + 1000, 0);
+      img.noisePrevX = sX; img.noisePrevY = sY;
+      img.noiseNextX = sX; img.noiseNextY = sY;
+      img.noisePrevT = now; img.noiseNextT = now + noiseIntervalMs;
+    }
+    if (now >= img.noiseNextT) {
+      img.noisePrevX = img.noiseNextX; img.noisePrevY = img.noiseNextY;
+      img.noisePrevT = img.noiseNextT;
+      const t = now * 0.001;
+      img.noiseNextX = noise2D(t + img.offset, 0);
+      img.noiseNextY = noise2D(t + img.offset + 1000, 0);
+      img.noiseNextT = img.noisePrevT + noiseIntervalMs;
+    }
+    const u = (now - img.noisePrevT) / (img.noiseNextT - img.noisePrevT);
+    return {
+      x: lerp(img.noisePrevX, img.noiseNextX, u),
+      y: lerp(img.noisePrevY, img.noiseNextY, u),
+    };
+  }, [lerp]);
+
               ref={(el) => {
                 if (el) emoteRefs.current.set(image.id, el);
                 else emoteRefs.current.delete(image.id);
