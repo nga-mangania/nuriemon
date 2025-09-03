@@ -488,7 +488,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
         // DOMへスタイル反映（transform移動＋回転・スケール）
         const div = containerRefs.current.get(moved.id);
         if (div) {
-          const t = `translate(${moved.x}vw, ${moved.y}vh) translate(-50%, -50%) perspective(500px) ${moved.zRotation ? `rotateY(${moved.zRotation}deg)` : ''}`;
+          const t = `translate3d(${moved.x}vw, ${moved.y}vh, 0) translate(-50%, -50%) perspective(500px) ${moved.zRotation ? `rotateY(${moved.zRotation}deg)` : ''}`;
           if (div.style.transform !== t) div.style.transform = t;
           if (div.style.display !== '') div.style.display = '';
         }
@@ -509,9 +509,11 @@ const AnimationView: React.FC<AnimationViewProps> = ({
               }
             } else {
               const src = `/emotes/${moved.emote.content}.svg`;
-              // シンプルに入れ替え（XSSリスクは限定的: 固定ディレクトリ）
-              if (!em.firstChild || (em.firstChild as HTMLImageElement).getAttribute('src') !== src) {
-                em.innerHTML = '';
+              // firstElementChildが<IMG>か確認し、異なる場合のみ差し替え
+              const currentImg = em.firstElementChild as HTMLImageElement | null;
+              const currentSrc = currentImg && typeof currentImg.getAttribute === 'function' ? currentImg.getAttribute('src') : null;
+              if (!currentImg || currentSrc !== src) {
+                em.textContent = '';
                 const im = document.createElement('img');
                 im.src = src;
                 im.decoding = 'async';

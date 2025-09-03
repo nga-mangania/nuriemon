@@ -675,7 +675,11 @@ async fn open_animation_window(app: tauri::AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| format!("アニメーションウィンドウの作成に失敗しました: {}", e))?;
     
-    // DevToolsはデフォルトで開かない
+    // デバッグビルドではDevToolsを自動で開く
+    #[cfg(debug_assertions)]
+    {
+        window.open_devtools();
+    }
     
     Ok(())
 }
@@ -693,7 +697,7 @@ async fn open_qr_window(app: tauri::AppHandle) -> Result<(), String> {
     }
     
     // 新しいウィンドウを作成
-    let _window = WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         &app,
         "qr-display",
         WebviewUrl::App("qr-display.html".into())
@@ -704,7 +708,11 @@ async fn open_qr_window(app: tauri::AppHandle) -> Result<(), String> {
     .build()
     .map_err(|e| format!("ウィンドウの作成に失敗しました: {}", e))?;
     
-    // 開発モードでも自動でDevToolsは開かない（パフォーマンス配慮）
+    // デバッグビルドではDevToolsを自動で開く
+    #[cfg(debug_assertions)]
+    {
+        window.open_devtools();
+    }
     
     Ok(())
 }
@@ -731,7 +739,11 @@ pub fn run() {
             app.manage(app_state);
             app.manage(workspace_connection);
             app.manage(server_state);
-            // DevTools は起動時に自動で開かない（ショートカットで切替）
+            // デバッグビルドではメインウィンドウのDevToolsを開く
+            #[cfg(debug_assertions)]
+            if let Some(win) = app.get_webview_window("main") {
+                win.open_devtools();
+            }
 
             // メインウィンドウの初期幅をディスプレイ幅の90%に調整（高さは既定のまま）
             if let Some(main_win) = app.get_webview_window("main") {
