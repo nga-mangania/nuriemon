@@ -54,6 +54,33 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   // ノイズ簡易キャッシュ（補間用）
   const noiseIntervalMs = 66; // 約15Hz
   
+  // 線形補間
+  const lerp = useCallback((a: number, b: number, t: number) => a + (b - a) * Math.max(0, Math.min(1, t)), []);
+
+  // ノイズを一定間隔でサンプリングし補間して返す
+  const getSmoothedNoise = useCallback((img: any, now: number) => {
+    if (img.noisePrevT == null) {
+      const sX = noise2D(now * 0.001 + img.offset, 0);
+      const sY = noise2D(now * 0.001 + img.offset + 1000, 0);
+      img.noisePrevX = sX; img.noisePrevY = sY;
+      img.noiseNextX = sX; img.noiseNextY = sY;
+      img.noisePrevT = now; img.noiseNextT = now + noiseIntervalMs;
+    }
+    if (now >= img.noiseNextT) {
+      img.noisePrevX = img.noiseNextX; img.noisePrevY = img.noiseNextY;
+      img.noisePrevT = img.noiseNextT;
+      const t = now * 0.001;
+      img.noiseNextX = noise2D(t + img.offset, 0);
+      img.noiseNextY = noise2D(t + img.offset + 1000, 0);
+      img.noiseNextT = img.noisePrevT + noiseIntervalMs;
+    }
+    const u = (now - img.noisePrevT) / (img.noiseNextT - img.noisePrevT);
+    return {
+      x: lerp(img.noisePrevX, img.noiseNextX, u),
+      y: lerp(img.noisePrevY, img.noiseNextY, u),
+    };
+  }, [lerp]);
+  
   // デバッグログ：地面位置の確認
   useEffect(() => {
     console.log('[AnimationView] 地面位置が変更されました:', groundPosition);
@@ -638,33 +665,6 @@ const AnimationView: React.FC<AnimationViewProps> = ({
             />
             <div
               className={styles.emote}
-  // 線形補間
-  const lerp = useCallback((a: number, b: number, t: number) => a + (b - a) * Math.max(0, Math.min(1, t)), []);
-
-  // ノイズを一定間隔でサンプリングし補間して返す
-  const getSmoothedNoise = useCallback((img: any, now: number) => {
-    if (img.noisePrevT == null) {
-      const sX = noise2D(now * 0.001 + img.offset, 0);
-      const sY = noise2D(now * 0.001 + img.offset + 1000, 0);
-      img.noisePrevX = sX; img.noisePrevY = sY;
-      img.noiseNextX = sX; img.noiseNextY = sY;
-      img.noisePrevT = now; img.noiseNextT = now + noiseIntervalMs;
-    }
-    if (now >= img.noiseNextT) {
-      img.noisePrevX = img.noiseNextX; img.noisePrevY = img.noiseNextY;
-      img.noisePrevT = img.noiseNextT;
-      const t = now * 0.001;
-      img.noiseNextX = noise2D(t + img.offset, 0);
-      img.noiseNextY = noise2D(t + img.offset + 1000, 0);
-      img.noiseNextT = img.noisePrevT + noiseIntervalMs;
-    }
-    const u = (now - img.noisePrevT) / (img.noiseNextT - img.noisePrevT);
-    return {
-      x: lerp(img.noisePrevX, img.noiseNextX, u),
-      y: lerp(img.noisePrevY, img.noiseNextY, u),
-    };
-  }, [lerp]);
-
               ref={(el) => {
                 if (el) emoteRefs.current.set(image.id, el);
                 else emoteRefs.current.delete(image.id);
