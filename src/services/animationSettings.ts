@@ -98,20 +98,13 @@ export const typeNames: Record<string, string> = {
 };
 
 // エモート定義
+// 絵文字エモート（表示順指定）: じゃんけん用を含む
 export const textEmotes = [
-  "❤️",
-  "⭐",
-  "✨",
   "😊",
-  "😂",
-  "🥰",
-  "😍",
-  "🎵",
-  "💖",
-  "🌟",
-  "🎈",
-  "🌈",
-  "💭",
+  "❤️",
+  "✊",
+  "✌️",
+  "🖐",
 ];
 
 export const svgEmotes = ["good", "Hello", "hi", "wow"];
