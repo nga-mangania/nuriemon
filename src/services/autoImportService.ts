@@ -159,14 +159,10 @@ export class AutoImportService {
         try { await ImageMetadataService.updateImageFilePath(image_id, processed_path); } catch {}
       }
 
-      // アニメーションタイプから動きタイプを判定
-      const walkTypes = ['normal', 'slow', 'fast'];
-      const isWalkType = walkTypes.includes(animation_settings.animation_type);
-      
-      // アニメーション設定を保存
+      // 取込時は常に「浮遊(fly)」で登録（ギャラリーからの手動編集は従来どおり可能）
       await MovementSettingsService.saveMovementSettings({
         image_id,
-        movement_type: isWalkType ? 'walk' : 'fly',
+        movement_type: 'fly',
         movement_pattern: animation_settings.animation_type,
         speed: animation_settings.speed,
         size: animation_settings.size.toString(),
