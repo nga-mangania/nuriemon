@@ -34,7 +34,7 @@ export const Sidebar: FC<SidebarProps> = ({ activeTab, onTabChange, onAnimationC
   return (
     <aside className={styles.sidebar}>
       <div className={styles.logo}>
-        <h1>ぬりえもん</h1>
+        <img src="/img/logo.svg" alt="ぬりえもん ロゴ" className={styles.logoImg} />
       </div>
       
       <nav className={styles.navigation}>

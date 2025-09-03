@@ -28,7 +28,7 @@ export function BackgroundRemover({ imageData, fileName, onProcessed, onSaved }:
     });
 
     return () => {
-      unlistenPromise.then(f => f());
+      unlistenPromise.then(f => { try { f(); } catch (_) {} }).catch(() => {});
     };
   }, []);
 

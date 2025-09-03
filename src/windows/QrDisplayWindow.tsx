@@ -56,6 +56,17 @@ export const QrDisplayWindow: React.FC = () => {
   // メタデータから表示用データを生成
   const processedImages = images.filter(img => img.type === 'processed');
 
+  // Relay の有効/不足判定（表示の出し分け用）
+  const relayActive = (operationMode === 'relay') || (operationMode === 'auto' && useRelay);
+  const missingRelay = relayActive && (!relayEventId || !pcId);
+
+  // 条件が整ったら一時的なバナーを自動クリア
+  useEffect(() => {
+    if (!missingRelay && (useRelay || isServerStarted)) {
+      if (banner) setBanner(null);
+    }
+  }, [missingRelay, useRelay, isServerStarted]);
+
   // (DBリフレッシュは補助方針に戻す)
 
   // セッションキーを生成（eventId:pcid:baseURL:imageId）
@@ -68,11 +79,14 @@ export const QrDisplayWindow: React.FC = () => {
     try {
       const mode = await AppSettingsService.getAppSetting('operation_mode');
       if (mode === 'relay' || mode === 'local' || mode === 'auto') setOperationMode(mode);
+      // effective を優先（プロビジョニング/ENVを尊重）
+      await GlobalSettingsService.loadEffective();
+      const eff = GlobalSettingsService.getEffective();
       const base = await resolveBaseUrl();
       if (base) setRelayBaseUrl(base);
-      const eid = await GlobalSettingsService.get('relay_event_id');
+      const eid = (eff?.relay?.eventId || await GlobalSettingsService.get('relay_event_id')) || '';
       if (eid) setRelayEventId(eid);
-      let pid = (await GlobalSettingsService.get('pcid'));
+      let pid = (eff?.relay?.pcId || await GlobalSettingsService.get('pcid')) || '';
       if (!pid) {
         // 新しいワークスペースなどで未設定なら自動生成して保存
         pid = generateDefaultPcid();
@@ -122,7 +136,18 @@ export const QrDisplayWindow: React.FC = () => {
     add('app-settings-changed'); // 設定変更時
 
     return () => {
-      unlisteners.forEach(p => p.then(fn => fn()));
+      // 二重解除や未登録時の例外/非同期拒否を握りつぶし、安全にクリーンアップ
+      unlisteners.forEach(p => p
+        .then(fn => {
+          try {
+            const r = (fn as any)();
+            if (r && typeof (r as any).catch === 'function') {
+              (r as any).catch(() => {});
+            }
+          } catch (_) {}
+        })
+        .catch(() => {})
+      );
     };
   }, []);
 
@@ -139,7 +164,9 @@ export const QrDisplayWindow: React.FC = () => {
         await reloadAppSettings();
         // 状態更新の反映を待たずに、直近の値を直接取得して判定する
         const mode = (await AppSettingsService.getAppSetting('operation_mode')) as 'auto'|'relay'|'local' | null;
-        const eid = await GlobalSettingsService.get('relay_event_id');
+        await GlobalSettingsService.loadEffective();
+        const eff = GlobalSettingsService.getEffective();
+        const eid = eff?.relay?.eventId || await GlobalSettingsService.get('relay_event_id');
         const base = await resolveBaseUrl();
         if (base) setRelayBaseUrl(base);
         if (eid) setRelayEventId(eid);
@@ -202,7 +229,7 @@ export const QrDisplayWindow: React.FC = () => {
     });
 
     return () => {
-      unlisten.then(fn => fn());
+      unlisten.then(fn => { try { fn(); } catch (_) {} }).catch(() => {});
     };
   }, []);
 
@@ -299,6 +326,8 @@ export const QrDisplayWindow: React.FC = () => {
             return;
           }
         } else {
+          // Relay での事前登録成功 → 一時バナーをクリア
+          setBanner(null);
           const base = (relayBaseUrl || 'https://ctrl.nuriemon.jp').replace(/\/$/, '');
           // 画像ごとのコントローラー割当: img(=imageId)を明示
           const qrUrl = `${base}/app/#e=${encodeURIComponent(relayEventId)}&sid=${encodeURIComponent(sid)}&img=${encodeURIComponent(imageId)}`;
@@ -478,11 +507,16 @@ export const QrDisplayWindow: React.FC = () => {
     <ErrorBoundary>
     <div className={styles.container}>
       <h1 className={styles.title}>QRコード - ぬりえもん</h1>
-      {banner && (
+      {(() => {
+        const displayBanner = missingRelay
+          ? 'Relay設定が不足しています（イベントID/PCID）。設定画面で確認してください。'
+          : banner;
+        return displayBanner ? (
         <div className={styles.banner}>
-          {banner}
+          {displayBanner}
         </div>
-      )}
+        ) : null;
+      })()}
 
       {!(isServerStarted || operationMode === 'relay' || (operationMode === 'auto' && useRelay)) ? (
         <div className={styles.loading}>

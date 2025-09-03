@@ -13,13 +13,13 @@
 .logo {
   padding: vars.$spacing-lg vars.$spacing-md;
   border-bottom: 1px solid #e0e0e0;
-  
-  h1 {
-    font-size: 1.5rem;
-    font-weight: bold;
-    color: vars.$primary-color;
-    margin: 0;
-    text-align: center;
+
+  .logoImg {
+    display: block;
+    margin: 0 auto;
+    max-width: 160px;
+    width: 100%;
+    height: auto;
   }
 }
 

@@ -5,6 +5,16 @@ import { PROTOCOL_VERSION } from '../protocol/version';
 export type RelayResponse<T> = { ok: true; data: T } | { ok: false; status?: number; error?: string; retryAfterMs?: number; code?: string };
 
 export async function resolveBaseUrl(): Promise<string> {
+  // 1) 最優先: effective の relay.baseUrl（プロビジョニング/ENVでの一元化）
+  try {
+    const eff = GlobalSettingsService.getEffective() || await GlobalSettingsService.loadEffective();
+    const effUrl = (eff as any)?.relay?.baseUrl as string | undefined;
+    if (effUrl && typeof effUrl === 'string' && effUrl.trim() !== '') {
+      return effUrl.replace(/\/$/, '');
+    }
+  } catch (_) {}
+
+  // 2) 互換: 既存の保存キー（env 切替 + prod/stg URL, 旧 relay_base_url）
   const env = (await GlobalSettingsService.get('relay_env')) || 'prod';
   const prod = (await GlobalSettingsService.get('relay_base_url_prod')) || 'https://ctrl.nuriemon.jp';
   const stg = (await GlobalSettingsService.get('relay_base_url_stg')) || 'https://stg.ctrl.nuriemon.jp';

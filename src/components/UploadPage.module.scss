@@ -17,15 +17,12 @@ $bg-color: #eaf0f2;
 
 .container {
   display: flex;
-  gap: 2%;
-  flex-wrap: wrap;
+  gap: 16px;
+  flex-wrap: nowrap;
+  overflow-x: auto; // 幅が狭い場合でも折り返さず横スクロール
   max-width: 1200px;
   margin: 0 auto;
   padding: 0 20px;
-  
-  @media screen and (max-width: 768px) {
-    flex-direction: column;
-  }
 }
 
 .uploadSection {
@@ -34,11 +31,10 @@ $bg-color: #eaf0f2;
   padding: 1.5rem;
   margin-bottom: 2rem;
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.1);
-  width: calc(100% / 3 - 2%);
-  
-  @media screen and (max-width: 768px) {
-    width: 100%;
-  }
+  // 右カラム: 手動アップロード
+  order: 3;
+  flex: 1 1 0;
+  min-width: 420px;
 
   h2 {
     color: $text-color;
@@ -283,28 +279,18 @@ select {
 
 // 区切り線
 .divider {
-  text-align: center;
-  position: relative;
-  margin: 2rem 0;
-  
+  // 中央の「または」表示（縦方向中央揃え）
+  order: 2;
+  flex: 0 0 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2rem;
+
   span {
-    background-color: white;
-    padding: 0 1rem;
+    display: inline-block;
     color: $text-color;
-    font-size: 1.1rem;
-    position: relative;
-    z-index: 1;
-  }
-  
-  &::before {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background-color: #ddd;
-    z-index: 0;
+    font-weight: 600;
   }
 }
 
@@ -315,6 +301,10 @@ select {
   padding: 1.5rem;
   margin-bottom: 2rem;
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.1);
+  // 左カラム: 自動取り込みを左側に表示
+  order: 1;
+  flex: 1 1 0;
+  min-width: 420px;
   
   h2 {
     color: $text-color;

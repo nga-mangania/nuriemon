@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::fs;
 use std::path::Path;
-use tauri::{State, Manager, Emitter};
+use tauri::{State, Manager, Emitter, LogicalSize, Size, LogicalPosition, Position};
 
 mod db;
 mod events;
@@ -20,6 +20,8 @@ use events::{DataChangeEvent, emit_data_change};
 use workspace::{WorkspaceState, WorkspaceConnection};
 use qr_manager::QrManager;
 use server_state::ServerState;
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
 
 // Python処理の結果
 #[derive(Serialize, Deserialize, Clone)]
@@ -52,6 +54,9 @@ struct PythonProcess {
 }
 
 static PYTHON_PROCESS: Mutex<Option<PythonProcess>> = Mutex::new(None);
+
+// DevTools 開閉状態の簡易トラッカー（ウィンドウラベル単位）
+static DEVTOOLS_OPEN: Lazy<Mutex<HashMap<String, bool>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn spawn_python_process() -> Result<PythonProcess, String> {
     // Pythonスクリプトのパスを取得
@@ -670,11 +675,7 @@ async fn open_animation_window(app: tauri::AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| format!("アニメーションウィンドウの作成に失敗しました: {}", e))?;
     
-    // 開発ビルドでは自動でDevToolsを開く（検証を容易に）
-    #[cfg(debug_assertions)]
-    {
-        window.open_devtools();
-    }
+    // DevToolsはデフォルトで開かない
     
     Ok(())
 }
@@ -730,13 +731,51 @@ pub fn run() {
             app.manage(app_state);
             app.manage(workspace_connection);
             app.manage(server_state);
-            // Dev build: auto-open DevTools for main window, to ease debugging
-            #[cfg(debug_assertions)]
-            if let Some(win) = app.get_webview_window("main") {
-                win.open_devtools();
+            // DevTools は起動時に自動で開かない（ショートカットで切替）
+
+            // メインウィンドウの初期幅をディスプレイ幅の90%に調整（高さは既定のまま）
+            if let Some(main_win) = app.get_webview_window("main") {
+                // 現在のモニタ情報を取得
+                match main_win.current_monitor() {
+                    Ok(Some(monitor)) => {
+                        let scale = monitor.scale_factor();
+                        let mon_size = monitor.size(); // 物理解像度
+                        let mon_w = (mon_size.width as f64) / scale;
+                        let mon_h = (mon_size.height as f64) / scale;
+                        // 論理サイズで90%に設定（高さははみ出さないようクランプ）
+                        let target_w = (mon_w * 0.9).round();
+                        let current_h = match main_win.inner_size() {
+                            Ok(sz) => (sz.height as f64) / scale,
+                            Err(_) => 800.0,
+                        };
+                        let target_h = current_h.min(mon_h * 0.9).round();
+
+                        // サイズを設定（論理サイズ指定）
+                        let _ = main_win.set_size(Size::Logical(LogicalSize::new(target_w, target_h)));
+                        // 画面内に収まるように位置を計算（中央寄せしつつクランプ）
+                        // 配置座標（論理）
+                        let (mut x, mut y) = (0.0_f64, 0.0_f64);
+                        // モニタの左上座標（論理）
+                        let mon_pos = monitor.position();
+                        let mon_x = (mon_pos.x as f64) / scale;
+                        let mon_y = (mon_pos.y as f64) / scale;
+                        // 理想位置は中央
+                        let ideal_x = mon_x + (mon_w - target_w) / 2.0;
+                        let ideal_y = mon_y + (mon_h - target_h) / 2.0;
+                        // クランプしてはみ出し回避
+                        let min_x = mon_x;
+                        let max_x = mon_x + (mon_w - target_w).max(0.0);
+                        let min_y = mon_y;
+                        let max_y = mon_y + (mon_h - target_h).max(0.0);
+                        x = ideal_x.clamp(min_x, max_x);
+                        y = ideal_y.clamp(min_y, max_y);
+                        let _ = main_win.set_position(Position::Logical(LogicalPosition::new(x, y)));
+                    }
+                    _ => {
+                        // モニタ取得に失敗した場合は既定の高さで幅のみ90%相当を推定しない（安全に何もしない）
+                    }
+                }
             }
-            
-            // デバッグビルドでもDevToolsの自動オープンは無効化
             
             Ok(())
         })
@@ -791,6 +830,7 @@ pub fn run() {
             ,load_event_secret
             ,delete_event_secret
             ,open_devtools
+            ,toggle_devtools
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -912,6 +952,34 @@ fn open_devtools(window_label: Option<String>, app: tauri::AppHandle) -> Result<
         #[cfg(debug_assertions)]
         {
             win.open_devtools();
+            return Ok(());
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            return Err("DevTools disabled in release build".into());
+        }
+    }
+    Err(format!("window not found: {}", label))
+}
+
+// DevTools をトグル（開閉）
+#[tauri::command]
+fn toggle_devtools(window_label: Option<String>, app: tauri::AppHandle) -> Result<(), String> {
+    let label = window_label.unwrap_or_else(|| "main".to_string());
+    if let Some(win) = app.get_webview_window(&label) {
+        #[cfg(debug_assertions)]
+        {
+            let mut map = DEVTOOLS_OPEN.lock().map_err(|_| "devtools state lock".to_string())?;
+            let is_open = *map.get(&label).unwrap_or(&false);
+            if is_open {
+                // 閉じる
+                let _ = win.close_devtools();
+                map.insert(label.clone(), false);
+            } else {
+                // 開く
+                win.open_devtools();
+                map.insert(label.clone(), true);
+            }
             return Ok(());
         }
         #[cfg(not(debug_assertions))]

@@ -36,11 +36,11 @@ export function UploadPage() {
   const loadUserSettings = async () => {
     // 動き設定の読み込み（現在は設定に保存されていない）
     // TODO: 動き設定を別途管理する仕組みが必要
-    
+
     // フォルダ設定を読み込み（表示用）
     const settings = await AppSettingsService.getSettings();
     console.log('[UploadPage] 現在の保存設定:', settings);
-    
+
     // 自動取り込み設定を読み込み
     const autoImportService = AutoImportService.getInstance();
     const importPath = await AppSettingsService.getAutoImportPath();
@@ -69,18 +69,18 @@ export function UploadPage() {
       console.log('[UploadPage] ワークスペースデータ読み込み完了を検知');
       // 設定を再読み込み
       await loadUserSettings();
-      
+
       // 自動取り込みが有効な場合は再開始が必要
       const autoImportService = AutoImportService.getInstance();
       const currentPath = await AppSettingsService.getAutoImportPath();
       const currentEnabled = await AppSettingsService.getAutoImportEnabled();
-      
+
       console.log('[UploadPage] 自動取り込み状態:', {
         enabled: currentEnabled,
         path: currentPath,
         isWatching: autoImportService.isCurrentlyWatching()
       });
-      
+
       if (currentEnabled && currentPath) {
         console.log('[UploadPage] 自動取り込みを再開始します');
         try {
@@ -96,9 +96,9 @@ export function UploadPage() {
     });
 
     return () => {
-      unlistenPromise.then(f => f());
-      settingsUnlistenPromise.then(f => f());
-      workspaceUnlistenPromise.then(f => f());
+      unlistenPromise.then(f => { try { f(); } catch (_) {} }).catch(() => {});
+      settingsUnlistenPromise.then(f => { try { f(); } catch (_) {} }).catch(() => {});
+      workspaceUnlistenPromise.then(f => { try { f(); } catch (_) {} }).catch(() => {});
     };
   }, []); // 依存配列から削除
 
@@ -121,15 +121,15 @@ export function UploadPage() {
             ''
           )
         );
-        
+
         const fileName = (selected as string).split(/[/\\]/).pop() || 'unknown';
         const extension = fileName.split('.').pop()?.toLowerCase();
         const mimeType = extension === 'png' ? 'image/png' : 'image/jpeg';
-        
+
         const dataUrl = `data:${mimeType};base64,${base64}`;
         const imageInfo = { name: fileName, data: dataUrl };
         setImage(imageInfo);
-        
+
         // 自動でアップロード
         await handleImageUpload(imageInfo);
       }
@@ -142,28 +142,28 @@ export function UploadPage() {
   const handleImageUpload = async (imageToUpload?: {name: string, data: string}) => {
     const img = imageToUpload || image;
     if (!img) return;
-    
+
     setUploadingImage(true);
     setUploadProgress(0);
 
     try {
       // まず元画像を保存
       await saveImage(img.data, img.name, 'original');
-      
+
       // 背景除去処理を実行
       console.log('[UploadPage] 背景除去処理を開始');
       const result = await invoke<{ success: boolean; image?: string; error?: string }>('process_image', {
         imageData: img.data
       });
       console.log('[UploadPage] 背景除去処理結果:', result.success ? '成功' : '失敗', result.error);
-      
+
       if (result.success && result.image) {
         // 処理済み画像を保存
         const processedFileName = img.name.replace(/\.[^/.]+$/, '') + '-nobg.png';
         console.log('[UploadPage] 処理済み画像を保存開始:', processedFileName);
         const processedMetadata = await saveImage(result.image, processedFileName, 'processed');
         console.log('[UploadPage] 処理済み画像保存完了:', processedMetadata.id);
-        
+
         // 動き設定を処理済み画像のIDで保存
         console.log('[UploadPage] 動き設定を保存:', processedMetadata.id, movementSettings);
         await saveMovementSettings(processedMetadata.id, movementSettings);
@@ -171,12 +171,12 @@ export function UploadPage() {
       } else {
         throw new Error(result.error || 'Background removal failed');
       }
-      
+
       setUploadProgress(100);
-      
+
       // 動き設定の保存は現在サポートされていません
       // TODO: 動き設定を保存する仕組みを実装
-      
+
       // アラートは削除（処理完了は視覚的に分かるため）
       clearImageSelection();
     } catch (error) {
@@ -201,14 +201,14 @@ export function UploadPage() {
       <div className={styles.container}>
         {/* お絵かきアップロード */}
         <div className={styles.uploadSection}>
-          <h2>お絵かきアップロード</h2>
+          <h2>手動でお絵かきアップロード</h2>
           <MovementSettings
             settings={movementSettings}
             onSettingsChange={(newSettings) => {
               setMovementSettings(prev => ({ ...prev, ...newSettings }));
             }}
           />
-          
+
           <div className={styles.uploadBox}>
             <h3>画像</h3>
             <div className={styles.uploadControls}>
@@ -220,7 +220,7 @@ export function UploadPage() {
                 {uploadingImage ? 'アップロード中...' : 'ファイルを選択（背景除去）'}
               </button>
             </div>
-            
+
             {image && (
               <div className={styles.fileInfo}>
                 <span className={styles.fileIcon}>
@@ -232,7 +232,7 @@ export function UploadPage() {
                 </button>
               </div>
             )}
-            
+
             {uploadingImage && (
               <div className={styles.progressBarContainer}>
                 <div className={styles.progressBar} style={{ width: `${uploadProgress}%` }}>
@@ -255,11 +255,11 @@ export function UploadPage() {
 
         {/* 自動取り込み設定 */}
         <div className={styles.autoImportSection}>
-          <h2>📁 フォルダを監視して自動取り込み</h2>
-          
+          <h2>📁 フォルダを設定して自動アップロード</h2>
+
           <div className={styles.autoImportSettings}>
             <div className={styles.autoImportPath}>
-              <p>監視フォルダ: {autoImportPath || '未設定'}</p>
+              <p>設定フォルダ: {autoImportPath || '未設定'}</p>
               <button
                 className={styles.selectFolderButton}
                 onClick={async () => {
@@ -267,9 +267,9 @@ export function UploadPage() {
                     const selected = await open({
                       directory: true,
                       multiple: false,
-                      title: '監視するフォルダを選択'
+                      title: '設定するフォルダを選択'
                     });
-                    
+
                     if (selected && typeof selected === 'string') {
                       setAutoImportPath(selected);
                       await AppSettingsService.setAutoImportPath(selected);
@@ -283,7 +283,7 @@ export function UploadPage() {
                 フォルダを選択
               </button>
             </div>
-            
+
             <div className={styles.autoImportToggle}>
               <label>
                 <input
@@ -291,13 +291,13 @@ export function UploadPage() {
                   checked={autoImportEnabled}
                   onChange={async (e) => {
                     const enabled = e.target.checked;
-                    
+
                     if (enabled) {
                       if (!autoImportPath) {
-                        alert('先に監視フォルダを選択してください');
+                        alert('先に設定フォルダを選択してください');
                         return;
                       }
-                      
+
                       try {
                         setIsStartingAutoImport(true);
                         const autoImportService = AutoImportService.getInstance();
@@ -318,16 +318,16 @@ export function UploadPage() {
                   }}
                   disabled={isStartingAutoImport}
                 />
-                {isStartingAutoImport ? '開始中...' : '監視を開始'}
+                {isStartingAutoImport ? '開始中...' : '自動取込開始'}
               </label>
               {autoImportEnabled && (
-                <span className={styles.statusBadge}>監視中</span>
+                <span className={styles.statusBadge}>設定中</span>
               )}
             </div>
           </div>
-          
+
           <div className={styles.note}>
-            <p>💡 新しい画像が追加されると自動的に背景除去して処理されます</p>
+            <p>💡 設定したフォルダに新しい画像が追加されると、自動的に背景除去してアニメーション画面に表示されます</p>
             <p>※ スキャナーの保存先フォルダを指定すると便利です</p>
           </div>
         </div>

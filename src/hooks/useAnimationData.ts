@@ -109,7 +109,9 @@ export const useAnimationData = () => {
     });
 
     return () => {
-      unlistenPromise.then(unlisten => unlisten());
+      unlistenPromise
+        .then(unlisten => { try { unlisten(); } catch (_) {} })
+        .catch(() => {});
     };
   }, [updateImages]);
 

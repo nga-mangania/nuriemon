@@ -83,6 +83,22 @@ function App() {
     }
   }, [isReady, currentWorkspace]);
 
+  // DevTools トグルのキーボードショートカット（Chrome互換）
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().includes('MAC');
+      const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+      const key = e.key.toLowerCase();
+      const comboToggle = (cmdOrCtrl && e.shiftKey && key === 'i') || (isMac && e.metaKey && e.altKey && key === 'i') || e.key === 'F12';
+      if (comboToggle) {
+        e.preventDefault();
+        try { (invoke as any)('toggle_devtools', { windowLabel: 'main' }); } catch (_) {}
+      }
+    };
+    window.addEventListener('keydown', handler, { capture: true });
+    return () => window.removeEventListener('keydown', handler, { capture: true } as any);
+  }, []);
+
   // ワークスペース変更時に自動削除サービスを再起動
   useEffect(() => {
     if (!isReady) return;
