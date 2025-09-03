@@ -10,7 +10,13 @@ use crate::server_state::ServerState;
 struct WebSocketMessage {
     #[serde(rename = "type")]
     msg_type: String,
+    #[serde(default)]
     payload: serde_json::Value,
+    // Relay互換のトップレベルフィールド（joinなど）
+    #[serde(default)]
+    sid: Option<String>,
+    #[serde(default, rename = "imageId")]
+    image_id_top: Option<String>,
 }
 
 pub async fn websocket_handler(
@@ -108,7 +114,7 @@ async fn handle_websocket_message(
                             }
                         }
 
-                        // 接続完了通知
+                        // 接続完了通知（レガシー互換: connected）
                         let _ = session.text(serde_json::json!({
                             "type": "connected",
                             "imageId": valid_image_id
@@ -126,6 +132,44 @@ async fn handle_websocket_message(
                         }).to_string()).await;
                     }
                 }
+            }
+        }
+        "join" => {
+            // Relay互換のハンドシェイク（ackを返す）
+            let sid_opt = msg.sid.as_deref().or_else(|| msg.payload.get("sid").and_then(|v| v.as_str()));
+            if let Some(sid) = sid_opt {
+                let provided_image_id = msg.image_id_top.as_deref()
+                    .or_else(|| msg.payload.get("imageId").and_then(|v| v.as_str()));
+                let state: tauri::State<ServerState> = app_handle.state();
+                if let Some(qr_manager) = state.get_qr_manager() {
+                    if let Some(valid_image_id) = qr_manager.validate_session(sid) {
+                        if let Some(img) = provided_image_id {
+                            if img != valid_image_id {
+                                let _ = session.text(serde_json::json!({
+                                    "type": "ack",
+                                    "ok": false,
+                                    "error": "imageId mismatch"
+                                }).to_string()).await; return;
+                            }
+                        }
+                        // ack
+                        let _ = session.text(serde_json::json!({
+                            "type": "ack",
+                            "ok": true
+                        }).to_string()).await;
+                        // 通知
+                        let _ = app_handle.emit("mobile-connected", serde_json::json!({
+                            "sessionId": sid,
+                            "imageId": valid_image_id,
+                        }));
+                        return;
+                    }
+                }
+                let _ = session.text(serde_json::json!({
+                    "type": "ack",
+                    "ok": false,
+                    "error": "invalid or expired session"
+                }).to_string()).await;
             }
         }
         "cmd" => {

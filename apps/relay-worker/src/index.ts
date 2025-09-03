@@ -1,3 +1,5 @@
+/// <reference types="@cloudflare/workers-types/2023-07-01" />
+
 interface Env {
   EVENT_DO: DurableObjectNamespace;
   ALLOWED_ORIGINS: string;
@@ -576,10 +578,10 @@ function appHtml(): string {
       </div>
       <div class="emotes">
         <button onclick="emote('😊')">😊</button>
-        <button onclick="emote('😂')">😂</button>
         <button onclick="emote('❤️')">❤️</button>
-        <button onclick="emote('⭐')">⭐</button>
-        <button onclick="emote('✨')">✨</button>
+        <button onclick="emote('✊')">✊</button>
+        <button onclick="emote('✌️')">✌️</button>
+        <button onclick="emote('🖐')">🖐</button>
       </div>
     </div>
     <div class="dpad">

@@ -341,6 +341,14 @@ Rust Backend → Tauriイベント → 中央リスナー → Zustandストア �
   - シンプル: 幼児向け、エモート＋ランダムアクションのみ
   - 将来の挙動変更に備え、疎結合・設定駆動で実装
 
+#### コントローラーUIのソース（明記）
+- Relay（本番配信）: `apps/relay-worker/src/index.ts`（Cloudflare Workersの`/app`で配信）
+  - UI/ボタン構成・送信フォーマット（`type:'cmd'`）の正とする
+  - デプロイ: `apps/relay-worker`で`wrangler publish`（stagingは`--env staging`）
+- Local（アプリ内蔵）: `mobile-ui/dist/mobile.html`
+  - RelayのUI・コマンド仕様に合わせる（/appで配信）。必要に応じてローカル検出時は`/ws`に接続
+  - 受信側の正規化は`src/services/pcWsClient.ts`（Relay）・`src-tauri/src/websocket.rs`（Local）に実装
+
 ### Phase 6: ユーザー管理・配布準備（未実装）
 1. **ユーザー管理機能**
    - マルチユーザー対応

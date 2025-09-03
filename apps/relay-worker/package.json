@@ -2,6 +2,9 @@
   "name": "relay-worker",
   "private": true,
   "type": "module",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240903.0"
+  },
   "scripts": {
     "dev": "wrangler dev --env=staging",
     "deploy:stg": "wrangler deploy --env=staging",
