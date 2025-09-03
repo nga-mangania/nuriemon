@@ -23,7 +23,7 @@ export const useAnimationData = () => {
       // 表示用に縮小（キャッシュ）
       let imageUrl = displayUrlCache.get(metadata.id);
       if (!imageUrl) {
-        imageUrl = await downscaleDataUrl(fullUrl, 800, 0.8);
+        imageUrl = await downscaleDataUrl(fullUrl, 512, 0.8);
         displayUrlCache.set(metadata.id, imageUrl);
       }
       const savedSettings = movementSettingsMap.get(metadata.id);

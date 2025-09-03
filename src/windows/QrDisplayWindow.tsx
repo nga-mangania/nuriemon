@@ -40,6 +40,14 @@ export const QrDisplayWindow: React.FC = () => {
   // Relay時のサムネイルをデータURLで保有（convertFileSrcは保存先により不安定なため）
   const [thumbs, setThumbs] = useState<Map<string, string>>(new Map());
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
+  const visibleIdsRef = useRef<Set<string>>(new Set());
+  const onVisibleChange = (id: string, visible: boolean) => {
+    const next = new Set(visibleIdsRef.current);
+    if (visible) next.add(id); else next.delete(id);
+    visibleIdsRef.current = next;
+    setVisibleIds(next);
+  };
   const inflightRef = useRef<Set<string>>(new Set());
   const debug = (msg: string) => {
     try {
@@ -418,7 +426,8 @@ export const QrDisplayWindow: React.FC = () => {
       const s = sessions.get(image.id);
       const desiredKey = buildSessionKey(image.id);
       const valid = !!s && (s as any).envKey === envKey && (s as any).sessionKey === desiredKey;
-      if (!valid && !inflightRef.current.has(image.id)) {
+      const visible = visibleIdsRef.current.has(image.id);
+      if (!valid && !inflightRef.current.has(image.id) && visible) {
         setTimeout(() => { generateQr(image.id).catch(() => {}); }, delay);
         delay += stepMs;
       }
@@ -556,6 +565,7 @@ export const QrDisplayWindow: React.FC = () => {
                   ready={isServerStarted || operationMode === 'relay' || (operationMode === 'auto' && useRelay)}
                   serverPort={serverPort}
                   thumbUrl={thumbs.get(image.id) || ''}
+                  onVisible={onVisibleChange}
                 />
               ))
           )}
@@ -601,13 +611,26 @@ interface ImageQrItemProps {
   ready: boolean;
   serverPort: number | null;
   thumbUrl?: string;
+  onVisible: (id: string, visible: boolean) => void;
 }
 
-const ImageQrItem: React.FC<ImageQrItemProps> = ({ image, session, onGenerateQr, serverPort, ready, thumbUrl }) => {
+const ImageQrItem: React.FC<ImageQrItemProps> = ({ image, session, onGenerateQr, serverPort, ready, thumbUrl, onVisible }) => {
   // 自動生成は親コンポーネント側で制御（重複生成防止）
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        onVisible(image.id, entry.isIntersecting);
+      });
+    }, { root: null, threshold: 0.1 });
+    io.observe(el);
+    return () => { try { io.disconnect(); } catch {} };
+  }, [image.id, onVisible]);
 
   return (
-    <div className={styles.imageQrItem}>
+    <div className={styles.imageQrItem} ref={ref}>
       <div className={styles.imageSection}>
         <img
           src={serverPort ? `http://127.0.0.1:${serverPort}/image/${image.id}` : (thumbUrl || '')}

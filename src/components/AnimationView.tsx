@@ -221,7 +221,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   // 特殊な動きを管理する関数
   const applySpecialMovement = useCallback((image: AnimatedImage, currentTime: number): AnimatedImage => {
     if (!image.specialMovement) {
-      if (image.specialMovementCooldown <= 0 && Math.random() < 0.0995) {
+      const p = specialProbRef.current;
+      if (image.specialMovementCooldown <= 0 && Math.random() < p) {
         const type = Math.floor(Math.random() * 5);
         image.specialMovement = {
           type,
@@ -449,11 +450,12 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   // アニメーションループ
   useEffect(() => {
     function animate() {
+      const frameStart = performance.now();
       const currentTime = Date.now();
       // エモートのブロードキャストを分割して適用
       const bc = emoteBroadcastRef.current;
       if (bc && bc.pending.length > 0) {
-        const batchSize = 10;
+        const batchSize = emoteBatchSizeRef.current;
         const batch = bc.pending.splice(0, batchSize);
         for (const id of batch) {
           const img = animatedImagesRef.current[id];
@@ -549,6 +551,38 @@ const AnimationView: React.FC<AnimationViewProps> = ({
             }
           } catch (e) { console.warn('[AnimationView] hideImage failed', e); }
         })();
+      }
+
+      // パフォーマンス監視（EMA / ヒステリシス）
+      const dt = performance.now() - frameStart;
+      const ema = emaRef.current = emaRef.current * 0.9 + dt * 0.1;
+      const mode = perfModeRef.current;
+      if (mode === 'normal') {
+        if (ema > 14) {
+          aboveRef.current += 1; belowRef.current = 0;
+          if (aboveRef.current > 30) {
+            perfModeRef.current = 'degraded';
+            noiseIntervalMsRef.current = 100;
+            emoteBatchSizeRef.current = 6;
+            specialProbRef.current = 0.05;
+            aboveRef.current = 0; belowRef.current = 0;
+          }
+        } else if (ema < 10) {
+          aboveRef.current = 0; belowRef.current = 0;
+        }
+      } else {
+        if (ema < 8) {
+          belowRef.current += 1; aboveRef.current = 0;
+          if (belowRef.current > 60) {
+            perfModeRef.current = 'normal';
+            noiseIntervalMsRef.current = 66;
+            emoteBatchSizeRef.current = 8;
+            specialProbRef.current = 0.0995;
+            aboveRef.current = 0; belowRef.current = 0;
+          }
+        } else if (ema > 16) {
+          belowRef.current = 0;
+        }
       }
 
       animationRef.current = requestAnimationFrame(animate);
