@@ -453,7 +453,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       // エモートのブロードキャストを分割して適用
       const bc = emoteBroadcastRef.current;
       if (bc && bc.pending.length > 0) {
-        const batchSize = 12;
+        const batchSize = 10;
         const batch = bc.pending.splice(0, batchSize);
         for (const id of batch) {
           const img = animatedImagesRef.current[id];

@@ -47,6 +47,9 @@
   transform: translateX(-50%);
   font-size: 24px;
   animation: float 2s ease-in-out infinite;
+  will-change: transform;
+  contain: layout paint;
+  pointer-events: none;
   
   img {
     width: 100%;
