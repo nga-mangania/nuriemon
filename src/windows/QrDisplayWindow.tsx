@@ -34,7 +34,9 @@ export const QrDisplayWindow: React.FC = () => {
   const [useRelay, setUseRelay] = useState<boolean>(false);
   const [banner, setBanner] = useState<string | null>(null);
   const [regenTick, setRegenTick] = useState<number>(0);
-  const [showDebug, setShowDebug] = useState<boolean>(true);
+  const [showDebug, setShowDebug] = useState<boolean>(false);
+  const showDebugRef = useRef<boolean>(false);
+  useEffect(() => { showDebugRef.current = showDebug; }, [showDebug]);
   // Relay時のサムネイルをデータURLで保有（convertFileSrcは保存先により不安定なため）
   const [thumbs, setThumbs] = useState<Map<string, string>>(new Map());
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
@@ -45,11 +47,13 @@ export const QrDisplayWindow: React.FC = () => {
       const line = `[${ts}] ${msg}`;
       // コンソールにも出す
       console.log('[QRDEBUG]', line);
-      setDebugLogs(prev => {
-        const next = prev.length > 400 ? prev.slice(prev.length - 400) : prev.slice();
-        next.push(line);
-        return next;
-      });
+      if (showDebugRef.current) {
+        setDebugLogs(prev => {
+          const next = prev.length > 400 ? prev.slice(prev.length - 400) : prev.slice();
+          next.push(line);
+          return next;
+        });
+      }
     } catch {}
   };
   
@@ -403,24 +407,22 @@ export const QrDisplayWindow: React.FC = () => {
 
   // 再生成トリガや画像リスト変更時に、未生成のQRを補完生成（同一画像の重複生成を抑止）
   useEffect(() => {
-    const gen = async () => {
-      console.log('[QRDEBUG]', `regen tick=${regenTick}, images=${processedImages.length}`);
-      const relayActive = (operationMode === 'relay') || (operationMode === 'auto' && useRelay);
-      const ready = isServerStarted || relayActive;
-      const envKey = `${relayBaseUrl}|${relayEventId}|${pcId}|${operationMode}`;
-      for (const image of processedImages) {
-        const s = sessions.get(image.id);
-        const has = !!s;
-        const desiredKey = buildSessionKey(image.id);
-        const valid = !!s && (s as any).envKey === envKey && (s as any).sessionKey === desiredKey;
-        console.log('[QRDEBUG]', `[gate] imageId=${image.id} has=${has} valid=${valid} inflight=${inflightRef.current.has(image.id)} ready=${ready} relayActive=${relayActive}`);
-        if (!valid && ready) {
-          console.log('[QRDEBUG]', `auto-generate start imageId=${image.id}`);
-          await generateQr(image.id);
-        }
+    // スパイク回避のため、QR生成を等間隔でスケジューリング
+    const relayActive = (operationMode === 'relay') || (operationMode === 'auto' && useRelay);
+    const ready = isServerStarted || relayActive;
+    const envKey = `${relayBaseUrl}|${relayEventId}|${pcId}|${operationMode}`;
+    if (!ready) return;
+    let delay = 0;
+    const stepMs = 60; // 60ms間隔でスタガ
+    processedImages.forEach(image => {
+      const s = sessions.get(image.id);
+      const desiredKey = buildSessionKey(image.id);
+      const valid = !!s && (s as any).envKey === envKey && (s as any).sessionKey === desiredKey;
+      if (!valid && !inflightRef.current.has(image.id)) {
+        setTimeout(() => { generateQr(image.id).catch(() => {}); }, delay);
+        delay += stepMs;
       }
-    };
-    gen();
+    });
   }, [regenTick, processedImages, sessions, operationMode, useRelay, relayBaseUrl, relayEventId, pcId, isServerStarted]);
 
   // グローバル再生成ボタン
@@ -437,20 +439,30 @@ export const QrDisplayWindow: React.FC = () => {
     const loadThumbs = async () => {
       if (serverPort) return;
       const { loadImage } = await import('../services/imageStorage');
+      const { downscaleDataUrl } = await import('../utils/image');
       const map = new Map(thumbs);
+      let delay = 0;
+      const step = 30; // 30ms間隔でゆっくり読み込む
       for (const image of processedImages) {
         if (!map.get(image.id)) {
-          try {
-            const url = await loadImage(image as any);
-            map.set(image.id, url);
-          } catch (e) {
-            console.warn('[QrDisplayWindow] thumbnail load failed:', e);
-          }
+          setTimeout(async () => {
+            try {
+              const full = await loadImage(image as any);
+              const small = await downscaleDataUrl(full, 200, 0.8);
+              map.set(image.id, small);
+              // setStateはまとめず小出し（UIブロック回避）
+              setThumbs(new Map(map));
+            } catch (e) {
+              console.warn('[QrDisplayWindow] thumbnail load failed:', e);
+            }
+          }, delay);
+          delay += step;
         }
       }
-      setThumbs(map);
     };
     loadThumbs();
+    // 依存にthumbsは入れない（逐次更新）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processedImages, serverPort]);
 
 
