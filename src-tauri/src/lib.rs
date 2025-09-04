@@ -59,14 +59,27 @@ static PYTHON_PROCESS: Mutex<Option<PythonProcess>> = Mutex::new(None);
 static DEVTOOLS_OPEN: Lazy<Mutex<HashMap<String, bool>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn spawn_python_process() -> Result<PythonProcess, String> {
-    // Pythonスクリプトのパスを取得
+    // Sidecar (bundled binary) > dev script の順に起動を試行
+    if let Ok(sidecar) = std::env::var("NURIEMON_SIDECAR") {
+        let p = std::path::PathBuf::from(&sidecar);
+        if p.exists() {
+            let mut child = Command::new(&p)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("Failed to start sidecar: {}", e))?;
+            let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+            let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+            let reader = BufReader::new(stdout);
+            return Ok(PythonProcess { child, stdin, stdout: reader });
+        }
+    }
+
+    // Dev fallback: run python3 with script
     let python_script = std::env::current_dir()
         .map_err(|e| e.to_string())?
         .join("../python-sidecar/main.py");
-
-    if !python_script.exists() {
-        return Err(format!("Python script not found at: {:?}", python_script));
-    }
 
     let mut child = Command::new("python3")
         .arg(&python_script)
@@ -716,6 +729,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             // アプリケーション状態の初期化
             let app_state = AppState {
@@ -731,6 +745,21 @@ pub fn run() {
             app.manage(app_state);
             app.manage(workspace_connection);
             app.manage(server_state);
+
+            // ===== Sidecar path hint (for packaged app) =====
+            // Try to locate bundled sidecar binary in resource_dir and expose via env var for spawn_python_process.
+            if let Ok(dir) = app.path().resource_dir() {
+                #[cfg(target_os = "windows")]
+                let candidates = [dir.join("python-sidecar.exe"), dir.join("sidecar").join("python-sidecar.exe")];
+                #[cfg(not(target_os = "windows"))]
+                let candidates = [dir.join("python-sidecar"), dir.join("sidecar").join("python-sidecar")];
+                for p in candidates.iter() {
+                    if p.exists() {
+                        std::env::set_var("NURIEMON_SIDECAR", p.to_string_lossy().to_string());
+                        break;
+                    }
+                }
+            }
             // DevTools は起動時に自動で開かない（ショートカットで開閉）
 
             // メインウィンドウの初期幅をディスプレイ幅の90%に調整（高さは既定のまま）
