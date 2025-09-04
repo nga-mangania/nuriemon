@@ -681,7 +681,7 @@ async fn open_animation_window(app: tauri::AppHandle) -> Result<(), String> {
     }
     
     // 新しいウィンドウを作成
-    let window = WebviewWindowBuilder::new(&app, "animation", WebviewUrl::App("#/animation".into()))
+    let _window = WebviewWindowBuilder::new(&app, "animation", WebviewUrl::App("#/animation".into()))
         .inner_size(1024.0, 768.0)
         .title("ぬりえもん - アニメーション")
         .resizable(true)
@@ -706,7 +706,7 @@ async fn open_qr_window(app: tauri::AppHandle) -> Result<(), String> {
     }
     
     // 新しいウィンドウを作成
-    let window = WebviewWindowBuilder::new(
+    let _window = WebviewWindowBuilder::new(
         &app,
         "qr-display",
         WebviewUrl::App("qr-display.html".into())
@@ -724,12 +724,19 @@ async fn open_qr_window(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_store::Builder::default().build());
+
+    // Updater plugin: enable only for release builds (dev lacks pubkey/endpoints)
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .setup(move |app| {
             // アプリケーション状態の初期化
             let app_state = AppState {

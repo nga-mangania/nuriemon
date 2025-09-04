@@ -14,7 +14,6 @@ import { rehydrateStore, saveStateToFile, useWorkspaceStore } from "./stores/wor
 import { emit } from '@tauri-apps/api/event';
 import styles from "./App.module.scss";
 import { createPcWsClient } from "./services/pcWsClient";
-import { autoCheckForUpdates } from "./services/updater";
 
 console.log('[App.tsx] Module loaded');
 
@@ -65,8 +64,6 @@ function App() {
           const eventListener = TauriEventListener.getInstance();
           await eventListener.setupListeners();
           console.log('[App] Tauriイベントリスナーをセットアップしました');
-          // アップデートの自動チェック（非同期・失敗は無視）
-          try { autoCheckForUpdates(); } catch {}
         } catch (error) {
           console.error('初期化エラー:', error);
         }
