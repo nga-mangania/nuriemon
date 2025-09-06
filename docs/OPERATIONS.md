@@ -13,8 +13,9 @@ cd apps/license-api
 # 1) D1 にスキーマ適用
 wrangler d1 execute nuriemon-license-stg --file=./schema.sql --env=staging
 
-# 2) 秘密鍵（JWK）を登録（RSAまたはEd25519）
-wrangler secret put SIGNING_JWK --env=staging
+# 2) 秘密鍵（JWK）と公開鍵（JWKS）を登録（推奨）
+wrangler secret put SIGNING_JWK --env=staging         # 署名用（private JWK）
+wrangler secret put SIGNING_PUBLIC_JWKS --env=staging  # 配信用の公開JWKS（keys: [...]）
 
 # 3) （任意）管理APIキー
 wrangler secret put ADMIN_API_KEY --env=staging
@@ -23,7 +24,7 @@ wrangler secret put ADMIN_API_KEY --env=staging
 wrangler deploy --env=staging
 ```
 
-SIGNING_JWK は JWK 形式の秘密鍵（`kid` を含めるとスムーズ）。公開鍵は `/.well-known/jwks.json` に自動で出ます。
+`/.well-known/jwks.json` は、まず `SIGNING_PUBLIC_JWKS` をそのまま返します（推奨）。未設定の場合のみ、`SIGNING_JWK` に含まれる公開要素（Ed25519なら `x`、RSAなら `n/e`）からJWKSを組み立てます。鍵の export は行いません。
 
 ## relay-worker の設定
 
@@ -60,4 +61,3 @@ curl -X POST -H "X-Admin-Api-Key: $ADMIN" -d '{"code":"ABCD..."}' https://licens
 - 新しい `SIGNING_JWK` を設定（`kid` を新規値に）。
 - `/.well-known/jwks.json` は自動で新 `kid` を含む公開鍵に更新。
 - 既存トークンは旧 `kid` で検証され続けるため、失効は TTL 経過で自然切替。必要に応じて `/token/refresh` を促す。
-

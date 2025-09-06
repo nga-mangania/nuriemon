@@ -1,11 +1,12 @@
 name = "nuriemon-license-api"
 main = "src/index.ts"
+account_id = "7154b1ae0818f393c2c49e9ff67c5b74"
 compatibility_date = "2025-08-01"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "nuriemon-license"
-database_id = "__REPLACE_IN_PROD__"
+database_id = "dae12e28-cd89-4308-9993-8bcd9e65fc32"
 
 [vars]
 ISSUER = "https://license.nuriemon.jp"
@@ -19,10 +20,10 @@ name = "nuriemon-license-api-stg"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "nuriemon-license-stg"
-database_id = "__REPLACE_IN_STG__"
+database_id = "8ebc1f43-b946-46af-beda-b5d0a1e8086c"
 
 [env.staging.vars]
-ISSUER = "https://license.stg.nuriemon.jp"
+ISSUER = "https://stg.license.nuriemon.jp"
 AUDIENCE = "https://stg.ctrl.nuriemon.jp"
 TOKEN_TTL_SECONDS = 1209600 # 14 days
 

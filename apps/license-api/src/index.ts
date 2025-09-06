@@ -4,6 +4,8 @@ interface Env {
   DB: D1Database;
   // Private signing JWK (RSA or OKP Ed25519). JSON string.
   SIGNING_JWK: string;
+  // Optional: Pre-baked JWKS (public). JSON string. Preferred if present.
+  SIGNING_PUBLIC_JWKS?: string;
   // Optional: Admin API key to protect license management endpoints
   ADMIN_API_KEY?: string;
   // Issuer/Audience and token TTL
@@ -25,7 +27,18 @@ export default {
       }
 
       if (req.method === 'GET' && url.pathname === '/.well-known/jwks.json') {
-        const jwks = await currentPublicJwks(env);
+        try {
+          // 1) Prefer explicitly provisioned public JWKS
+          if (env.SIGNING_PUBLIC_JWKS && env.SIGNING_PUBLIC_JWKS.trim()) {
+            const raw = env.SIGNING_PUBLIC_JWKS.trim();
+            const obj = JSON.parse(raw);
+            return cors(json(obj));
+          }
+        } catch (e) {
+          try { console.error('[jwks] parse SIGNING_PUBLIC_JWKS failed', (e as any)?.message || e); } catch {}
+        }
+        // 2) Fallback: derive public part from provided private JWK fields (without export)
+        const jwks = await currentPublicJwks(env).catch(() => ({ keys: [] }));
         return cors(json(jwks));
       }
 
@@ -205,17 +218,25 @@ async function verifyJwt(env: Env, token: string): Promise<Record<string, any>> 
 }
 
 async function currentPublicJwks(env: Env): Promise<any> {
-  // derive public from private JWK
-  const jwk = JSON.parse(env.SIGNING_JWK);
-  const { kid } = jwk;
-  if (jwk.kty === 'OKP') {
-    // Ed25519: expect both private and public parts in secret; if only private provided as 'd', derive 'x' by importing and exporting
-    const key = await importPrivateKey(jwk);
-    const pub = await crypto.subtle.exportKey('jwk', (await derivePublicKeyFromPrivate(key)));
-    return { keys: [{ kty: 'OKP', crv: 'Ed25519', x: pub.x, kid: kid || `k_${nanoid(6)}` }] };
-  } else {
-    // RSA
-    return { keys: [{ kty: 'RSA', n: jwk.n, e: jwk.e, kid: kid || `k_${nanoid(6)}` }] };
+  try {
+    const jwk = JSON.parse(env.SIGNING_JWK);
+    const kid = jwk.kid || `k_${nanoid(6)}`;
+    if (jwk.kty === 'OKP') {
+      // Use embedded public component if present; never export from private key
+      if (jwk.x) {
+        return { keys: [{ kty: 'OKP', crv: jwk.crv || 'Ed25519', x: jwk.x, kid }] };
+      }
+      return { keys: [] };
+    }
+    if (jwk.kty === 'RSA') {
+      if (jwk.n && jwk.e) {
+        return { keys: [{ kty: 'RSA', n: jwk.n, e: jwk.e, kid }] };
+      }
+      return { keys: [] };
+    }
+    return { keys: [] };
+  } catch {
+    return { keys: [] };
   }
 }
 
@@ -231,17 +252,7 @@ async function importPublicKey(jwk: any): Promise<CryptoKey> {
   }
   return crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
 }
-async function derivePublicKeyFromPrivate(priv: CryptoKey): Promise<CryptoKey> {
-  // Workers supports exporting private to JWK and dropping 'd' to get public
-  const jwk = await crypto.subtle.exportKey('jwk', priv);
-  delete (jwk as any).d;
-  delete (jwk as any).dp;
-  delete (jwk as any).dq;
-  delete (jwk as any).qi;
-  delete (jwk as any).p;
-  delete (jwk as any).q;
-  return importPublicKey(jwk);
-}
+// Removed export-based derivation; Workers keys are non-extractable by design
 
 // =============== utils ===============
 function json(j: Json, init: ResponseInit = {}) {
@@ -298,4 +309,3 @@ function generateLicenseCode(): string {
   for (let i = 0; i < 20; i++) s += alphabet[bytes[i] % alphabet.length];
   return s;
 }
-
