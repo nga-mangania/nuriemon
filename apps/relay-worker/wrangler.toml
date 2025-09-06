@@ -6,6 +6,9 @@ compatibility_date = "2025-08-01"
 # --------- Production (default) ----------
 [vars]
 ALLOWED_ORIGINS = "https://ctrl.nuriemon.jp,tauri://localhost"
+LICENSE_JWKS_URL = "https://license.nuriemon.jp/.well-known/jwks.json"
+LICENSE_ISSUER = "https://license.nuriemon.jp"
+LICENSE_AUDIENCE = "https://ctrl.nuriemon.jp"
 
 [durable_objects]
 bindings = [
@@ -23,6 +26,9 @@ name = "nuriemon-relay-stg"
 
 [env.staging.vars]
 ALLOWED_ORIGINS = "https://stg.ctrl.nuriemon.jp,tauri://localhost,http://localhost:1420,http://127.0.0.1:1430"
+LICENSE_JWKS_URL = "https://license.stg.nuriemon.jp/.well-known/jwks.json"
+LICENSE_ISSUER = "https://license.stg.nuriemon.jp"
+LICENSE_AUDIENCE = "https://stg.ctrl.nuriemon.jp"
 
 [env.staging.durable_objects]
 bindings = [

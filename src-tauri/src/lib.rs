@@ -880,6 +880,9 @@ pub fn run() {
             ,save_event_secret
             ,load_event_secret
             ,delete_event_secret
+            ,save_license_token
+            ,load_license_token
+            ,delete_license_token
             ,open_devtools
             ,toggle_devtools
         ])
@@ -904,6 +907,12 @@ fn warmup_python() -> Result<(), String> {
 fn keychain_account(env: &str) -> (String, String) {
     let service = "nuriemon".to_string();
     let account = format!("event_setup_secret:{}", env);
+    (service, account)
+}
+
+fn license_token_account() -> (String, String) {
+    let service = "nuriemon".to_string();
+    let account = "license_device_token".to_string();
     (service, account)
 }
 
@@ -1045,6 +1054,37 @@ fn delete_event_secret(env: String) -> Result<(), String> {
                 Err(e) => Err(format!("KEYCHAIN_DELETE_ERROR: {}", e)),
             }
         }
+        Err(e) => Err(format!("KEYCHAIN_DELETE_ERROR: {}", e)),
+    }
+}
+
+// ===== License device token (OS Keychain) =====
+#[tauri::command]
+fn save_license_token(token: String) -> Result<(), String> {
+    let (service, account) = license_token_account();
+    Entry::new(&service, &account)
+        .map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?
+        .set_password(&token)
+        .map_err(|e| format!("KEYCHAIN_WRITE_ERROR: {}", e))
+}
+
+#[tauri::command]
+fn load_license_token() -> Result<Option<String>, String> {
+    let (service, account) = license_token_account();
+    let entry = Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
+    match entry.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("KEYCHAIN_READ_ERROR: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn delete_license_token() -> Result<(), String> {
+    let (service, account) = license_token_account();
+    let entry = Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
+    match entry.delete_password() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(format!("KEYCHAIN_DELETE_ERROR: {}", e)),
     }
 }

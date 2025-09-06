@@ -8,6 +8,10 @@ export type EffectiveSettings = {
     pcId?: string;
     wsProtocol?: string; // v1
   };
+  license?: {
+    endpoint?: string;
+    activationRequired?: boolean;
+  };
   defaults: {
     operationMode: 'auto'|'relay'|'local';
   };
@@ -22,6 +26,7 @@ export type EffectiveSettings = {
 const codeDefaults: EffectiveSettings = {
   version: '1',
   relay: { wsProtocol: 'v1' },
+  license: { endpoint: 'https://license.nuriemon.jp', activationRequired: false },
   defaults: { operationMode: 'auto' },
   ui: { hideRelaySettings: false, lockRelaySettings: false },
   features: { noDelete: false },

@@ -4,6 +4,10 @@ interface Env {
   EVENT_DO: DurableObjectNamespace;
   ALLOWED_ORIGINS: string;
   EVENT_SETUP_SECRET: string; // wrangler secret put EVENT_SETUP_SECRET
+  // JWT device token verification (license-api)
+  LICENSE_JWKS_URL?: string; // e.g., https://license.nuriemon.jp/.well-known/jwks.json
+  LICENSE_ISSUER?: string;   // optional strict check
+  LICENSE_AUDIENCE?: string; // optional strict check
 }
 
 const PROTOCOL_VERSION = 1;
@@ -52,8 +56,17 @@ export default {
     if (req.method === 'POST' && m) {
       const eventId = m[1];
       const path = `/e/${eventId}/register-pc`;
-      const verify = await verifySigned(req, env, 'register-pc', path, eventId);
-      if (!verify.ok) return error(verify, cors);
+      // Prefer JWT device token; fallback to HMAC for allowed events
+      const authz = req.headers.get('Authorization');
+      const token = parseBearer(authz);
+      if (token) {
+        const vr = await verifyDeviceToken(token, env, { scope: 'pc:register' }).catch(() => ({ ok: false } as any));
+        if (!(vr as any).ok) return error({ status: 401, code: 'E_BAD_TOKEN' }, cors);
+      } else {
+        if (!isHmacAllowed(eventId)) return error({ status: 401, code: 'E_TOKEN_REQUIRED' }, cors);
+        const verify = await verifySigned(req, env, 'register-pc', path, eventId);
+        if (!verify.ok) return error(verify, cors);
+      }
 
       const body = await readJson(req);
       if (!body || typeof body.pcid !== 'string' || !/^[a-z0-9-]{3,32}$/.test(body.pcid)) {
@@ -73,8 +86,16 @@ export default {
     if (req.method === 'POST' && m) {
       const eventId = m[1];
       const path = `/e/${eventId}/pending-sid`;
-      const verify = await verifySigned(req, env, 'pending-sid', path, eventId);
-      if (!verify.ok) return error(verify, cors);
+      const authz = req.headers.get('Authorization');
+      const token = parseBearer(authz);
+      if (token) {
+        const vr = await verifyDeviceToken(token, env, { scope: 'pc:pending-sid' }).catch(() => ({ ok: false } as any));
+        if (!(vr as any).ok) return error({ status: 401, code: 'E_BAD_TOKEN' }, cors);
+      } else {
+        if (!isHmacAllowed(eventId)) return error({ status: 401, code: 'E_TOKEN_REQUIRED' }, cors);
+        const verify = await verifySigned(req, env, 'pending-sid', path, eventId);
+        if (!verify.ok) return error(verify, cors);
+      }
 
       const body = await readJson(req);
       const okFields =
@@ -144,6 +165,7 @@ export class EventDO {
       try { console.log(`[bridge/do] accept /ws; event=${this.eventId||'-'}`); } catch {}
       // Confirm acceptance (no socket attached in response for DO bridge). Echo selected protocol.
       const selected = selectSubprotocol(req);
+      // Echo back only the negotiated app protocol (v1). Token-bearing subprotocol will still be present on req but not echoed.
       const hdrs = selected ? { 'Sec-WebSocket-Protocol': selected } : undefined;
       return new Response(null, { status: 101, headers: hdrs });
     }
@@ -238,8 +260,8 @@ export class EventDO {
         return;
       }
 
-      // PC auth
-      if (msg.type === 'pc-auth' || msg.op === 'ws-auth') {
+      // PC auth (HMAC or JWT)
+      if (msg.type === 'pc-auth' || msg.op === 'ws-auth' || msg.op === 'ws-auth-bearer') {
         this.handlePcAuth(ws, msg);
         return;
       }
@@ -298,6 +320,33 @@ export class EventDO {
 
   private async handlePcAuth(ws: WebSocket, msg: any) {
     try { console.log('[bridge/do] pc-auth received'); } catch {}
+    // JWT flow
+    if (msg.op === 'ws-auth-bearer' && typeof msg.token === 'string') {
+      const v = await verifyDeviceToken(msg.token, this.env, { scope: 'pc:ws' }).catch(() => ({ ok: false } as any));
+      if ((v as any).ok) {
+        const pcid = String((v as any).sub || msg?.pcid || '');
+        if (pcid) {
+          this.pcByPcid.set(pcid, ws);
+          this.meta.set(ws, { role: 'pc', pcid, lastSeen: Date.now() });
+        }
+        this.safeSend(ws, { v: 1, type: 'pc-ack' });
+        try { console.log(`[bridge/do] pc-auth ok (jwt); pc=${pcid}`); } catch {}
+        if (pcid) {
+          const t = this.offlineTimers.get(pcid);
+          if (t) { try { clearTimeout(t); } catch {}; this.offlineTimers.delete(pcid); }
+          for (const [sock, m] of this.meta.entries()) {
+            if (m?.role === 'mobile' && m.pcid === pcid) {
+              this.safeSend(sock, { v: 1, type: 'evt', evt: 'pc-online' });
+            }
+          }
+        }
+        return;
+      } else {
+        this.safeSend(ws, { v: 1, type: 'pc-err', code: 'E_BAD_TOKEN' });
+        return;
+      }
+    }
+    // HMAC flow (legacy)
     // Prefer client-provided canonical path; fallback to X-Original-Path sent from Worker
     if (!msg.path) {
       try { msg.path = '/e/' + (this.eventId || '') + '/ws'; } catch {}
@@ -540,6 +589,55 @@ async function readJson(req: Request) {
   } catch {
     return null;
   }
+}
+
+// ===== JWT verify (license device tokens) =====
+type Jwks = { keys: Array<Record<string, any>> };
+let jwksCache: { exp: number; jwks: Jwks } | null = null;
+async function fetchJwks(env: Env): Promise<Jwks> {
+  if (!env.LICENSE_JWKS_URL) throw new Error('JWKS_URL not set');
+  const now = Date.now();
+  if (jwksCache && jwksCache.exp > now) return jwksCache.jwks;
+  const res = await fetch(env.LICENSE_JWKS_URL);
+  if (!res.ok) throw new Error('jwks fetch failed');
+  const jwks = await res.json<Jwks>();
+  jwksCache = { exp: now + 5 * 60 * 1000, jwks };
+  return jwks;
+}
+function parseBearer(h?: string | null): string | null {
+  if (!h) return null;
+  const m = /^Bearer\s+(.+)$/i.exec(h.trim());
+  return m ? m[1] : null;
+}
+async function verifyDeviceToken(token: string, env: Env, opts: { scope: 'pc:register'|'pc:pending-sid'|'pc:ws' }): Promise<{ ok: true; sub: string } | { ok: false }> {
+  const parts = token.split('.');
+  if (parts.length !== 3) return { ok: false } as const;
+  const enc = new TextEncoder();
+  const header = JSON.parse(new TextDecoder().decode(b64urlDecode(parts[0])));
+  const payload = JSON.parse(new TextDecoder().decode(b64urlDecode(parts[1])));
+  const sig = b64urlDecode(parts[2]);
+  const jwks = await fetchJwks(env);
+  const jwk = jwks.keys.find((k) => k.kid === header.kid);
+  if (!jwk) return { ok: false } as const;
+  const key = await importPublicKeyJwk(jwk);
+  const ok = await crypto.subtle.verify(jwk.kty === 'OKP' ? 'Ed25519' : { name: 'RSASSA-PKCS1-v1_5' }, key, sig, enc.encode(`${parts[0]}.${parts[1]}`));
+  if (!ok) return { ok: false } as const;
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.exp && now >= Number(payload.exp)) return { ok: false } as const;
+  if (env.LICENSE_AUDIENCE && payload.aud !== env.LICENSE_AUDIENCE) return { ok: false } as const;
+  if (env.LICENSE_ISSUER && payload.iss !== env.LICENSE_ISSUER) return { ok: false } as const;
+  if (opts.scope) {
+    const scope: string[] = Array.isArray(payload.scope) ? payload.scope : [];
+    if (!scope.includes(opts.scope)) return { ok: false } as const;
+  }
+  return { ok: true, sub: String(payload.sub || '') } as const;
+}
+async function importPublicKeyJwk(jwk: any): Promise<CryptoKey> {
+  if (jwk.kty === 'OKP') return crypto.subtle.importKey('jwk', jwk, { name: 'Ed25519' }, false, ['verify']);
+  return crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+}
+function isHmacAllowed(eventId: string): boolean {
+  return /^demo/.test(eventId) || /^studio-/.test(eventId);
 }
 
 // (legacy handleWs removed; DO handles WebSocket upgrade and bridging)

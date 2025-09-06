@@ -1,0 +1,17 @@
+{
+  "name": "nuriemon-license-api",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --env=staging",
+    "deploy:stg": "wrangler deploy --env=staging",
+    "deploy:prod": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240512.0",
+    "typescript": "^5.4.0"
+  }
+}
+

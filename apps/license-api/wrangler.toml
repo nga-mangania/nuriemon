@@ -1,0 +1,28 @@
+name = "nuriemon-license-api"
+main = "src/index.ts"
+compatibility_date = "2025-08-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nuriemon-license"
+database_id = "__REPLACE_IN_PROD__"
+
+[vars]
+ISSUER = "https://license.nuriemon.jp"
+AUDIENCE = "https://ctrl.nuriemon.jp"
+TOKEN_TTL_SECONDS = 2592000 # 30 days
+
+# ---------- Staging ----------
+[env.staging]
+name = "nuriemon-license-api-stg"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "nuriemon-license-stg"
+database_id = "__REPLACE_IN_STG__"
+
+[env.staging.vars]
+ISSUER = "https://license.stg.nuriemon.jp"
+AUDIENCE = "https://stg.ctrl.nuriemon.jp"
+TOKEN_TTL_SECONDS = 1209600 # 14 days
+

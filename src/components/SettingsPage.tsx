@@ -16,6 +16,7 @@ import { GlobalSettingsService } from '../services/globalSettings';
 import { currentRelayEnvAsSecretEnv, deleteEventSetupSecret, getEventSetupSecret, isUsingMemoryFallback, setEventSetupSecret } from '../services/secureSecrets';
 import styles from './SettingsPage.module.scss';
 import { checkForUpdatesManually } from '../services/updater';
+import { activateDevice, deleteDeviceToken, loadDeviceToken, parseJwtExp } from '../services/licenseClient';
 
 console.log('[SettingsPage] All imports completed');
 
@@ -49,6 +50,9 @@ export function SettingsPage() {
   const [effectiveJson, setEffectiveJson] = useState<string>('');
   const [hideRelaySettings, setHideRelaySettings] = useState<boolean>(false);
   const [lockRelaySettings, setLockRelaySettings] = useState<boolean>(false);
+  const [licenseCode, setLicenseCode] = useState<string>('');
+  const [licenseStatus, setLicenseStatus] = useState<string>('未有効化');
+  const [licenseExp, setLicenseExp] = useState<number | null>(null);
   
   // 背景アップロード関連のstate
   const [uploadingBackground, setUploadingBackground] = useState(false);
@@ -119,6 +123,17 @@ export function SettingsPage() {
       } catch (_) {
         setSecretFallback(isUsingMemoryFallback());
       }
+      // License status (device token)
+      try {
+        const tok = await loadDeviceToken();
+        if (tok) {
+          setLicenseStatus('有効化済み');
+          setLicenseExp(parseJwtExp(tok));
+        } else {
+          setLicenseStatus('未有効化');
+          setLicenseExp(null);
+        }
+      } catch {}
     } catch (_) {}
 
     // （生成は上で一度だけ行う）
@@ -456,6 +471,58 @@ export function SettingsPage() {
         <div className={styles.note}>
           <p>Auto: Relayを自動試行し不可時はLocalに案内。Relay: 4G/5Gのまま中継経由。Local: 会場Wi‑Fi/PCホットスポットでPCに直接接続。</p>
         </div>
+      </section>
+
+      {/* ライセンス */}
+      <section className={styles.section}>
+        <h2>ライセンス</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 12, alignItems: 'center', maxWidth: 760 }}>
+          <div>状態</div>
+          <div>
+            {licenseStatus}
+            {licenseExp ? (
+              <span style={{ marginLeft: 8, color: '#555' }}>
+                (期限: {new Date(licenseExp * 1000).toLocaleString()})
+              </span>
+            ) : null}
+          </div>
+          <div>ライセンスコード</div>
+          <div>
+            <input
+              type="text"
+              placeholder="XXXX-XXXX-..."
+              value={licenseCode}
+              onChange={(e) => setLicenseCode(e.target.value)}
+              style={{ width: '100%', padding: 6, borderRadius: 6, border: '1px solid #ccc' }}
+            />
+            <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+              <button
+                onClick={async () => {
+                  const eff = GlobalSettingsService.getEffective() || await GlobalSettingsService.loadEffective();
+                  const pid = (eff as any)?.relay?.pcId || pcId;
+                  const code = licenseCode.trim();
+                  if (!code) { alert('ライセンスコードを入力してください'); return; }
+                  const res = await activateDevice({ licenseCode: code, pcId: pid });
+                  if (res.ok) {
+                    setLicenseStatus('有効化済み');
+                    const tok = await loadDeviceToken();
+                    if (tok) setLicenseExp(parseJwtExp(tok));
+                    alert('有効化しました');
+                  } else {
+                    alert('有効化に失敗しました: ' + (res.error || 'unknown'));
+                  }
+                }}
+                className={styles.animationButton}
+              >有効化</button>
+              <button
+                onClick={async () => { await deleteDeviceToken(); setLicenseStatus('未有効化'); setLicenseExp(null); }}
+                className={styles.animationButton}
+                style={{ backgroundColor: '#999' }}
+              >トークン削除</button>
+            </div>
+          </div>
+        </div>
+        <div className={styles.note}><p>有効化すると端末トークンがOSの安全な領域に保存されます（eventIdとは独立）。</p></div>
       </section>
 
       {/* Relay設定 */}

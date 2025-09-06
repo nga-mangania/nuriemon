@@ -6,7 +6,10 @@
     "pcId": null,
     "wsProtocol": "v1"
   },
+  "license": {
+    "endpoint": "https://license.nuriemon.jp",
+    "activationRequired": false
+  },
   "defaults": { "operationMode": "relay" },
   "ui": { "hideRelaySettings": false, "lockRelaySettings": false }
 }
-

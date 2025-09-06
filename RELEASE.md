@@ -32,8 +32,22 @@ wrangler tail --env=staging
 
 `pc-auth ok` → `join received` → `fwd cmd` の流れと、`pc-offline/pc-online` のイベントを確認。
 
-## 5) 既知の注意点
+## 5) ライセンス（stg）通しテスト
+
+```
+cd apps/license-api
+wrangler d1 execute nuriemon-license-stg --file=./schema.sql --env=staging
+wrangler secret put SIGNING_JWK --env=staging   # JWK 形式
+wrangler deploy --env=staging
+
+# 発行
+curl -X POST -H "Content-Type: application/json" -H "X-Admin-Api-Key: $ADMIN" \
+  -d '{"sku":"NRM-STD","seats":2}' https://license.stg.nuriemon.jp/license/issue
+```
+
+アプリ側: 設定 → EventID 入力 → ライセンスコードを入力して「有効化」。以後は Authorization ヘッダ/WS サブプロトコルで自動付与されます。
+
+## 6) 既知の注意点
 
 - 初回モデルDLが走る環境では数十秒かかる場合があります。以降はオフラインで動作します。
 - HMR（http://localhost:1420）は CORS 差異があるため基本は使用しません。
-

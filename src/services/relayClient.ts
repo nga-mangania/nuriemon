@@ -1,4 +1,5 @@
 import { GlobalSettingsService } from './globalSettings';
+import { loadDeviceToken } from './licenseClient';
 import { currentRelayEnvAsSecretEnv, getEventSetupSecret } from './secureSecrets';
 import { PROTOCOL_VERSION } from '../protocol/version';
 
@@ -134,6 +135,18 @@ export async function registerPc(params: { eventId: string; pcid: string }): Pro
   const base = await baseUrl();
   const path = `/e/${encodeURIComponent(params.eventId)}/register-pc`;
   const body = { pcid: params.pcid };
+  const bearer = await loadDeviceToken();
+  if (bearer) {
+    try {
+      const url = base + path;
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json; charset=utf-8', 'Authorization': `Bearer ${bearer}` }, body: JSON.stringify(body), credentials: 'omit' });
+      if (res.status === 429 || res.status === 503) return { ok: false, status: res.status, retryAfterMs: parseRetryAfter(res.headers.get('Retry-After')) };
+      if (!res.ok) { let code: string | undefined; try { const err = await res.json(); code = err?.code; } catch {}; return { ok: false, status: res.status, code }; }
+      const data = await res.json();
+      return { ok: true, data } as RelayResponse<{ ok: true }>;
+    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  }
+  // fallback (legacy HMAC): staging/demo only via secureSecrets
   const env = await currentRelayEnvAsSecretEnv();
   const secret = await getEventSetupSecret(env);
   if (!secret) return { ok: false, error: 'E_MISSING_SECRET' };
@@ -146,6 +159,18 @@ export async function pendingSid(params: { eventId: string; pcid: string; sid: s
   // clamp ttl to [30,120]
   const ttl = Math.max(30, Math.min(120, Math.floor(params.ttl)));
   const body = { pcid: params.pcid, sid: params.sid, ttl };
+  const bearer = await loadDeviceToken();
+  if (bearer) {
+    try {
+      const url = base + path;
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json; charset=utf-8', 'Authorization': `Bearer ${bearer}` }, body: JSON.stringify(body), credentials: 'omit' });
+      if (res.status === 429 || res.status === 503) return { ok: false, status: res.status, retryAfterMs: parseRetryAfter(res.headers.get('Retry-After')) };
+      if (!res.ok) { let code: string | undefined; try { const err = await res.json(); code = err?.code; } catch {}; return { ok: false, status: res.status, code }; }
+      const data = await res.json();
+      return { ok: true, data } as RelayResponse<{ ok: true }>;
+    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  }
+  // fallback legacy HMAC
   const env = await currentRelayEnvAsSecretEnv();
   const secret = await getEventSetupSecret(env);
   if (!secret) return { ok: false, error: 'E_MISSING_SECRET' };
