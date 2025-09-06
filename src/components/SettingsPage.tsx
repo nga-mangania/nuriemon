@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { open, confirm } from '@tauri-apps/plugin-dialog';
-import { invoke } from '@tauri-apps/api/core';
+// import { invoke } from '@tauri-apps/api/core';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { AudioSettings } from './AudioSettings';
 import { GroundSetting } from './GroundSetting';
@@ -15,6 +15,7 @@ import { AppSettingsService } from '../services/database';
 import { GlobalSettingsService } from '../services/globalSettings';
 import { currentRelayEnvAsSecretEnv, deleteEventSetupSecret, getEventSetupSecret, isUsingMemoryFallback, setEventSetupSecret } from '../services/secureSecrets';
 import styles from './SettingsPage.module.scss';
+import { checkForUpdatesManually } from '../services/updater';
 
 console.log('[SettingsPage] All imports completed');
 
@@ -528,15 +529,15 @@ export function SettingsPage() {
               type="text"
               value={relayEventId}
               onChange={async (e) => {
-            const vRaw = e.target.value.trim().toLowerCase();
-            const v = sanitizeId(vRaw);
-            setRelayEventId(v);
-            if (isValidId(v)) {
-              try { 
-                await GlobalSettingsService.save('relay_event_id', v); 
-                emit('app-settings-changed', { key: 'relay_event_id', value: v });
-              } catch {}
-            }
+                const vRaw = e.target.value.trim().toLowerCase();
+                const v = sanitizeId(vRaw);
+                setRelayEventId(v);
+                if (isValidId(v)) {
+                  try {
+                    await GlobalSettingsService.setUserEventId(v);
+                    emit('app-settings-changed', { key: 'relay_event_id', value: v });
+                  } catch {}
+                }
               }}
               placeholder="例: demo"
               style={{ width: '100%' }}
@@ -766,13 +767,10 @@ export function SettingsPage() {
           {isAnimationWindowOpen ? 'アニメーション表示中' : 'アニメーションを表示'}
         </button>
       </section>
-      
-      {/* デバッグセクション */}
+
+      {/* データベースメンテナンス */}
       <section className={styles.section}>
         <h2>データベース管理</h2>
-        <div style={{ marginBottom: 12 }}>
-          <button onClick={() => { try { invoke('open_devtools', { window_label: 'main' } as any); } catch {} }}>DevTools</button>
-        </div>
         <button 
           onClick={async () => {
             const confirmed = await confirm('データベースをクリーンアップしますか？\n\n重複ファイルや存在しないファイルへの参照が削除されます。');
@@ -800,6 +798,11 @@ export function SettingsPage() {
         <div className={styles.note}>
           <p>※重複したファイルや存在しないファイルへの参照を削除します。</p>
           <p>※問題が発生した場合のみ実行してください。</p>
+        </div>
+        <div style={{ marginTop: 24 }}>
+          <h3>アップデート</h3>
+          <button onClick={() => checkForUpdatesManually()} className={styles.animationButton}>アップデートを確認</button>
+          <div className={styles.note}><p>GitHub Releases を参照して更新を確認します（ネットワークが必要）。</p></div>
         </div>
       </section>
     </div>

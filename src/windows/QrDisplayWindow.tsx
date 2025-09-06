@@ -70,6 +70,8 @@ export const QrDisplayWindow: React.FC = () => {
 
   // Relay の有効/不足判定（表示の出し分け用）
   const relayActive = (operationMode === 'relay') || (operationMode === 'auto' && useRelay);
+  // UI の表示準備完了判定（レンダリング条件と生成スケジューラで共有）
+  const uiReady = isServerStarted || relayActive;
   const missingRelay = relayActive && (!relayEventId || !pcId);
 
   // 条件が整ったら一時的なバナーを自動クリア
@@ -415,24 +417,24 @@ export const QrDisplayWindow: React.FC = () => {
 
   // 再生成トリガや画像リスト変更時に、未生成のQRを補完生成（同一画像の重複生成を抑止）
   useEffect(() => {
-    // スパイク回避のため、QR生成を等間隔でスケジューリング
-    const relayActive = (operationMode === 'relay') || (operationMode === 'auto' && useRelay);
-    const ready = isServerStarted || relayActive;
+    const ready = uiReady;
     const envKey = `${relayBaseUrl}|${relayEventId}|${pcId}|${operationMode}`;
     if (!ready) return;
     let delay = 0;
-    const stepMs = 60; // 60ms間隔でスタガ
-    processedImages.forEach(image => {
+    const stepMs = 60;
+    const noVisible = visibleIdsRef.current.size === 0;
+    const targetList = noVisible ? processedImages.slice(0, 3) : processedImages;
+    targetList.forEach(image => {
       const s = sessions.get(image.id);
       const desiredKey = buildSessionKey(image.id);
       const valid = !!s && (s as any).envKey === envKey && (s as any).sessionKey === desiredKey;
-      const visible = visibleIdsRef.current.has(image.id);
+      const visible = noVisible ? true : visibleIdsRef.current.has(image.id);
       if (!valid && !inflightRef.current.has(image.id) && visible) {
         setTimeout(() => { generateQr(image.id).catch(() => {}); }, delay);
         delay += stepMs;
       }
     });
-  }, [regenTick, processedImages, sessions, operationMode, useRelay, relayBaseUrl, relayEventId, pcId, isServerStarted]);
+  }, [regenTick, processedImages, sessions, operationMode, useRelay, relayBaseUrl, relayEventId, pcId, isServerStarted, uiReady]);
 
   // グローバル再生成ボタン
   const regenerateAll = () => {
@@ -539,39 +541,33 @@ export const QrDisplayWindow: React.FC = () => {
         ) : null;
       })()}
 
-      {!(isServerStarted || operationMode === 'relay' || (operationMode === 'auto' && useRelay)) ? (
-        <div className={styles.loading}>
-          初期化中...
-        </div>
-      ) : (
-        <>
-          {/* Debug overlay and server port display removed for cleaner QR scanning */}
+      <>
+        {/* Debug overlay and server port display removed for cleaner QR scanning */}
 
-          <div className={styles.controls}>
-            <button onClick={regenerateAll} style={{ fontSize: 12 }}>すべて再生成</button>
-          </div>
-          <div className={styles.imageGrid}>
-            {processedImages.length === 0 ? (
-              <div className={styles.noImages}>
-                画像がありません
-              </div>
-            ) : (
-              processedImages.map(image => (
-                <ImageQrItem
-                  key={image.id}
-                  image={image}
-                  session={sessions.get(image.id)}
-                  onGenerateQr={() => generateQr(image.id)}
-                  ready={isServerStarted || operationMode === 'relay' || (operationMode === 'auto' && useRelay)}
-                  serverPort={serverPort}
-                  thumbUrl={thumbs.get(image.id) || ''}
-                  onVisible={onVisibleChange}
-                />
-              ))
+        <div className={styles.controls}>
+          <button onClick={regenerateAll} style={{ fontSize: 12 }}>すべて再生成</button>
+        </div>
+        <div className={styles.imageGrid}>
+          {processedImages.length === 0 ? (
+            <div className={styles.noImages}>
+              画像がありません
+            </div>
+          ) : (
+            processedImages.map(image => (
+              <ImageQrItem
+                key={image.id}
+                image={image}
+                session={sessions.get(image.id)}
+                onGenerateQr={() => generateQr(image.id)}
+                ready={uiReady}
+                serverPort={serverPort}
+                thumbUrl={thumbs.get(image.id) || ''}
+                onVisible={onVisibleChange}
+              />
+            ))
           )}
-          </div>
-        </>
-      )}
+        </div>
+      </>
     </div>
     </ErrorBoundary>
 );

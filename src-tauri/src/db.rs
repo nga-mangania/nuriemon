@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 use chrono::Utc;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ImageMetadata {
     pub id: String,
     pub original_file_name: String,
@@ -15,8 +15,11 @@ pub struct ImageMetadata {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub storage_location: String, // 保存先のパス
+    #[serde(default)]
     pub file_path: Option<String>, // ファイルの完全パス
+    #[serde(default)]
     pub is_hidden: i32, // 0 or 1
+    #[serde(default)]
     pub display_started_at: Option<String>,
 }
 

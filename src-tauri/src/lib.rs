@@ -62,17 +62,26 @@ fn spawn_python_process() -> Result<PythonProcess, String> {
     // Sidecar (bundled binary) > dev script の順に起動を試行
     if let Ok(sidecar) = std::env::var("NURIEMON_SIDECAR") {
         let p = std::path::PathBuf::from(&sidecar);
-        if p.exists() {
-            let mut child = Command::new(&p)
+        if p.exists() && p.is_file() {
+            match Command::new(&p)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .map_err(|e| format!("Failed to start sidecar: {}", e))?;
-            let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
-            let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
-            let reader = BufReader::new(stdout);
-            return Ok(PythonProcess { child, stdin, stdout: reader });
+            {
+                Ok(mut child) => {
+                    let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+                    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+                    let reader = BufReader::new(stdout);
+                    return Ok(PythonProcess { child, stdin, stdout: reader });
+                }
+                Err(e) => {
+                    eprintln!("[sidecar] failed to start, falling back to python3: {}", e);
+                    // フォールバックに進む
+                }
+            }
+        } else {
+            eprintln!("[sidecar] NURIEMON_SIDECAR not a regular file: {}", p.display());
         }
     }
 
@@ -705,19 +714,19 @@ async fn open_qr_window(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
     
-    // 新しいウィンドウを作成
-    let _window = WebviewWindowBuilder::new(
+    // 新しいウィンドウを作成（SPAルート #/qr を表示）
+    let window = WebviewWindowBuilder::new(
         &app,
         "qr-display",
-        WebviewUrl::App("qr-display.html".into())
+        WebviewUrl::App("#/qr".into())
     )
     .title("QRコード - ぬりえもん")
     .inner_size(900.0, 700.0)
     .resizable(true)
     .build()
     .map_err(|e| format!("ウィンドウの作成に失敗しました: {}", e))?;
-    
-    // DevTools はデフォルトで開かない（ショートカットで開閉）
+    #[cfg(debug_assertions)]
+    { window.open_devtools(); }
     
     Ok(())
 }
@@ -730,7 +739,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build());
 
-    // Updater plugin: enable only for release builds (dev lacks pubkey/endpoints)
+    // Updater plugin: release builds only（devは未設定pubkeyで失敗するため）
     #[cfg(not(debug_assertions))]
     {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
@@ -753,6 +762,11 @@ pub fn run() {
             app.manage(workspace_connection);
             app.manage(server_state);
 
+            // 小文字 `nuriemon` への設定移行（旧フォルダ/大文字からの移行）
+            if let Err(e) = migrate_lowercase_app_dirs(app) {
+                eprintln!("[setup:migration] warn: {}", e);
+            }
+
             // ===== Sidecar path hint (for packaged app) =====
             // Try to locate bundled sidecar binary in resource_dir and expose via env var for spawn_python_process.
             if let Ok(dir) = app.path().resource_dir() {
@@ -761,13 +775,13 @@ pub fn run() {
                 #[cfg(not(target_os = "windows"))]
                 let candidates = [dir.join("python-sidecar"), dir.join("sidecar").join("python-sidecar")];
                 for p in candidates.iter() {
-                    if p.exists() {
+                    if p.exists() && p.is_file() {
                         std::env::set_var("NURIEMON_SIDECAR", p.to_string_lossy().to_string());
                         break;
                     }
                 }
             }
-            // DevTools は起動時に自動で開かない（ショートカットで開閉）
+            // DevTools: ウェルカム（メイン）ウィンドウでは自動起動しない
 
             // メインウィンドウの初期幅をディスプレイ幅の90%に調整（高さは既定のまま）
             if let Some(main_win) = app.get_webview_window("main") {
@@ -850,6 +864,7 @@ pub fn run() {
             workspace::get_global_setting,
             read_bundle_global_settings,
             read_user_provisioning_settings,
+            set_user_event_id,
             read_env_provisioning_settings,
             read_env_overrides,
             // フォルダ監視
@@ -916,6 +931,32 @@ fn read_user_provisioning_settings(app: tauri::AppHandle) -> Result<Option<Strin
     Ok(Some(s))
 }
 
+/// ユーザー設定（AppConfig配下）の global_settings.json に eventId を保存（マージ書き込み）
+#[tauri::command]
+fn set_user_event_id(app: tauri::AppHandle, event_id: String) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("app_config_dir error: {}", e))?;
+    let path = dir.join("global_settings.json");
+    // 既存を読み込み
+    let mut root: serde_json::Value = if path.exists() {
+        let s = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
+        serde_json::from_str(&s).unwrap_or(serde_json::json!({}))
+    } else { serde_json::json!({}) };
+    // relay オブジェクトを確保し、eventId を設定
+    if !root.get("relay").is_some() || !root.get("relay").unwrap().is_object() {
+        root["relay"] = serde_json::json!({});
+    }
+    root["relay"]["eventId"] = serde_json::Value::String(event_id.trim().to_string());
+    // ディレクトリ作成
+    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| format!("create_dir_all error: {}", e))?; }
+    // 保存（pretty）
+    let pretty = serde_json::to_string_pretty(&root).map_err(|e| format!("json error: {}", e))?;
+    std::fs::write(&path, pretty).map_err(|e| format!("write error: {}", e))?;
+    Ok(())
+}
+
 #[tauri::command]
 fn read_env_provisioning_settings() -> Result<Option<String>, String> {
     if let Ok(p) = std::env::var("NURIEMON_GLOBAL_SETTINGS_PATH") {
@@ -960,23 +1001,124 @@ fn save_event_secret(env: String, secret: String) -> Result<(), String> {
 
 #[tauri::command]
 fn load_event_secret(env: String) -> Result<Option<String>, String> {
-    let (service, account) = keychain_account(env.trim());
+    let env = env.trim().to_string();
+    let (service, account) = keychain_account(&env);
     let entry = Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
     match entry.get_password() {
         Ok(pw) => Ok(Some(pw)),
-        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(keyring::Error::NoEntry) => {
+            // 互換: 旧サービス名 "Nuriemon" からの移行を試みる
+            let legacy_service = "Nuriemon".to_string();
+            let legacy_entry = Entry::new(&legacy_service, &account)
+                .map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
+            match legacy_entry.get_password() {
+                Ok(pw) => {
+                    // 新サービス名に保存し直し、旧エントリは削除（ベストエフォート）
+                    let _ = Entry::new(&service, &account)
+                        .map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?
+                        .set_password(&pw);
+                    let _ = legacy_entry.delete_password();
+                    Ok(Some(pw))
+                }
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(e) => Err(format!("KEYCHAIN_READ_ERROR: {}", e)),
+            }
+        }
         Err(e) => Err(format!("KEYCHAIN_READ_ERROR: {}", e)),
     }
 }
 
 #[tauri::command]
 fn delete_event_secret(env: String) -> Result<(), String> {
-    let (service, account) = keychain_account(env.trim());
+    let env = env.trim().to_string();
+    let (service, account) = keychain_account(&env);
     let entry = Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
     match entry.delete_password() {
         Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(keyring::Error::NoEntry) => {
+            // 旧サービス名でも削除ベストエフォート
+            let legacy_service = "Nuriemon".to_string();
+            let legacy_entry = Entry::new(&legacy_service, &account)
+                .map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
+            match legacy_entry.delete_password() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(format!("KEYCHAIN_DELETE_ERROR: {}", e)),
+            }
+        }
         Err(e) => Err(format!("KEYCHAIN_DELETE_ERROR: {}", e)),
+    }
+}
+
+// ================== Migration: uppercase -> lowercase app dirs ==================
+
+fn migrate_lowercase_app_dirs(app: &tauri::App) -> Result<(), String> {
+    // app_config_dir: ユーザー設定（プロビジョニング）
+    if let Ok(dir) = app.path().app_config_dir() {
+        if let Err(e) = migrate_case_variant_dir(&dir) {
+            eprintln!("[migration] config_dir warn: {}", e);
+        }
+    }
+    // app_data_dir: 内部保存（GlobalSettingsService）
+    if let Ok(dir) = app.path().app_data_dir() {
+        if let Err(e) = migrate_case_variant_dir(&dir) {
+            eprintln!("[migration] data_dir warn: {}", e);
+        }
+    }
+    Ok(())
+}
+
+fn migrate_case_variant_dir(target_dir: &std::path::Path) -> Result<(), String> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let Some(parent) = target_dir.parent() else { return Ok(()); };
+    let Some(target_name) = target_dir.file_name().and_then(|s| s.to_str()) else { return Ok(()); };
+
+    // 探索: 親ディレクトリ配下で、大文字小文字のみ異なる候補を探す
+    let mut legacy_dir: Option<PathBuf> = None;
+    for entry in fs::read_dir(parent).map_err(|e| format!("read_dir error: {}", e))? {
+        let entry = entry.map_err(|e| format!("read_dir entry error: {}", e))?;
+        if !entry.file_type().map_err(|e| format!("file_type error: {}", e))?.is_dir() {
+            continue;
+        }
+        let name_os = entry.file_name();
+        let Some(name) = name_os.to_str() else { continue; };
+        if name.eq_ignore_ascii_case(target_name) && name != target_name {
+            legacy_dir = Some(entry.path());
+            break;
+        }
+    }
+
+    let Some(legacy_dir) = legacy_dir else { return Ok(()); };
+    let legacy_file = legacy_dir.join("global_settings.json");
+    if !legacy_file.exists() { return Ok(()); }
+
+    let target_file = target_dir.join("global_settings.json");
+    // 既に新パスに存在するなら移行不要
+    if target_file.exists() { return Ok(()); }
+
+    // 新ディレクトリを作成
+    if let Some(parent) = target_file.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            return Err(format!("create_dir_all error: {}", e));
+        }
+    }
+
+    // 移動（renameできなければコピー→削除）
+    match fs::rename(&legacy_file, &target_file) {
+        Ok(()) => {
+            eprintln!("[migration] moved {:?} -> {:?}", legacy_file, target_file);
+            Ok(())
+        }
+        Err(_e) => {
+            // フォールバック: copy + remove_file
+            fs::copy(&legacy_file, &target_file)
+                .map_err(|e| format!("copy failed: {}", e))?;
+            fs::remove_file(&legacy_file)
+                .map_err(|e| format!("remove legacy failed: {}", e))?;
+            eprintln!("[migration] copied {:?} -> {:?}", legacy_file, target_file);
+            Ok(())
+        }
     }
 }
 

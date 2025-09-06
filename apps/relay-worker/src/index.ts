@@ -27,16 +27,19 @@ export default {
       return new Response(html, { status: 200, headers: h });
     }
 
-    // WebSocket: GET /e/{event}/ws
+    // WebSocket: GET /e/{event}/ws (forward original Upgrade request to DO)
     let mw = url.pathname.match(/^\/e\/([a-z0-9-]{3,32})\/ws$/);
-    if (req.method === 'GET' && mw && req.headers.get('Upgrade') === 'websocket') {
+    if (req.method === 'GET' && mw && req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
       // Optional Origin check: allow empty Origin (CLI/debug), or a member of allowlist
       if (origin && allow.length > 0 && !allow.includes(origin)) {
         return new Response('Forbidden origin', { status: 403 });
       }
-      // Delegate the full WS upgrade to DO (DO will create WebSocketPair and accept)
-      const stub = env.EVENT_DO.get(env.EVENT_DO.idFromName(mw[1]));
-      return stub.fetch(req);
+      const eventId = mw[1];
+      const stub = env.EVENT_DO.get(env.EVENT_DO.idFromName(eventId));
+      // Forward the original Upgrade request to DO; DO will return 101
+      const doResp = await stub.fetch(req);
+      try { console.log('[bridge/worker] DO status =', doResp.status); } catch {}
+      return doResp;
     }
 
     // /healthz
@@ -120,7 +123,31 @@ export class EventDO {
 
   async fetch(req: Request) {
     const url = new URL(req.url);
-    // WS upgrade handled entirely in DO (create pair and accept here)
+    // Bridge endpoint from Worker: POST /ws with incoming webSocket
+    if (url.pathname === '/ws' && (req.method === 'POST' || req.method === 'GET')) {
+      try {
+        console.log('[bridge/do] /ws entry', { method: req.method, hasWS: !!(req as any).webSocket, proto: req.headers.get('Sec-WebSocket-Protocol') || undefined });
+      } catch {}
+      const incoming = (req as any).webSocket as WebSocket | undefined;
+      if (!incoming) return new Response('Missing webSocket', { status: 400 });
+      const eid = req.headers.get('X-Event-Id') || url.searchParams.get('event') || undefined;
+      if (eid) this.eventId = eid;
+      this.originalPath = req.headers.get('X-Original-Path') || (this.eventId ? `/e/${this.eventId}/ws` : undefined);
+      try {
+        // Bind the socket to this DO instance
+        this.state.acceptWebSocket(incoming);
+      } catch (e) {
+        try { console.log('[bridge/do] accept error', String((e as any)?.message || e)); } catch {}
+        return new Response('accept failed', { status: 500 });
+      }
+      if (!this.hbTimer) this.startHeartbeatTicker();
+      try { console.log(`[bridge/do] accept /ws; event=${this.eventId||'-'}`); } catch {}
+      // Confirm acceptance (no socket attached in response for DO bridge). Echo selected protocol.
+      const selected = selectSubprotocol(req);
+      const hdrs = selected ? { 'Sec-WebSocket-Protocol': selected } : undefined;
+      return new Response(null, { status: 101, headers: hdrs });
+    }
+    // (Optional) direct DO upgrade path (not used externally)
     if (req.headers.get('Upgrade') === 'websocket') {
       const m = url.pathname.match(/^\/e\/([a-z0-9-]{3,32})\/ws$/);
       this.eventId = m ? m[1] : this.eventId;

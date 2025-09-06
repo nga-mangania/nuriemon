@@ -1,0 +1,12 @@
+{
+  "version": "1",
+  "relay": {
+    "baseUrl": "https://ctrl.nuriemon.jp",
+    "eventId": "",
+    "pcId": null,
+    "wsProtocol": "v1"
+  },
+  "defaults": { "operationMode": "relay" },
+  "ui": { "hideRelaySettings": false, "lockRelaySettings": false }
+}
+

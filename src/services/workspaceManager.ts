@@ -261,6 +261,17 @@ export class WorkspaceManager {
   }
 
   /**
+   * 最後に使用したワークスペースをクリア
+   */
+  async clearLastWorkspace(): Promise<void> {
+    try {
+      await invoke('save_global_setting', { key: 'lastWorkspace', value: '' });
+    } catch (e) {
+      console.warn('[WorkspaceManager] clearLastWorkspace failed (ignored):', e);
+    }
+  }
+
+  /**
    * 最後に使用したワークスペースを取得
    */
   async getLastWorkspace(): Promise<string | null> {

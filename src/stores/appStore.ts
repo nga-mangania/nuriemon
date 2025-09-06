@@ -55,10 +55,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
     } catch (error) {
       console.error('[AppStore] 初期化エラー:', error);
-      set({
-        status: 'workspace-needed',
-        error: error instanceof Error ? error.message : '初期化に失敗しました'
-      });
+      // 失敗時は lastWorkspace をクリアして初回起動に戻す（エラーはUIに出さない）
+      try { await WorkspaceManager.getInstance().clearLastWorkspace(); } catch {}
+      set({ status: 'workspace-needed', error: null });
     }
   },
 

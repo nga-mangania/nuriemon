@@ -45,9 +45,11 @@ export function WorkspaceSelector() {
         </button>
         <p>※あとから変更も可能です。</p>
         {error && (
-          <div className={styles.error}>{error}</div>
+          <div className={styles.error}>
+            {error}
+          </div>
         )}
-      </div>
+     </div>
     </div>
   );
 }

@@ -5,7 +5,11 @@ import { PROTOCOL_VERSION } from '../protocol/version';
 export type RelayResponse<T> = { ok: true; data: T } | { ok: false; status?: number; error?: string; retryAfterMs?: number; code?: string };
 
 export async function resolveBaseUrl(): Promise<string> {
-  // 1) 最優先: effective の relay.baseUrl（プロビジョニング/ENVでの一元化）
+  // 0) ユーザー保存のベースURLがあれば最優先（開発時の一時切替用途）
+  const userSaved = await GlobalSettingsService.get('relay_base_url');
+  if (userSaved && userSaved.trim()) return userSaved.replace(/\/$/, '');
+
+  // 1) effective の relay.baseUrl（プロビジョニング/ENVでの一元化）
   try {
     const eff = GlobalSettingsService.getEffective() || await GlobalSettingsService.loadEffective();
     const effUrl = (eff as any)?.relay?.baseUrl as string | undefined;

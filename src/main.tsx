@@ -20,7 +20,7 @@ try {
 // ウィンドウタイプの判定
 const hash = window.location.hash;
 const isAnimationWindow = hash === '#/animation';
-const isQrDisplayWindow = (window as any).QR_DISPLAY_WINDOW === true;
+const isQrDisplayWindow = hash === '#/qr' || (window as any).QR_DISPLAY_WINDOW === true;
 
 console.log('[main.tsx] Hash:', hash, 'isAnimationWindow:', isAnimationWindow, 'isQrDisplayWindow:', isQrDisplayWindow);
 
@@ -38,6 +38,15 @@ try {
       </React.StrictMode>,
     );
     console.log('[main.tsx] React app rendered');
+    // Hide initial loading overlay if present
+    try {
+      const loading = document.getElementById('initial-loading');
+      if (loading) {
+        loading.classList.add('hidden');
+        // Remove from DOM after fade-out
+        setTimeout(() => { try { loading.remove(); } catch {} }, 350);
+      }
+    } catch {}
   }
 } catch (error) {
   console.error('[main.tsx] Error rendering app:', error);

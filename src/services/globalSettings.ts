@@ -45,6 +45,8 @@ let effectiveCache: EffectiveSettings | null = null;
 let lockRelay = false;
 
 export class GlobalSettingsService {
+  static reset() { effectiveCache = null; }
+
   static async save(key: string, value: string): Promise<void> {
     await invoke('save_global_setting', { key, value });
   }
@@ -103,6 +105,13 @@ export class GlobalSettingsService {
 
   static getEffective(): EffectiveSettings | null {
     return effectiveCache;
+  }
+
+  static async setUserEventId(eventId: string): Promise<void> {
+    await invoke('set_user_event_id', { eventId, event_id: eventId } as any);
+    // 反映のためキャッシュを破棄
+    GlobalSettingsService.reset();
+    await GlobalSettingsService.loadEffective();
   }
 }
 

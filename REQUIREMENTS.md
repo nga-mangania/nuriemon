@@ -1,585 +1,784 @@
-# ぬりえもん デスクトップアプリ版 要件定義書
+以下が**修正済みの全文**です。前回までの議論・合意点をすべて反映し、用語・パス表記・現在実装（/ 将来案）の区別、eventId とライセンスの分離、設定の優先順位、開発と本番の挙動差（CORS）などのブレを解消しています。**省略は一切していません**。
+
+---
+
+# ぬりえもん デスクトップアプリ版 要件定義書（修正済み・最新版）
+
+**最終更新:** 2025-09-02
 
 ## プロジェクト概要
 
 ### 背景
-- 既存のWebアプリケーション「ぬりえもん」（oekaki-screen）をデスクトップアプリケーションとして再構築
-- 元プロジェクト: `/Users/nga/oekaki-screen` (Webアプリ版)
-- 新プロジェクト: `/Users/nga/nuriemon` (デスクトップ版)
 
-ぬりえもんは子どもに楽しんでもらう為のツール。
-自分の描いた絵や塗り絵が画面に反映して動くのが特徴。
+* 既存の Web アプリケーション「ぬりえもん」（`/Users/nga/oekaki-screen`）をデスクトップアプリ（`/Users/nga/nuriemon`）として再構築。
+* ぬりえもんは、子どもが描いた絵や塗り絵を画面で動かして楽しむツール。
 
 ### 目的
-1. **オフライン運用（Localモード時）**: **Localモード時は**インターネット接続不要で全機能を利用可能に。**Relayモード時は**TLS経由で中継通信を行う。
-2. **軽量化**: アプリケーションサイズを最小限に（目標: **本体**30MB以下。Python sidecar/モデルは別パッケージまたは初回取得）
-3. **モダン化**: 1年以上前のコードベースを最新技術で刷新
-4. **配布容易性**: 一般ユーザーが簡単にインストール・利用できる形に
-5. **プロダクション品質**: 商用製品として販売可能な品質を確保
-6. **運用モードの二重化**: **Auto/Relay/Local** の3モードで用途・現場環境に応じて切替可能（Phase 5以降）
+
+1. **オフライン運用（Local モード）**
+   Local モード時はインターネット接続不要で全機能利用。Relay モード時は TLS 経由で中継通信。
+2. **軽量化**
+   アプリ本体サイズ 30MB 以下を目標（Python sidecar / モデルは別パッケージまたは初回取得）。
+3. **モダン化**
+   古いコードベースを刷新し、現行スタックへ。
+4. **配布容易性**
+   一般ユーザーが簡単にインストール・利用できる形に。
+5. **プロダクション品質**
+   商用販売できる品質（安定性・セキュリティ・運用性）。
+6. **運用モードの二重化**
+   **Auto / Relay / Local** の3モードで切替（Phase 5 以降）。
+
+---
 
 ## 開発品質基準
 
 ### コード品質要件
-1. **プロダクションレディ**: 「とりあえず動く」コードは不可。商用製品として恥ずかしくない品質を維持
-2. **アーキテクチャ優先**: 機能追加前に適切な設計を行い、技術的負債を作らない
-3. **パフォーマンス重視**: ポーリングなど非効率な実装は避け、イベント駆動など適切なパターンを使用
-4. **保守性**: 将来の機能追加・修正を考慮した拡張性のある設計
-5. **一貫性**: コーディング規約、命名規則、ディレクトリ構造の統一
 
-### AI開発者への指示
-1. **実装前の設計**: 新機能実装前に必ずアーキテクチャ設計を提示し、承認を得ること
-2. **改善提案の義務**: 実装完了後、より良い実装方法があれば必ず提案すること
-3. **問題の早期報告**: 設計上の問題や技術的負債を発見したら即座に報告すること
-4. **ベストプラクティス**: Tauriや各技術スタックのベストプラクティスに従うこと
+1. **プロダクションレディ**：試作用で妥協したコードは不可。
+2. **アーキテクチャ優先**：設計してから実装。負債を作らない。
+3. **パフォーマンス重視**：ポーリング乱用は不可。イベント駆動など適切な手段。
+4. **保守性**：拡張しやすい構造・分離。
+5. **一貫性**：命名規約・構成・Lint/Format の統一。
+
+### AI 開発者への指示
+
+1. **実装前に設計提示・承認**
+2. **改善提案の義務**
+3. **問題の早期報告**
+4. **ベストプラクティス順守（Tauri/React/Rust など）**
 
 ### 品質チェックリスト
-- [ ] コードは商用製品として適切な品質か
-- [ ] パフォーマンスは最適化されているか
-- [ ] エラーハンドリングは適切か
-- [ ] セキュリティは考慮されているか
-- [ ] 将来の拡張性は確保されているか
-- [ ] テストは書かれているか（将来実装予定）
+
+* [ ] 商用品質か
+* [ ] パフォーマンス最適化
+* [ ] エラーハンドリング妥当
+* [ ] セキュリティ配慮
+* [ ] 拡張性確保
+* [ ] テスト（段階導入予定）
+
+---
 
 ## 技術選定
 
-### 採用技術スタック
-- **フレームワーク**: Tauri v2 (Rust + WebView)
-- **フロントエンド**: React 18+ with TypeScript
-- **ビルドツール**: Vite
-- **スタイリング**: CSS Modules + Sass (Tailwind CSSは不採用)
-- **画像処理**: Python (rembg/U2Net) - **sidecarとしてバンドル**（本体と別パッケージ可）
-- **ローカルDB**: SQLite
-- **状態管理**: Zustand（実装済み）
-- **（オンライン時）中継方式**: HTTPS + WebSocket（PC→中継サーバはアウトバウンド1本、スマホ→中継は4G/5G）
+* **フレームワーク**: Tauri v2（Rust + WebView）
+* **フロント**: React 18+ / TypeScript / Vite
+* **スタイル**: CSS Modules + Sass（Tailwind 不採用）
+* **画像処理**: Python（rembg/U2Net）→ **sidecar として同梱**（モデルは初回 DL）
+* **ローカル DB**: SQLite
+* **状態管理**: Zustand（統一済み）
+* **オンライン中継**: HTTPS + WebSocket（PC→中継はアウトバウンド1本／スマホは 4G/5G）
+
+---
 
 ## 機能要件
 
-### コア機能（既存機能の移植）
+### コア機能（移植）
+
 1. **画像アップロード・処理**
-   - ローカルファイルシステムからの画像選択
-   - AI背景除去機能（Python sidecar）
-   - 処理済み画像のローカル保存
+
+   * ファイル選択
+   * 背景除去（Python sidecar）
+   * 処理済み画像の保存
 
 2. **アニメーション機能**
-   - 画像の動き設定（移動、速度、サイズ、タイプ）
-   - Canvas描画によるアニメーション表示
-   - 音響効果（ローカル音源）
+
+   * 動き設定（移動・速度・サイズ・タイプ）
+   * Canvas 描画
+   * BGM/効果音再生
 
 3. **ギャラリー機能**
-   - 処理済み画像の一覧表示
-   - 画像の管理（削除、編集）
+
+   * 一覧・削除・編集
+   * メタデータ管理（SQLite）
 
 ### 新規要件
-1. **自動アップデート機能**
-   - アプリケーションの自動更新通知・実行
-2. **動作モード切替（Auto/Relay/Local）**
-   - 初期設定画面で「Auto（推奨）/Relay/Local」を選択（**デフォルト: Auto**）
-   - **Auto**: Relay接続可能なら自動採用、不可/劣化時はLocalを案内
-   - **Relay**: PCはインターネットへアウトバウンド接続し、中継サーバ経由でスマホと通信（スマホは4G/5Gのまま）
-   - **Local**: PCローカルWebサーバーに対し、会場Wi‑Fi/PCホットスポット経由でスマホ接続（完全オフライン）
+
+1. **自動アップデート**（Tauri Updater）
+2. **動作モード切替（Auto / Relay / Local）**
+
+   * 初期設定で選択（**デフォルト: Auto**）
+   * **Auto**: Relay 到達性が良ければ Relay、不可/劣化時は Local を案内
+   * **Relay**: PC は中継へ WS 接続、スマホは 4G/5G で中継へ
+   * **Local**: PC 内蔵 Web サーバにスマホが会場 Wi‑Fi で接続（完全オフライン）
+
+---
 
 ## 非機能要件
 
 ### パフォーマンス
-- 起動時間: 3秒以内
-- 画像処理: 1枚あたり5秒以内（背景除去）
-- メモリ使用量: 500MB以下
+
+* 起動 ≤ 3 秒
+* 背景除去 ≤ 5 秒/枚
+* メモリ ≤ 500MB
 
 ### セキュリティ
-- ローカルデータの暗号化（オプション）
-- **外部通信なし（Localモード時）**。**Relayモード時**は中継サーバと**TLS通信**（WAF/Firewall Rules/レート制限適用）
-- **トークン/ログ方針**:
-  - QRは**短命・署名付き・ワンタイム**（60〜120秒）、**利用後失効**
-  - **URLクエリにトークンを載せない**（Referer/ログ漏洩防止）。WSは `Sec-WebSocket-Protocol` または**初回メッセージ**で送信
-  - トークン/JTIは**一部マスク**し、PII最小化。保持は短期（7〜14日）
+
+* ローカルデータ暗号化（オプション）
+* **Local** は外部通信なし。**Relay** は TLS + WAF/レート制限。
+* **トークン/ログ方針**
+
+  * QR は **短命・署名付き・ワンタイム**（60–120 秒）、利用後失効
+  * **URL クエリにトークンを載せない**（Referer/ログ漏洩防止）
+    → WS は `Sec-WebSocket-Protocol` **または** 初回メッセージで伝送
+  * トークン/JTI はマスク・短期保持（7–14 日）
 
 ### 配布
-- Windows: MSIインストーラー（コード署名推奨）
-- macOS: DMGファイル（公証対応）
-- インストールサイズ: **本体**30MB以下目標（Python sidecar/モデルは別扱い）
+
+* Windows: MSI（コード署名推奨）
+* macOS: DMG（公証対応）
+* 本体サイズ 30MB 以下目標（sidecar/モデルは別）
+
+---
 
 ## システムアーキテクチャ
 
-### アーキテクチャ設計原則
-1. **ワークスペースベース**: 各フォルダが独立したワークスペースとして機能
-2. **マルチウィンドウ対応**: アニメーション機能など、独立したウィンドウで動作する機能を考慮
-3. **イベント駆動**: ウィンドウ間通信はTauriのイベントシステムを使用
-4. **データ一貫性**: SQLiteを中心としたデータ管理、ワークスペース単位での独立性
-5. **責務の分離**: UI、ビジネスロジック、データアクセスの明確な分離
+### 設計原則
+
+1. **ワークスペースベース**（フォルダごと独立）
+2. **マルチウィンドウ対応**（アニメ窓・QR表示窓ほか）
+3. **イベント駆動**（Tauri イベントで疎結合）
+4. **データ一貫性**（DB=正。ストアは派生）
+5. **責務分離**（UI/ロジック/データアクセス）
 
 ### ディレクトリ構造
-```
-
-nuriemon/
-├── src-tauri/              # Tauriバックエンド (Rust)
-│   ├── src/
-│   │   ├── lib.rs          # メインライブラリ
-│   │   ├── main.rs         # エントリーポイント
-│   │   ├── db.rs           # SQLite操作
-│   │   ├── events.rs       # イベントエミッター（ウィンドウ間通信）
-│   │   └── workspace.rs    # ワークスペース管理
-│   └── tauri.conf.json     # Tauri設定
-├── src/                    # Reactフロントエンド
-│   ├── App.tsx            # メインアプリケーション
-│   ├── windows/           # ウィンドウ別エントリーポイント
-│   │   └── AnimationWindow\.tsx
-│   ├── components/        # UIコンポーネント
-│   │   ├── WorkspaceSelector.tsx  # ワークスペース選択
-│   │   └── SettingsPage.tsx       # 初期設定画面
-│   ├── services/          # ビジネスロジック
-│   │   ├── workspaceManager.ts    # ワークスペース管理
-│   │   └── database.ts            # DB操作
-│   ├── hooks/             # カスタムフック
-│   │   └── useWorkspace.ts        # ワークスペースフック
-│   ├── events/            # イベントリスナー管理
-│   └── styles/            # Sass/CSSモジュール
-├── python-sidecar/        # Python画像処理
-│   ├── main.py           # エントリーポイント
-│   ├── requirements.txt  # 依存関係
-│   └── dist/             # PyInstallerビルド出力
-└── vite.config.ts        # Vite設定
 
 ```
-
-### ワークスペースアーキテクチャ
+├── apps
+│   └── relay-worker
+│       ├── MIGRATION_PLAN.md
+│       ├── package.json
+│       ├── README.md
+│       ├── scripts
+│       │   └── signedSmokeTest.mjs
+│       ├── src
+│       │   └── index.ts
+│       ├── tsconfig.json
+│       └── wrangler.toml
+├── CLAUDE.md
+├── dist
+│   ├── assets
+│   │   ├── cleanupDatabase-4Si8etW_.js
+│   │   ├── index-CbO7Dljf.js
+│   │   ├── index-DzalDG_R.css
+│   │   ├── legacyMigration-D03GM30g.js
+│   │   └── webviewWindow-YRN-oxqE.js
+│   ├── emotes
+│   │   ├── good.svg
+│   │   ├── Hello.svg
+│   │   ├── hi.svg
+│   │   └── wow.svg
+│   ├── favicon
+│   │   ├── android-chrome-192x192.png
+│   │   ├── android-chrome-512x512.png
+│   │   ├── apple-touch-icon.png
+│   │   ├── browserconfig.xml
+│   │   ├── favicon-16x16.png
+│   │   ├── favicon-32x32.png
+│   │   ├── favicon.ico
+│   │   ├── mstile-150x150.png
+│   │   ├── safari-pinned-tab.svg
+│   │   └── site.webmanifest
+│   ├── img
+│   │   ├── logo.png
+│   │   └── logo.svg
+│   ├── index.html
+│   ├── tauri.svg
+│   ├── vite.svg
+│   └── welcome
+│       ├── nuriemon_c.png
+│       └── nuriemon.png
+├── docs
+│   └── secure-secrets.md
+├── index.html
+├── mobile-ui
+│   └── dist
+│       ├── index.html
+│       └── mobile.html
+├── new.md
+├── package-lock.json
+├── package.json
+├── public
+│   ├── emotes
+│   │   ├── good.svg
+│   │   ├── Hello.svg
+│   │   ├── hi.svg
+│   │   └── wow.svg
+│   ├── favicon
+│   │   ├── android-chrome-192x192.png
+│   │   ├── android-chrome-512x512.png
+│   │   ├── apple-touch-icon.png
+│   │   ├── browserconfig.xml
+│   │   ├── favicon-16x16.png
+│   │   ├── favicon-32x32.png
+│   │   ├── favicon.ico
+│   │   ├── mstile-150x150.png
+│   │   ├── safari-pinned-tab.svg
+│   │   └── site.webmanifest
+│   ├── img
+│   │   ├── logo.png
+│   │   └── logo.svg
+│   ├── tauri.svg
+│   ├── vite.svg
+│   └── welcome
+│       ├── nuriemon_c.png
+│       └── nuriemon.png
+├── python-sidecar
+│   ├── main.py
+│   ├── requirements.txt
+│   └── setup.sh
+├── qr-display.html
+├── README.md
+├── RELEASE.md
+├── REQUIREMENTS.md
+├── src
+│   ├── App.css
+│   ├── App.module.scss
+│   ├── App.tsx
+│   ├── assets
+│   │   └── react.svg
+│   ├── components
+│   │   ├── AnimationPage.module.scss
+│   │   ├── AnimationPageSimple.tsx
+│   │   ├── AnimationView.module.scss
+│   │   ├── AnimationView.tsx
+│   │   ├── AudioSettings.module.scss
+│   │   ├── AudioSettings.tsx
+│   │   ├── BackgroundRemover.module.scss
+│   │   ├── BackgroundRemover.tsx
+│   │   ├── FileUpload.module.scss
+│   │   ├── FileUpload.tsx
+│   │   ├── GalleryPage.module.scss
+│   │   ├── GalleryPage.tsx
+│   │   ├── GroundSetting.module.scss
+│   │   ├── GroundSetting.tsx
+│   │   ├── ImageGallery.module.scss
+│   │   ├── ImageGallery.tsx
+│   │   ├── ImagePreview.module.scss
+│   │   ├── ImagePreview.tsx
+│   │   ├── InitialSetup.tsx
+│   │   ├── MovementSettings.module.scss
+│   │   ├── MovementSettings.tsx
+│   │   ├── SavedImages.module.scss
+│   │   ├── SavedImages.tsx
+│   │   ├── SettingsPage.module.scss
+│   │   ├── SettingsPage.tsx
+│   │   ├── ShareUrl.module.scss
+│   │   ├── ShareUrl.tsx
+│   │   ├── Sidebar
+│   │   │   ├── Sidebar.module.scss
+│   │   │   └── Sidebar.tsx
+│   │   ├── UploadPage.module.scss
+│   │   ├── UploadPage.tsx
+│   │   ├── WorkspaceSelector.module.scss
+│   │   └── WorkspaceSelector.tsx
+│   ├── events
+│   │   └── tauriEventListener.ts
+│   ├── hooks
+│   │   ├── useAnimationData.ts
+│   │   ├── useAudio.ts
+│   │   └── useWorkspace.ts
+│   ├── main.tsx
+│   ├── protocol
+│   │   ├── errors.ts
+│   │   └── version.ts
+│   ├── services
+│   │   ├── animationSettings.ts
+│   │   ├── autoDelete.ts
+│   │   ├── autoImportService.ts
+│   │   ├── cleanupDatabase.ts
+│   │   ├── connectivityProbe.ts
+│   │   ├── customFileOperations.ts
+│   │   ├── database.ts
+│   │   ├── fileScope.ts
+│   │   ├── globalSettings.ts
+│   │   ├── imageStorage.ts
+│   │   ├── legacyMigration.ts
+│   │   ├── migration.ts
+│   │   ├── movementStorage.ts
+│   │   ├── pcWsClient.ts
+│   │   ├── relayClient.ts
+│   │   ├── secureSecrets.ts
+│   │   ├── settings.ts
+│   │   ├── updateFilePaths.ts
+│   │   ├── updater.ts
+│   │   └── workspaceManager.ts
+│   ├── stores
+│   │   ├── appStore.ts
+│   │   └── workspaceStore.ts
+│   ├── styles
+│   │   ├── _variables.scss
+│   │   └── reset.scss
+│   ├── utils
+│   │   ├── image.ts
+│   │   ├── runCleanup.ts
+│   │   ├── storeSync.ts
+│   │   └── tauriStorage.ts
+│   ├── vite-env.d.ts
+│   └── windows
+│       ├── AnimationWindow.module.scss
+│       ├── AnimationWindow.tsx
+│       ├── QrDisplayWindow.module.scss
+│       └── QrDisplayWindow.tsx
+├── src-tauri
+│   ├── build.rs
+│   ├── capabilities
+│   │   └── default.json
+│   ├── Cargo.lock
+│   ├── Cargo.toml
+│   ├── gen
+│   │   └── schemas
+│   │       ├── acl-manifests.json
+│   │       ├── capabilities.json
+│   │       ├── desktop-schema.json
+│   │       └── macOS-schema.json
+│   ├── icons
+│   │   ├── 128x128.png
+│   │   ├── 128x128@2x.png
+│   │   ├── 32x32.png
+│   │   ├── icon.icns
+│   │   ├── icon.ico
+│   │   ├── icon.png
+│   │   ├── Square107x107Logo.png
+│   │   ├── Square142x142Logo.png
+│   │   ├── Square150x150Logo.png
+│   │   ├── Square284x284Logo.png
+│   │   ├── Square30x30Logo.png
+│   │   ├── Square310x310Logo.png
+│   │   ├── Square44x44Logo.png
+│   │   ├── Square71x71Logo.png
+│   │   ├── Square89x89Logo.png
+│   │   └── StoreLogo.png
+│   ├── resources
+│   │   ├── global_settings.json
+│   │   ├── global_settings.json.example
+│   │   ├── global_settings.studio.json
+│   │   ├── ja.lproj
+│   │   │   └── InfoPlist.strings
+│   │   └── python-sidecar
+│   │       └── README.txt
+│   ├── src
+│   │   ├── db.rs
+│   │   ├── events.rs
+│   │   ├── file_watcher.rs
+│   │   ├── lib.rs
+│   │   ├── main.rs
+│   │   ├── qr_manager.rs
+│   │   ├── server_state.rs
+│   │   ├── web_server.rs
+│   │   ├── websocket.rs
+│   │   └── workspace.rs
+│   ├── target
+│   │   ├── CACHEDIR.TAG
+│   │   ├── debug
+│   │   │   ├── global_settings.json
+│   │   │   ├── global_settings.json.example
+│   │   │   ├── libnuriemon_lib.a
+│   │   │   ├── libnuriemon_lib.d
+│   │   │   ├── libnuriemon_lib.dylib
+│   │   │   ├── libnuriemon_lib.rlib
+│   │   │   ├── nuriemon
+│   │   │   └── nuriemon.d
+│   │   └── release
+│   │       ├── nuriemon
+│   │       └── nuriemon.d
+│   └── tauri.conf.json
+├── static
+│   └── share.html
+├── tsconfig.json
+├── tsconfig.node.json
+└── vite.config.ts
 ```
 
-ワークスペース（フォルダ）
-├── .nuriemon/              # ワークスペース専用データ
-│   ├── nuriemon.db         # SQLiteデータベース
-│   └── settings.json       # ワークスペース設定
-├── images/                 # 画像ファイル
-│   ├── originals/         # オリジナル画像
-│   ├── processed/         # 処理済み画像
-│   └── backgrounds/       # 背景画像
-└── audio/                 # 音声ファイル
-├── bgm-*.mp3         # BGM
-└── soundEffect-*.mp3  # 効果音
+### ワークスペース構成
 
 ```
-
-### ウィンドウ間通信アーキテクチャ
-
-#### イベント駆動アーキテクチャ（2025年1月実装）
+<workspace>/
+├─ .nuriemon/
+│  ├─ nuriemon.db            # SQLite
+│  └─ settings.json          # ワークスペース設定
+├─ images/
+│  ├─ originals/
+│  ├─ processed/
+│  └─ backgrounds/
+└─ audio/
+   ├─ bgm-*.mp3
+   └─ soundEffect-*.mp3
 ```
 
-Rust Backend → Tauriイベント → 中央リスナー → Zustandストア → Reactコンポーネント
-↓                                                      ↑
-ワークスペースDB ←─────────────────────────────────────────────→
+### ウィンドウ間通信（イベント駆動）
 
-````
+```
+Rust Backend
+  └─(emit)→ Tauri イベント
+        └─→ 中央リスナー（TauriEventListener）
+              └─→ Zustand ストア
+                    └─→ React コンポーネント
+                           ↑
+                    SQLite（正）
+```
 
-##### 設計原則
-1. **単一方向データフロー**: バックエンドからフロントエンドへの一方向のデータフロー
-2. **Zustand中心の状態管理**:
-   - 設定値（地面位置、削除時間など）はZustandストアで管理
-   - 画像データなど大量のデータはDBを正とし、更新通知のみイベントで伝播
-3. **疎結合な設計**: コンポーネント間の直接的な依存を排除
+* **原則**
 
-##### 実装詳細
-- **TauriEventListener**: すべてのバックエンドイベントを受信し、適切な処理を行う中央リスナー
-- **イベントの種類**:
-  - `data-changed`: バックエンドからのデータ変更通知
-  - `image-list-updated`: 画像リスト更新の内部通知（フロントエンド内）
-  - `workspace-changed`: ワークスペース切り替え通知
+  * 単一方向データフロー（DB→イベント→ストア→UI）
+  * 設定値はストア、一覧などは DB を正として必要時に再読込
+  * 疎結合（直接参照を避ける）
 
-## データ移行計画
+* **主なイベント**
 
-### 既存システムからの変更
-| 既存 (Web版) | 新規 (デスクトップ版) |
-|------------|------------------|
-| Firebase Auth | ローカル認証 (SQLite) |
-| Firestore | SQLite |
-| Cloud Storage | ローカルファイルシステム |
-| SendGrid | システム通知 |
-| オンライン共有 | ファイルエクスポート |
+  * `data-changed` / `image-list-updated` / `workspace-changed` / `workspace-settings-updated` / `workspace-data-loaded`
 
-### データ保存場所
+---
 
-#### ワークスペースベースの保存
-- **ワークスペース単位**: 各フォルダが独立した作業環境として機能
-- **ポータブル性**: フォルダごと移動・コピーが可能
-- **データの独立性**: ワークスペース間でデータは共有されない
+## データ移行・保存
 
-#### グローバル設定の保存場所
-- Windows: `%APPDATA%/nuriemon/global_settings.json`
-- macOS: `~/Library/Application Support/nuriemon/global_settings.json`
-- Linux: `~/.config/nuriemon/global_settings.json`
+### 既存 → 新規
 
-### ワークスペース管理
-- 起動時に最後に使用したワークスペースを自動的に開く
-- ワークスペース切り替え時は動的にDB接続を切り替え
-- 各ワークスペースは`.nuriemon/`ディレクトリに設定とDBを保存
+| 旧（Web版）       | 新（デスクトップ版）   |
+| ------------- | ------------ |
+| Firebase Auth | ローカル（SQLite） |
+| Firestore     | SQLite       |
+| Cloud Storage | ローカル FS      |
+| SendGrid      | OS 通知 等      |
+| オンライン共有       | ファイルエクスポート   |
 
-## 開発ロードマップ
-### 設定の一本化（方針）
-- 正: ワークスペース内の `.nuriemon/settings.json` と OS ごとの GlobalSettings（`global_settings.json`）。
-- 旧: `src/services/settings.ts` および DB `app_settings` は廃止方向（起動時に移行のみ実施、以降は不使用）。
-- コードはワークスペース絶対パスを正とし、旧「保存先種別（pictures/downloads/documents/appData/custom）」分岐は撤廃。
+### 保存場所
 
-### Phase 1: 基盤構築（完了）
-1. ✅ Tauriプロジェクトのセットアップ
-2. ✅ 基本的なReact + TypeScript環境構築
-3. ✅ SassとCSS Modulesの設定
-4. ✅ Gitリポジトリの設定
+* **ワークスペース**配下（前述）
+* **グローバル設定**（ユーザー単位）
 
-### Phase 2: 基盤機能実装（完了）
-1. ✅ **ファイル選択ダイアログの実装**
-   - Tauriのファイルダイアログ APIを使用
-   - 画像ファイル（.png, .jpg, .jpeg, .gif）のみ選択可能に
+  * **macOS**: `~/Library/Application Support/nuriemon/global_settings.json`
+  * **Windows**: `%APPDATA%\nuriemon\global_settings.json`
+  * **Linux**: `~/.config/nuriemon/global_settings.json`
+  * ※ **小文字 `nuriemon` に統一**
 
-2. ✅ **ローカルファイルシステムAPIの設定**
-   - 画像の保存・読み込み権限設定
-   - アプリデータディレクトリの設定
+---
 
-3. ✅ **画像アップロード機能の実装**
-   - 選択した画像のプレビュー表示
-   - Canvasでの画像表示
-   - 画像のローカル保存
+## 開発ロードマップ（抜粋）
 
-### Phase 3: コア機能実装（完了）
-4. ✅ **Python画像処理サービスの統合**
-   - 背景除去機能の移植（rembg/U2Net使用）
-   - Rust経由でPython実行
-   - JSON形式でのプロセス間通信
+### Phase 1–4（完了）
 
-5. ✅ **ギャラリー機能の実装**
-   - 処理済み画像の一覧表示
-   - サムネイル生成
-   - 画像の削除・管理機能
-   - メタデータ管理（JSON形式）
+* Tauri 基盤、ファイル選択、画像処理（sidecar）、ギャラリー、SQLite、アニメ、保存先選択
 
-6. ✅ **保存先選択機能**
-   - アプリデータ、ピクチャ、ダウンロード、ドキュメント、カスタムフォルダ選択
-   - カスタムディレクトリへの保存（Rust側カスタムコマンド実装）
-   - 設定の永続化
+### Phase 4.5–4.8（完了）
 
-### Phase 4: 応用機能実装（完了）
-1. ✅ **ローカルDB (SQLite)の設定**
-   - 画像メタデータの移行（JSONからSQLiteへ）
-   - ユーザー設定の保存
-   - 処理履歴の管理
-   - より高度なクエリ機能
-   - 動き設定の保存機能
+* マルチウィンドウ / イベント集中化 / Zustand 統一
+* 効果音・削除挙動修正、画像更新リアルタイム化
 
-2. ✅ **アニメーション機能の移植**
-   - 既存の動き設定（移動、速度、サイズ、タイプ）を移植
-   - Canvasアニメーションの実装
-   - プレビュー機能
-   - 背景、BGM、効果音の設定機能
+### Phase 5（子ども操作：QR + Auto/Relay/Local）
 
-### Phase 4.5: 機能改善と修正（完了）
-1. ✅ **マルチウィンドウアーキテクチャの実装**
-   - Tauriイベントシステムの統合
-   - ウィンドウ間のリアルタイム通信
-   - イベント駆動への部分的な移行
+* **共通**：画像ごとに QR 表示／スマホをコントローラ化／WS でリアルタイム操作
+* **Auto**：Relay 到達性ヘルスで自動判断→不可時は Local 案内
+* **Relay**：PC→中継（HTTPS/WS）、スマホ（4G/5G）→中継
+* **Local**：PC 内蔵サーバへ会場 Wi‑Fi 接続（自己診断ページ・案内）
+* **UI**：アニメ窓に QR は出さない（体験優先）。モバイル UI はシンプル/アドバンス切替。
+* **Per-image control**：`img=<imageId>` により個別制御。`payload.imageId` がある場合のみ対象へ反映。
 
-2. ✅ **効果音再生の修正**
-   - 初回画像追加時の効果音再生問題を解決
-   - 音声プールの管理改善
+### Phase 6（ユーザー管理・配布準備）
 
-3. ✅ **削除機能の改善**
-   - ギャラリーからの削除ボタン修正
-   - アニメーション画面の背景表示修正
-   - Tauriネイティブダイアログに統一
+* **自動アップデート**（GitHub Releases）
+* **配布ビルド**（macOS DMG / Windows MSI）
+* **署名・公証**（段階導入）
+* **（将来）ユーザー/プロファイル**
 
-### Phase 4.6: UI/UX改善（完了）
-1. ✅ **アップロードページの機能分離**
-   - 初期設定ページの作成
-   - 高頻度機能（画像アップロード）の分離
+---
 
-2. ✅ **設定管理の統一化**
-   - AppSettingsServiceへの完全移行
-   - フォルダ設定の永続化修正
-   - 背景の即時アップロード機能復元
-   - エラーハンドリング強化
+## 運用モード（Auto / Relay / Local）
 
-### Phase 4.7: 自動取り込み機能（完了）
-1. ✅ **フォルダ監視による自動画像取り込み**
-   - 指定フォルダの監視機能（Rust側でnotifyクレート使用）
-   - 新規画像の自動検出と背景除去処理
-   - スキャナー連携を想定した自動ワークフロー
-   - ファイルシステムイベントによる効率的な実装
-   - 重複画像の検出（ファイル名ベース）
+* **Auto（推奨）**：低頻度ヘルス（`/healthz`）で Relay 可否を判定。可なら Relay、不可/劣化なら Local 案内。
 
-2. ✅ **自動アニメーション設定**
-   - 動きのプリセットパターン（normal, slow, fast, float, bounce, rotate, swim）
-   - randクレートを使用した適切な乱数生成
-   - 歩くタイプと飛ぶタイプの自動判定
-   - ランダム性を持たせた自然な動き（速度: 0.5-1.5、サイズ: 0.8-1.2）
+* **Relay**：単一ドメインの中継へ PC/スマホが合流（PC はアウトバウンド1本）。画像/設定は PC ローカル。
 
-### Phase 4.8: アーキテクチャ改善（完了）
-1. ✅ **Zustand統一アーキテクチャへの移行**
-   - useDataChangeListenerフックを削除
-   - TauriEventListenerによる中央集権的なイベント処理
-   - WorkspaceManagerのイベント発行をZustandストア更新に置き換え
-   - 状態管理の一元化と単一方向データフローの確立
+* **Local**：会場 Wi‑Fi（または PC ホットスポット）で内蔵サーバへ接続。
 
-2. ✅ **画像リアルタイム更新の修正**
-   - ImageAdded/Deleted/SettingsChangedイベントの適切な処理
-   - image-list-updatedイベントによる疎結合な更新通知
-   - DBを単一の情報源とした堅牢な設計
+* **スケール目標**：直近 1,000–10,000 同時（Cloudflare Workers + Durable Objects）
 
-### Phase 5: 子ども操作機能（QR紐付け + Auto/Relay/Local対応）
-- **共通**: 画像アップロード時に個別QR表示、スマホをコントローラ化、WebSocketリアルタイム操作
-- **Autoモード**:
-  - 起動時に**Relay到達性プローブ**を実施（低頻度ヘルスチェック）
-  - Relay健全 → **Public URLのQR**を表示、不可/劣化 → **Local案内**（Wi‑Fi接続手順/自己診断ページリンク）
-- **Relayモード（オンライン）**:
-  - PC→中継サーバ（HTTPS/WS）へアウトバウンド接続
-  - スマホ（4G/5G）→中継のパブリックURLに接続、サーバが制御メッセージを中継
-  - セッションは短命トークンで論理分離、**DB不要（メモリ/TTL/DO storage）**
-  - **URLにトークンを載せない**（初回メッセージ or `Sec-WebSocket-Protocol`）
-- **Localモード（オフライン）**:
-  - PC内蔵Webサーバ（ローカル）にスマホを会場Wi‑Fi/PCホットスポットで接続
-  - **自己診断ページ → 成功/失敗分岐案内 → Wi‑Fi接続QR** の順で誘導
-  - AP隔離検知/案内、mDNS(.local)併記等で接続性を向上（将来）
-- **フォールバック**: しきい値超過・障害時はUIでLocalへ切替ガイダンス（ワンタップ切替）
-- **UI**: アニメーション画面にはQRコードを表示しない（観覧体験優先）
-- **スマホUI**: シンプル/アドバンス切替、上下左右、アクション、エモート
-  - シンプル: 幼児向け、エモート＋ランダムアクションのみ
-  - 将来の挙動変更に備え、疎結合・設定駆動で実装
+* **レイテンシ**：95p < 150ms（Relay）
 
-#### コントローラーUIのソース（明記）
-- Relay（本番配信）: `apps/relay-worker/src/index.ts`（Cloudflare Workersの`/app`で配信）
-  - UI/ボタン構成・送信フォーマット（`type:'cmd'`）の正とする
-  - デプロイ: `apps/relay-worker`で`wrangler publish`（stagingは`--env staging`）
-- Local（アプリ内蔵）: `mobile-ui/dist/mobile.html`
-  - RelayのUI・コマンド仕様に合わせる（/appで配信）。必要に応じてローカル検出時は`/ws`に接続
-  - 受信側の正規化は`src/services/pcWsClient.ts`（Relay）・`src-tauri/src/websocket.rs`（Local）に実装
+---
 
-### Phase 6: ユーザー管理・配布準備（未実装）
-1. **ユーザー管理機能**
-   - マルチユーザー対応
-   - プロファイル切り替え
-   - 個別設定の保存
-2. **配布用ビルド設定**
-   - Windows用MSIインストーラー作成
-   - macOS用DMGファイル作成
-   - コード署名の設定
-3. **自動アップデート機能**
-   - アップデートチェック機能
-   - 差分アップデートの実装
-   - 更新通知UI
+## Relay アーキテクチャ（Cloudflare Workers + Durable Objects）
 
-## 運用モード（Auto/Relay/Local）
+> **実装状況**：本仕様は **EventDO 一元**で運用（現行）。`PcDO` は将来の高スケール向け候補。
+> **目的**：PoP/インスタンス差を吸収し、PC/モバイルを確実に同一ハブに集約。
 
-### モード定義
-- **Auto（推奨）**: 起動時にRelay到達性を**低頻度でプローブ**。健全ならRelay採用、不可/劣化時はLocal案内。
-- **Relay（オンライン）**: 来場者は4G/5Gのまま、共通ドメインの中継サーバへ接続。PCは中継へアウトバウンド接続。画像/設定はPCローカル（SQLite/FS）。
-- **Local（オフライン）**: 来場者は会場Wi‑FiまたはPCホットスポットに接続し、PCローカルサーバへ直接接続。
+### エンドポイント / プロトコル（現行）
 
-### 初期設定（UI）
-- 初回起動時に「Auto（推奨）/Relay/Local」を選択可能（**デフォルト: Auto**）
-- モードはワークスペース設定に保存し、いつでも変更可能（モード切替時はQR/接続先を出し分け）
-- ランタイムでも**ステータスバーからワンタップ切替**できる（推奨）
+* `POST /e/{event}/register-pc` … PC 登録（HMAC 署名ヘッダで検証）
+* `POST /e/{event}/pending-sid` … QR 用 `sid` を pending 登録（TTL）
+* `GET  /e/{event}/sid-status?sid=...` … `sid` の状態確認
+* `GET  /e/{event}/ws`（**WebSocket**）
 
-### スケール目標
-- 直近の運用想定: **同時1,000〜10,000接続**（Cloudflare Workers + Durable Objects で運用）
-- 中長期の設計目標: **100×1000（会場×参加者）≒ 100,000接続**
-- レイテンシ目標: **95p < 150ms（Relay時）**
+  * **サブプロトコル**: `v1`
+  * **PC**：接続後に `pc-auth`（HMAC 検証 / nonce 再生攻撃防止 / 時計ズレ補正）→ `pc-ack`
+  * **Mobile**：`join { sid }` → `ack`、以降 `cmd` を送信
+  * **サーバ**：`evt` をモバイルへブロードキャスト（必要時）
 
-### 推奨中継基盤（採用/候補）
-- **採用**: **Cloudflare Workers + Durable Objects**（グローバル、低運用負荷、WS対応、セッションの強整合/ピン留めに最適）
-- **代替候補**:
-  - Fly.io（Rust/Actix、Anycast、オートスケール）
-  - AWS（ALB+AutoScaling+ECS/Fargate、必要に応じRedis）
-- いずれも「**単一ドメイン・共通基盤**」を全イベントで共用し、セッションを**トークンで論理分離**
+> **注意**：かつての案だった `POST /session` による「モバイル向けワンタイム WS トークン払い出し」は**将来オプション**。現行は `sid` と `pc-auth` の二段で成立。
 
-## Relayアーキテクチャ（Cloudflare Workers + Durable Objects）
+### ハートビート / 切断通知（現行）
 
-### オブジェクト粒度
-- **EventDO**（イベント単位）: 参加者WS群の集約、レート制御、**イベント別キルスイッチ**
-- **PcDO**（PC単位）: PCセッションの**順序保証/強整合**、スマホ↔PCの橋渡し
-
-### エンドポイント/プロトコル
-- `POST /e/{event_id}/session` → **短命署名トークン**を発行（claims: `exp`,`iat`,`jti`,`nonce`。TTL 60–120秒、**ワンタイム**）
-- `GET /e/{event_id}/ws`（WS握手）
-  - **禁止**: URLクエリにトークンを載せる
-  - 方式A: `Sec-WebSocket-Protocol: bearer.<token>, v1`
-  - 方式B: 初回メッセージでトークン送信（受理前は何も処理しない）
-- **リージョンピン留め**: PCが先にPcDOへ接続して**近接リージョンに初期化**。スマホは同PcDOへルーティング
-
-### QR/セッション交換（確定）
-- QRは `e`（event_id）と `sid`（非秘匿の短命セッションID）だけを含む。
-  - 例: `https://ctrl.nuriemon.jp/app/#e={event_id}&sid={sid}`（Crockford base32 10桁、TTL=90秒、I/O/L除外）
-  - `sid` はPCが事前にEventDOへ「ペンディング登録」（TTL=90秒）してからQR化する。
-- スマホは起動後、`POST /e/{event_id}/session` に `{ sid }` を送って、署名付きのワンタイムWSトークンを取得する（JTIはDO storageにTTL付き保持、ワンタイム担保）。
-- WS接続は `GET /e/{event_id}/ws` に対して `Sec-WebSocket-Protocol: bearer.<token>, v1` を付与して行う（URLクエリにトークンは載せない）。
-- WSは30〜45秒間隔のハートビートを実装し、スパイク時は 503 + `Retry-After` と指数バックオフ＋ジッターで安定化する。
-
-#### Local/Relay のQR寿命ポリシー（正式）
-- Local（オフライン）: 固定QR（長寿命）。会場内ネットワークでの到達性を最重視し、セッションは長時間有効（例: 24h）。
-- Relay（オンライン）: 短命・ワンタイム（60–120秒）。`sid` は DO にTTL付きでpending登録、`/session` でJTIワンタイムのWSトークンを払い出し、使い切り（再利用不可）。
-
-### 失効/JTIの保持
-- **利用後失効（使い切り）**は **DOの`storage`（TTL付き）**にJTIを保存（**メモリ併用**）し、**再起動/スリープでも二重使用を防止**
-
-### レート制限/スパイク対策
-- イベント単位・IP単位・セッション単位のレート制限
-- 同時大量入室に対し、**503 + `Retry-After`** と **指数バックオフ + ジッター**をクライアント必須実装
-
-### バックプレッシャ/送信キュー
-- クライアント別送信キューに**上限**（件数/バイト）を設定
-- 超過時は同種イベントの**coalesce**（古い更新間引き）または対象クライアント一時ドロップ＋**再同期要求**
-
-### メッセージ仕様（将来互換）
-```json
-{ "v": 1, "type": "join|cmd|ack|evt|error|hb", "sid": "...", "ts": 0, "payload": {...} }
-````
-
-* `v` と `type` は必須。`error.code` は列挙。将来は**MessagePack**に置換可能
-* `permessage-deflate` は任意（CPU/帯域のトレードオフで選択）
+* サーバ→全 WS に 25–30 秒間隔で `{v:1,type:'hb'}`（ログ抑制）
+* モバイルは任意で `hb-ack` 返送（生存観測）
+* PC が切断したら、同 PC に紐づくモバイルへ `pc-offline` を通知（UI は再接続導線を提示）
+  ※ モバイル強制 close（一定猶予後の `close(1012)`）は**オプション**。現状は通知方式。
 
 ### 署名正規化 v1（HMAC）
-- 対象: `POST /e/{event_id}/register-pc`, `POST /e/{event_id}/pending-sid`
-- 目的: EVENT_SETUP_SECRET による運営PCの正当性検証（偽PC/乱発防止）
-- ヘッダ: `X-Relay-Iat`(UNIX秒), `X-Relay-Nonce`(16B base64url), `X-Relay-Sig`(base64url HMAC)
-- 正規化: `op + "\n" + path + "\n" + payloadHash + "\n" + iat + "\n" + nonce`
-  - `op`: `register-pc` | `pending-sid`
-  - `path`: 例 `/e/demo-event/pending-sid`（スキーム/ホスト/クエリなし）
-  - `payloadHash`: 生ボディの SHA-256 小文字hex（空は `e3b0c442...b855`）
-  - 署名: HMAC-SHA256(secret, canonical) を base64url で送信
-- ボディ(JSON):
-  - register-pc: `{"pcid":"<[a-z0-9-]{3,32}>"}`
-  - pending-sid: `{ "pcid":"...", "sid":"<base32-10>", "ttl":90 }`（TTLはサーバで[30,120]にクランプ）
-- サーバ検証:
-  1) iat±60s（外れは 401 E_CLOCK_SKEW + `X-Server-Time`）
-  2) nonce 未使用（DO storage TTL=120s）
-  3) payloadHash 一致（受信生ボディ）
-  4) canonical を再構築し HMAC 検証
-  5) 成功時: register-pc は PcDO 登録、pending-sid は pending 登録（重複sidは409 E_SID_EXISTS）
-- エラー: 429/503 は必ず `Retry-After` を返却（クライアントは指数バックオフ＋ジッター）
 
-## セキュリティ/運用
+* 対象: `register-pc` / `pending-sid`
+* ヘッダ:
+  `X-Relay-Iat`（UNIX 秒）, `X-Relay-Nonce`（16B base64url）, `X-Relay-Sig`（base64url HMAC）
+* 正規化文字列:
+  `op + "\n" + path + "\n" + payloadHash + "\n" + iat + "\n" + nonce`
 
-### マルチテナント/イベント分離
+  * `op` = `register-pc` | `pending-sid`
+  * `path` 例：`/e/demo-event/pending-sid`
+  * `payloadHash`: 受信生ボディ SHA-256 小文字 hex（空は `e3b0c442...b855`）
+* 検証: 時計ズレ ±60s / nonce 未使用 / payloadHash 一致 / HMAC 一致
+* エラー: 401（E\_CLOCK\_SKEW）→ `X-Server-Time`、409（E\_SID\_EXISTS）、429/503 は `Retry-After`
 
-* ルーティング: `/e/{event_id}` または サブドメインで論理分離
-* レート制限/クォータ: **イベント単位**・IP単位・セッション単位
-* **キルスイッチ**: 特定イベントのみRelay停止→Local誘導
+### QR / セッション（現行）
 
-### 観測性/SLO
+* QR は **`e`（eventId）と `sid` のみ**を含む（`sid` は base32 10 桁・TTL=90s・I/O/L 除外）。
+  例：`https://ctrl.nuriemon.jp/app/#e={event}&sid={sid}`
+* PC が先に `pending-sid` で登録 → QR 化 → モバイルが `join {sid}`
+* `sid` は DO ストレージで TTL 失効（ワンタイム性は DO が担保）
 
-* **メトリクス**: 接続成功率、レイテンシ（p50/p95）、切断理由、再接続率、bps/接続
-* **ダッシュボード**: イベント別リアルタイム表示
-* **SLO**: 例）接続成功率 **99.5%**、95pレイテンシ **< 150ms**（Relay時）
-* **アラート**: しきい値超過時に**UIへLocal誘導バナー**と**ワンタップ切替**を表示
+### レート制限 / バックプレッシャ（設計方針）
 
-### Local到達性改善（将来）
+* イベント単位 / IP 単位 / セッション単位でレート制御
+* 送信キュー上限・coalesce・過負荷時の 503+`Retry-After` と指数バックオフ＋ジッター
 
-* QRは `http://<ip>:<port>` と `http://<hostname>.local` を併記
-* **自己診断ページ → 成功/失敗の案内 → Wi‑Fi接続QR** の順で誘導
-* APクライアント隔離の確認チェックリスト
+---
 
-### Auto継続プローブ（仕様明文化）
-- プローブ対象: `/healthz`（2sタイムアウト、no‑store）を低頻度で実施。
-- 採用条件: 連続N回成功、かつ `version===PROTOCOL_VERSION`、95pレイテンシしきい値内。
-- 切替条件: 一定回数の連続失敗または 503/429 の誘導＋`Retry-After` を尊重。UIにLocal誘導バナーとワンタップ切替を提示。
-- DoS時は指数バックオフ＋ジッターで負荷分散。
+## セキュリティ / 運用
 
-### CORS最小化（ローカル/Relay）
-- Localサーバ: 基本は同一オリジンで配信し、不要な`Access-Control-Allow-*`ヘッダは付与しない。
-- Relay(prod): `ALLOWED_ORIGINS = "https://ctrl.nuriemon.jp,tauri://localhost"`（Workers側設定）。
+### マルチテナント / イベント分離
 
-## AI開発者への最終注意
+* ルーティング：`/e/{event}`
+* レート制限・クォータ：イベント/セッション/クライアント単位
+* **キルスイッチ**：特定 event の Relay 停止→ Local 誘導（UI バナー）
 
-このプロジェクトは商用製品として販売予定です。
-思考は英語でも構わないが、コミュニケーションは必ず日本語で。
+### 観測性 / SLO
 
-「とりあえず動く」コードを書いた場合、それは技術的負債として後で必ず問題になります。
-最初から正しく実装することで、長期的な開発効率と製品品質を保ちましょう。
+* **メトリクス**：接続成功率、p50/p95、切断理由、再接続率、bps/接続
+* **ダッシュボード**：イベント別リアルタイム
+* **SLO**：例）接続成功率 99.5%、95p < 150ms（Relay）
 
-## AIの役割
+### Local 到達性（将来）
 
-互いに協力しあい、より良いものを開発していけるように！
-* **codex** = 本プロダクトの開発現場責任者の立ち位置。自らコード作成や開発を行う。
-* **Chatgpt5pro** = codexの開発が正しいかチェックや、提案、場合によっては指示を行う。
+* QR に `http://<ip>:<port>` と `http://<hostname>.local` 併記
+* **自己診断ページ → 成功/失敗の案内 → Wi‑Fi 接続 QR**
+* AP クライアント隔離の確認手順
 
-  1. 多角的な視点: フロントエンドとバックエンド、両方の視点から問題を分析し、相互の影響を常に考慮します。
-  2. 根本原因の追求: 表面的な解決策だけでなく、常に「なぜそうなったのか？」という根本原因を追求し、アーキテクチャレベルでの改善を提案します。
-  3. 疑う姿勢: 提示された情報だけでなく、「他に考えられる可能性はないか？」と常に疑う姿勢を持ち、より広い視野で問題解決に取り組みます。
+### セキュリティヘッダ（UI 配信/リダイレクト）
 
-- ### セキュリティヘッダ（UI配信/リダイレクト時）
-- - Content-Security-Policy: `default-src 'self'; connect-src 'self' wss://ctrl.nuriemon.jp`
-- - Referrer-Policy: `no-referrer`
-- - Strict-Transport-Security: `max-age=15552000`（preload/IncludeSubDomainsは当面オフ）
+* `Content-Security-Policy`: `default-src 'self'; connect-src 'self' wss://ctrl.nuriemon.jp`
+* `Referrer-Policy`: `no-referrer`
+* `Strict-Transport-Security`: `max-age=15552000`
+
+---
 
 ## 最近の変更（2025-09-01）
 
-Relay/WS 安定化とコントローラーUXの改善、および削除ポリシーの整理を実施。
+* **Relay/DO**：WS ハートビート（\~25s）、`pc-online` / `pc-offline` 通知。
+  ※ 強制 close（PC 復帰なし 45s 超）の適用は**オプション**化。現状は通知ベース。
+* **モバイル UI**（/app）：自動再接続（指数バックオフ）＋「再接続」ボタン。`pc-offline`/`pc-online` を UI 反映。
+* **画像ごとのコントローラー割当**：`img=<imageId>` を QR に付与、`payload.imageId` を透過保持。
+  `imageId` 指定があるときのみ該当画像へ適用（未指定時の全体適用はレガシー互換として限定的に維持）。
+* **削除ポリシー**：No-Delete モード廃止／**自動削除停止**。手動削除は常に可。UI の「非表示」は見た目のみ。
 
-- Relay/DO（Durable Object）
-  - 25s間隔のpush型ハートビートを全WSへ送信（`{v:1,type:'hb'}`）。モバイルは任意で`hb-ack`応答。
-  - PC認証完了時/切断時にイベント通知（`pc-online`/`pc-offline`）。PC切断後45秒以内に復帰がない場合、当該PCに紐づくモバイルWSをサーバ側で強制`close(1012)`して整理。
-  - これにより中間ネットワークのアイドル切断や“ゾンビ”化を抑止しつつ、短時間のPC再起動では接続体験を維持。
+---
 
-- モバイルUI（/app）
-  - 自動再接続（指数バックオフ）＋手動「再接続」ボタンを追加。`pc-offline`/`pc-online`イベントを表示に反映。
-  - 受信`hb`に対して`hb-ack`を返送し、接続生存の観測性を向上。
+## アセット配置ガイド
 
-- 画像ごとのコントローラー割当（per-image control）
-  - QRに`img=<imageId>`を追加。モバイルは各コマンドに`payload.imageId`を同梱。PC→DO→モバイルの経路で透過的に保持。
-  - AnimationView側は`imageId`が指定された場合、その画像のみに適用。指定`imageId`が見つからない場合は“無視”（他画像へは適用しない）。
-  - レガシーUI互換として、`imageId`未指定時のみ全体適用のフォールバックを維持。
-  - 修正: A削除後にAのコントローラーをリロードしてもBが動く問題を解消（未検出`imageId`時の全体適用を撤廃）。
+* **UI 直参照**：`public/`
 
-- 削除ポリシーの整理
-  - No-Deleteモード（削除API無効化）を廃止。手動削除は常に許可。
-  - 自動削除（autoDelete.ts）は停止。起動時/時間経過による物理削除は行わない。
-  - 「非表示までの時間」は画面上の表示ロジックのみ（DB/ファイルは残す）。
+  * 例：`/welcome/hero.png`, `/emotes/good.svg`
+* **ビルド管理**：`src/assets/`（import して使用）
+* **バックエンド同梱**：`src-tauri/resources/`
 
-- 影響範囲/運用
-  - tailログは従来どおり（HBはログ抑制）。不通時は`close`や`pc-offline`/`pc-timeout`で把握可能。
-  - 既存ワークスペース/設定に互換。旧`no_delete_mode`キーは読み捨て。
+  * 例：`global_settings.json`（バンドル既定）
+* **ユーザーデータ**：`<workspace>/images/*`, `<workspace>/audio/*`
 
-- 今後の候補
-  - 容量アラート（閾値下回りで通知＋一括削除導線）。
-  - コントローラーUIの本格実装（シンプル/アドバンス切替、エモート、感度調整 等）。
+**エモート追加**
 
-## アセット配置ガイド（画像/音源など）
+* SVG：`public/emotes/xxx.svg` を追加 → `svgEmotes` に `"xxx"` を登録
+* テキスト絵文字：`textEmotes` へ追加候補
 
-- UI画像（フロント側で直接参照）: `public/`
-  - ウェルカムページ用: `public/welcome/`（例: `/welcome/hero.png`）
-  - エモートSVG: `public/emotes/`（既存: `good.svg`, `hi.svg` 等）
-  - 汎用画像: `public/img/`
-- バンドル管理（ビルド時最適化）: `src/assets/`
-  - 例: `import hero from '@/assets/welcome/hero.png'` → `<img src={hero} />`
-- バックエンド固定リソース（Tauri同梱）: `src-tauri/resources/`
-  - 例: `global_settings.json`（プロビジョニング既定）
-  - Rustからは `app.path().resource_dir()?.join("global_settings.json")` で参照
-- ユーザーデータ（ワークスペース）: `<workspace>/images/*`, `<workspace>/audio/*`
-  - 背景や取り込み画像はここに保存（UIから変更可能）
+---
 
-エモート追加のルール
-- SVGとして表示: `public/emotes/xxx.svg` を追加し、`src/services/animationSettings.ts` の `svgEmotes` に `"xxx"` を追加。
-- 絵文字として表示: テキストで送信（`😊` など）。`textEmotes` に候補を追加可。
+## グローバル設定 / プロビジョニング（Relay）
 
-参照方法の例
-- 直リンク: `<img src="/welcome/hero.png" />`
-- CSS: `background-image: url('/welcome/hero.png');`
-- import（アセット）: `import logo from '@/assets/img/logo.png'` → `<img src={logo} />`
+### 優先順位（上ほど強い）
 
-## グローバル設定/プロビジョニング（Relay）
+1. **環境変数 JSON パス**：`NURIEMON_GLOBAL_SETTINGS_PATH`
+2. **ユーザー設定ファイル**：`global_settings.json`
 
-- 優先順位（上ほど強い）
-  1) 環境変数JSONパス: `NURIEMON_GLOBAL_SETTINGS_PATH`
-  2) ユーザー設定（プロビジョニング）: AppConfig 配下 `global_settings.json`
-     - macOS: `~/Library/Application Support/Nuriemon/global_settings.json`
-     - Windows: `%APPDATA%/Nuriemon/global_settings.json`
-     - Linux: `~/.config/nuriemon/global_settings.json`
-  3) バンドル既定: `src-tauri/resources/global_settings.json`
-  4) 内部保存（GlobalSettingsService）
-  5) 個別環境変数オーバーライド（その回のみ）:
-     - `NURIEMON_RELAY_BASE_URL`, `NURIEMON_RELAY_EVENT_ID`, `NURIEMON_PCID`, `NURIEMON_OPERATION_MODE`
+   * macOS: `~/Library/Application Support/nuriemon/global_settings.json`
+   * Windows: `%APPDATA%\nuriemon\global_settings.json`
+   * Linux: `~/.config/nuriemon/global_settings.json`
+3. **バンドル既定**：`src-tauri/resources/global_settings.json`
+4. **内部保存（GlobalSettingsService）**
+5. **個別キーの環境変数オーバーライド**（起動中のみ）
+   `NURIEMON_RELAY_BASE_URL`, `NURIEMON_RELAY_EVENT_ID`, `NURIEMON_PCID`, `NURIEMON_OPERATION_MODE`
 
-- JSON形式（v1）サンプル: `src-tauri/resources/global_settings.json.example`
-  - `relay.baseUrl`/`eventId`/`pcId`/`wsProtocol`
-  - `defaults.operationMode`: `auto` | `relay` | `local`（画面の初期値）
-  - `ui.hideRelaySettings`/`ui.lockRelaySettings`: 設定画面を隠す/読取専用化
-  - `features.noDelete`: 既定はfalse（自動削除は無効、手動は可）
+> **運用のポイント**
+>
+> * **社内テストを本番相当**で回す：**バンドル同梱**を推奨（誤編集や置き忘れ防止）。
+> * **一般配布**：バンドルには **baseUrl のみ**／`eventId` は空で同梱 → **初回セットアップ画面で購入者が入力**するのが簡潔。
 
-- 注意
-  - 秘密鍵（EVENT_SETUP_SECRET）はJSONに含めず、OSキーチェーンに保存（既存の `save_event_secret` 系）
-  - ロック有効時（`lockRelaySettings: true`）は Relay 設定はUIで変更不可
+### `global_settings.json` サンプル
+
+**社内テスト（固定 eventId で配る）：**
+
+```json
+{
+  "version": "1",
+  "relay": {
+    "baseUrl": "https://stg.ctrl.nuriemon.jp",
+    "eventId": "studio-2025-09",
+    "pcId": null,
+    "wsProtocol": "v1"
+  },
+  "defaults": { "operationMode": "relay" },
+  "ui": { "hideRelaySettings": true, "lockRelaySettings": true }
+}
+```
+
+**一般配布（購入者が初回に入力）：**
+
+```json
+{
+  "version": "1",
+  "relay": {
+    "baseUrl": "https://ctrl.nuriemon.jp",
+    "eventId": "",
+    "pcId": null,
+    "wsProtocol": "v1"
+  },
+  "defaults": { "operationMode": "relay" },
+  "ui": { "hideRelaySettings": false, "lockRelaySettings": false }
+}
+```
+
+> **秘密鍵**（`EVENT_SETUP_SECRET`）は JSON に含めず、OS キーチェーンへ保存。
+
+---
+
+## 初回セットアップ（購入者向け UX）
+
+1. **動作モード**選択（Auto / Relay / Local）※ 既定は Relay（一般配布を想定）
+2. **eventId 入力**（英数・ハイフン、8–32 文字などルール表示）
+3. **pcId 自動生成**（端末固有。グローバルに保存）
+4. **保存**：優先順位ルールに従い、通常はユーザー設定ファイルに書き出し。
+
+   * **ワークスペースを変えても eventId/pcId はグローバルで維持**（任意変更は可）
+
+---
+
+## ライセンス（eventId とは独立）
+
+* **ライセンスコード**は配布・台数・不正配布対策のための**別レイヤ**。
+* PC アプリは初回起動時にライセンス入力 → **ライセンス認証 Worker（別系統）** へ `activate` → 署名トークン発行。
+* 以後、起動チェックはトークンで行い、**eventId とは混同しない**。
+* オフライン猶予・台数上限・有効期限などはポリシーで定義。
+* ライセンス認証サーバは Cloudflare Workers（KV/R2/DO 等）で実装可。Relay とは**分離**。
+
+---
+
+## 開発を本番挙動に近づける（CORS 回避）
+
+* HMR（`http://localhost:1420`）は CORS で Relay に弾かれる。\*\*本番同等（`tauri://localhost`）\*\*で動かしたい場合：
+
+**推奨 A：dist ウォッチ開発**
+
+* `vite build --watch`（HMR ではなく `dist/` を更新）
+* Tauri は `devUrl` を使わず `frontendDist` を読む → **オリジンが `tauri://localhost`** になり CORS 回避。
+
+**代替 B：ステージングで一時的に `http://localhost:1420` を許可**
+
+* `ALLOWED_ORIGINS` に追加（本番は据え置き）。暫定策。
+
+**代替 C：ネットワークをネイティブ経由に統一**
+
+* HTTP：`@tauri-apps/plugin-http` など
+* WS：`@tauri-apps/plugin-websocket` または Rust 側で WS → フロントとブリッジ
+* dev でも CORS 非依存になるが、実装コストは A・B より高い。
+
+---
+
+## サイドカー（背景除去）
+
+* **方式 A 採用**：**sidecar バイナリ同梱**／モデル（U2Net など）は**初回 DL**してキャッシュ。
+* 2 回目以降はオフライン会場でも高速。
+* sidecar が見つからない開発時はローカル `python3 main.py` も可（自動切替）。
+
+---
+
+## QA チェックリスト
+
+* [ ] 初回セットアップで eventId 入力 → QR 表示 → モバイル join → PC 反映
+* [ ] ワークスペース切替でも eventId/pcId が維持（設定画面で確認）
+* [ ] 長時間の操作で途切れない（hb 有効・`pc-offline` 通知が UI に反映）
+* [ ] 画像・音声の取り込み/再生がスムーズ（負荷・遅延）
+* [ ] 自動アップデート（通知～適用）
+* [ ] OS 権限ダイアログ（初回のみ）
+* [ ] ギャラリー削除は常に可（自動削除は停止）
+* [ ] Per-image control：`imageId` 指定時は対象のみ反映、未指定は全体適用（互換）
+
+---
+
+## よくある質問（抜粋）
+
+**Q. eventId は毎回違う必要がある？**
+A. いいえ。同じ会場・端末群で共有する「合流点」です。**一般配布では初回セットアップで購入者に入力**してもらい、その後はグローバルで維持します。
+
+**Q. ライセンスと eventId の関係は？**
+A. **無関係**です。ライセンスは配布・台数・不正対策、eventId は PC とモバイルの**紐付けハブ名**です。
+
+**Q. 社内 PC を本番相当で動かすには？**
+A. バンドル同梱の `global_settings.json` に **baseUrl と固定の eventId** を入れ、`lockRelaySettings=true` を推奨。
+
+**Q. 購入者が eventId を知らないのでは？**
+A. **初回セットアップ画面**で入力してもらう設計に変更済みです（本書に反映）。事前に配布側で決めた命名規則（例：`school-2025-autumn`）を案内します。
+
+---
+
+## 付録：キーと配置まとめ
+
+* **設定の優先順位**：環境変数 > ユーザー設定（`~/Library/Application Support/nuriemon/global_settings.json` ほか）> **バンドル同梱** > 内部保存 > その回だけの環境変数上書き
+* **代表キー**
+
+  * `relay.baseUrl`（例：`https://ctrl.nuriemon.jp`）
+  * `relay.eventId`（一般配布は空→初回 UI で入力）
+  * `relay.pcId`（初回自動生成・グローバル保存）
+  * `relay.wsProtocol`（`v1`）
+  * `defaults.operationMode`（例：`relay`）
+  * `ui.hideRelaySettings` / `ui.lockRelaySettings`（本番は true 推奨）
+* **macOS のユーザー配置先**：`~/Library/Application Support/nuriemon/global_settings.json`（**小文字**）
+
+---
+
+## AI の役割
+
+* **codex**：開発実装責任者（実装・検証を担当）
+* **GPT-5 Pro**：レビュー・提案・設計指示・設計/実装の整合性チェック
+
+  1. フロント/バック両面からの多角的レビュー
+  2. 根本原因の追求と再発防止の提案
+  3. 常に仮説検証し、より良い選択肢の提示
+
+---
+
+### 変更の要点（本ドキュメントへの反映）
+
+* **eventId はライセンスと無関係**／**初回セットアップで購入者が入力**／**グローバルで維持**。
+* **global\_settings.json の優先順位**・**パス表記を小文字 `nuriemon` に統一**。
+* **Relay の現行実装**に合わせ、`/session` トークン発行案は**将来オプション**として分離。
+* **PcDO 言及**は将来案へと位置づけ、**現行は EventDO 一元**に統一。
+* **CORS と開発手順**（dist ウォッチ）を明記。
+* **自動削除の停止**／**手動削除は常に可**を明文化。
+* **Per-image control** と **pc-offline/online 通知**を仕様化。
+* 文言・図表・コードブロックの体裁を全体で整えました。
+
+---

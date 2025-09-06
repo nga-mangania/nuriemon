@@ -1,0 +1,12 @@
+{
+  "version": "1",
+  "relay": {
+    "baseUrl": "https://stg.ctrl.nuriemon.jp",
+    "eventId": "studio-2025-09",
+    "pcId": null,
+    "wsProtocol": "v1"
+  },
+  "defaults": { "operationMode": "relay" },
+  "ui": { "hideRelaySettings": true, "lockRelaySettings": true }
+}
+

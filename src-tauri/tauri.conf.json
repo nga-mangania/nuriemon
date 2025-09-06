@@ -4,8 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.nuriemon.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev:dist",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -27,7 +26,9 @@
     "targets": "all",
     "resources": {
       "resources/ja.lproj": "ja.lproj",
-      "resources/global_settings.json.example": "global_settings.json.example"
+      "resources/global_settings.json.example": "global_settings.json.example",
+      "resources/global_settings.json": "global_settings.json",
+      "resources/python-sidecar": "python-sidecar"
     },
     "icon": [
       "icons/32x32.png",
@@ -37,9 +38,5 @@
       "icons/icon.ico"
     ]
   },
-  "plugins": {
-    "updater": {
-      "active": false
-    }
-  }
+  "plugins": {}
 }

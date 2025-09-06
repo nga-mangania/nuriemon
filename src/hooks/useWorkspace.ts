@@ -12,11 +12,11 @@ export function useWorkspace() {
 
   // 初回マウント時に一度だけ初期化
   useEffect(() => {
-    if (!initializeRef.current) {
+    if (!initializeRef.current && status === 'initializing') {
       initializeRef.current = true;
       initialize();
     }
-  }, [initialize]);
+  }, [initialize, status]);
 
   return {
     // 状態

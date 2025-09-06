@@ -13,7 +13,11 @@ import { TauriEventListener } from "./events/tauriEventListener";
 import { rehydrateStore, saveStateToFile, useWorkspaceStore } from "./stores/workspaceStore";
 import { emit } from '@tauri-apps/api/event';
 import styles from "./App.module.scss";
+import { InitialSetup } from "./components/InitialSetup";
 import { createPcWsClient } from "./services/pcWsClient";
+import { checkRelayHealth } from "./services/connectivityProbe";
+import { resolveBaseUrl } from "./services/relayClient";
+import { checkForUpdatesOnStartup } from "./services/updater";
 
 console.log('[App.tsx] Module loaded');
 
@@ -33,6 +37,7 @@ function App() {
   console.log('[App] Component rendering');
   const [activeTab, setActiveTab] = useState<'settings' | 'upload' | 'gallery' | 'animation'>('upload');
   const { isLoading, needsWorkspace, isReady, currentWorkspace } = useWorkspace();
+  const [showSetup, setShowSetup] = useState(false);
   const relayBridgeRef = useRef<ReturnType<typeof createPcWsClient> | null>(null);
   
   console.log('[App] State:', { isLoading, needsWorkspace, isReady, currentWorkspace });
@@ -64,6 +69,18 @@ function App() {
           const eventListener = TauriEventListener.getInstance();
           await eventListener.setupListeners();
           console.log('[App] Tauriイベントリスナーをセットアップしました');
+
+          // 初回セットアップ（eventId 未設定なら表示）
+          try {
+            const { GlobalSettingsService } = await import('./services/globalSettings');
+            const eff = await GlobalSettingsService.loadEffective();
+            const eid = eff?.relay?.eventId?.trim();
+            const locked = !!eff?.ui?.lockRelaySettings;
+            setShowSetup(!locked && (!eid || eid.length === 0));
+          } catch {}
+
+          // 起動時にアップデート確認（静かに）
+          try { await checkForUpdatesOnStartup(); } catch {}
         } catch (error) {
           console.error('初期化エラー:', error);
         }
@@ -139,7 +156,14 @@ function App() {
         const eff = GlobalSettingsService.getEffective();
         const eid = eff?.relay?.eventId || null;
         const pcid = eff?.relay?.pcId || null;
-        const relayActive = mode === 'relay' || mode === 'auto';
+        let relayActive = mode === 'relay';
+        if (mode === 'auto') {
+          try {
+            const base = await resolveBaseUrl();
+            const health = await checkRelayHealth(base);
+            relayActive = !!health.ok;
+          } catch { relayActive = false; }
+        }
         if (relayActive && eid && pcid) {
           if (relayBridgeRef.current) { relayBridgeRef.current.stop(); relayBridgeRef.current = null; }
           const client = createPcWsClient({ eventId: eid, pcid });
@@ -186,6 +210,7 @@ function App() {
   if (isReady) {
     return (
       <div className={styles.appLayout}>
+        {showSetup && <InitialSetup onDone={() => setShowSetup(false)} />}
         <Sidebar
           activeTab={activeTab}
           onTabChange={setActiveTab}

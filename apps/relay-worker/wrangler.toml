@@ -22,7 +22,7 @@ new_sqlite_classes = ["EventDO"]
 name = "nuriemon-relay-stg"
 
 [env.staging.vars]
-ALLOWED_ORIGINS = "https://stg.ctrl.nuriemon.jp,tauri://localhost,http://localhost:1420"
+ALLOWED_ORIGINS = "https://stg.ctrl.nuriemon.jp,tauri://localhost,http://localhost:1420,http://127.0.0.1:1430"
 
 [env.staging.durable_objects]
 bindings = [
