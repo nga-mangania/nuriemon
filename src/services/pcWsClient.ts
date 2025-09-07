@@ -11,10 +11,6 @@ function b64url(bytes: Uint8Array): string {
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-async function sha256hex(bytes: Uint8Array): Promise<string> {
-  const d = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(d)).map(x => x.toString(16).padStart(2, '0')).join('');
-}
 
 async function hmacBase64Url(secret: string, message: string): Promise<string> {
   const enc = new TextEncoder();

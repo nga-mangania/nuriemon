@@ -10,7 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useWorkspace } from "./hooks/useWorkspace";
 import { WorkspaceSelector } from "./components/WorkspaceSelector";
 import { TauriEventListener } from "./events/tauriEventListener";
-import { rehydrateStore, saveStateToFile, useWorkspaceStore } from "./stores/workspaceStore";
+import { rehydrateStore, useWorkspaceStore } from "./stores/workspaceStore";
 import { emit } from '@tauri-apps/api/event';
 import styles from "./App.module.scss";
 import { InitialSetup } from "./components/InitialSetup";
@@ -231,11 +231,9 @@ function App() {
 }
 
 // Zustandストアの変更を監視して他のウィンドウに通知
-useWorkspaceStore.subscribe(
-  (state) => state.images,
-  (images) => {
+useWorkspaceStore.subscribe((state, prev) => {
+  if (state.images !== prev.images) {
     console.log('[App] Images changed in store, emitting store-updated event');
-    // 画像リストが変更されたら他のウィンドウに通知
     try {
       const p = emit('store-updated');
       if (p && typeof (p as any).catch === 'function') {
@@ -243,6 +241,6 @@ useWorkspaceStore.subscribe(
       }
     } catch (_) {}
   }
-);
+});
 
 export default App;

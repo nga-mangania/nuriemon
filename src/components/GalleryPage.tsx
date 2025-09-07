@@ -80,6 +80,8 @@ export function GalleryPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const { deletionTime } = useWorkspaceStore();
   const [tick, setTick] = useState(0);
+  // mark as read to satisfy TS
+  void tick;
 
   useEffect(() => {
     const t = setInterval(() => setTick(v => v + 1), 1000);

@@ -3,7 +3,6 @@
 import { create } from 'zustand';
 import { load } from '@tauri-apps/plugin-store';
 import { ImageMetadata } from '../services/imageStorage';
-import { emit } from '@tauri-apps/api/event';
 
 // ストアのインスタンスは一度だけ生成
 let storeInstance: any = null;
@@ -169,12 +168,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 export async function loadStateFromFile() {
   try {
     const store = await getStore();
-    const stateFromFile = await store.get<{
+    const stateFromFile = (await store.get('workspace')) as {
       currentWorkspace: string | null;
       images: ImageMetadata[];
       groundPosition: number;
       deletionTime: string;
-    }>('workspace');
+    } | null;
     
     if (stateFromFile) {
       useWorkspaceStore.setState(stateFromFile);

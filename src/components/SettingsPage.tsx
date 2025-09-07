@@ -36,7 +36,7 @@ export function SettingsPage() {
   const [isAnimationWindowOpen, setIsAnimationWindowOpen] = useState(false);
   const [isChangingWorkspace, setIsChangingWorkspace] = useState(false);
   const [operationMode, setOperationMode] = useState<'auto' | 'relay' | 'local'>('auto');
-  const [relayBaseUrl, setRelayBaseUrl] = useState<string>('https://ctrl.nuriemon.jp');
+  // relayBaseUrl は UIでは直接使用しないため保持しない（effective に委譲）
   const [relayEventId, setRelayEventId] = useState<string>('');
   const [pcId, setPcId] = useState<string>('');
   const [eventSetupSecretInput, setEventSetupSecretInput] = useState<string>('');
@@ -88,8 +88,7 @@ export function SettingsPage() {
       const stg = await GlobalSettingsService.get('relay_base_url_stg');
       if (stg) setRelayBaseUrlStg(stg);
       // 互換: relay_base_url があれば現在のenvの値として扱う
-      const legacy = await GlobalSettingsService.get('relay_base_url');
-      if (legacy) setRelayBaseUrl(legacy);
+      // legacy relay_base_url は effective 解決に委譲（ここでは読み込まない）
       await GlobalSettingsService.loadEffective();
       const eff = GlobalSettingsService.getEffective();
       setHideRelaySettings(!!eff?.ui?.hideRelaySettings);
@@ -561,8 +560,7 @@ export function SettingsPage() {
                 try {
                   await GlobalSettingsService.save('relay_base_url_prod', v);
                   if (relayEnv === 'prod') await GlobalSettingsService.save('relay_base_url', v);
-                  setRelayBaseUrl(v);
-                  emit('app-settings-changed', { key: 'relay_base_url_prod', value: v });
+                emit('app-settings-changed', { key: 'relay_base_url_prod', value: v });
                 } catch {}
               }}
               placeholder="https://ctrl.nuriemon.jp"
@@ -581,7 +579,6 @@ export function SettingsPage() {
                 try {
                   await GlobalSettingsService.save('relay_base_url_stg', v);
                   if (relayEnv === 'stg') await GlobalSettingsService.save('relay_base_url', v);
-                  if (relayEnv === 'stg') setRelayBaseUrl(v);
                   emit('app-settings-changed', { key: 'relay_base_url_stg', value: v });
                 } catch {}
               }}
@@ -877,6 +874,11 @@ export function SettingsPage() {
 }
 
 // ========= helpers =========
+function maskSecret(s: string): string {
+  const t = (s || '').toString();
+  if (t.length <= 6) return '******';
+  return `${t.slice(0, 3)}…${t.slice(-3)}`;
+}
 function sanitizeId(input: string): string {
   // 小文字英数とハイフンのみ、最大32
   return input.replace(/[^a-z0-9-]/g, '').slice(0, 32);

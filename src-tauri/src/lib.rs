@@ -739,11 +739,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build());
 
-    // Updater plugin: release builds only（devは未設定pubkeyで失敗するため）
-    #[cfg(not(debug_assertions))]
-    {
-        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
-    }
+    // Updater plugin is temporarily disabled until release keys/config are provisioned.
 
     builder
         .setup(move |app| {

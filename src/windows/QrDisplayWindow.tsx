@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useWorkspaceStore, loadStateFromFile } from '../stores/workspaceStore';
 import { AppSettingsService } from '../services/database';
@@ -41,6 +41,8 @@ export const QrDisplayWindow: React.FC = () => {
   const [thumbs, setThumbs] = useState<Map<string, string>>(new Map());
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
+  // mark as used to satisfy TS compile (used only for dev overlay toggles)
+  if (false) { console.log(debugLogs.length, visibleIds.size); }
   const visibleIdsRef = useRef<Set<string>>(new Set());
   const onVisibleChange = (id: string, visible: boolean) => {
     const next = new Set(visibleIdsRef.current);
