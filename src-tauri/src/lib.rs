@@ -85,24 +85,38 @@ fn spawn_python_process() -> Result<PythonProcess, String> {
         }
     }
 
-    // 2) Packaged script under resource_dir/python-sidecar/main.py
-    if let Ok(resource_dir) = tauri::api::path::resource_dir() {
-        let script = resource_dir.join("python-sidecar").join("main.py");
-        if script.exists() && script.is_file() {
-            let mut child = Command::new("python3")
-                .arg(&script)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|e| format!("Failed to start Python process (resource script): {}", e))?;
-            let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
-            let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
-            let reader = BufReader::new(stdout);
-            eprintln!("[sidecar] started python3 with resource script: {}", script.display());
-            return Ok(PythonProcess { child, stdin, stdout: reader });
-        } else {
-            eprintln!("[sidecar] resource script not found: {}", script.display());
+    // 2) Packaged script under Resources/python-sidecar/main.py (derive from current_exe)
+    if let Ok(exe_path) = std::env::current_exe() {
+        let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+        // macOS: <App>.app/Contents/MacOS/nuriemon -> Resources sibling
+        if let Some(macos_resources) = exe_path
+            .parent() // MacOS
+            .and_then(|p| p.parent()) // Contents
+            .map(|p| p.join("Resources"))
+        {
+            candidates.push(macos_resources);
+        }
+        // Fallbacks: relative resources directories
+        if let Some(parent) = exe_path.parent() {
+            candidates.push(parent.join("Resources"));
+            candidates.push(parent.join("resources"));
+        }
+        for base in candidates {
+            let script = base.join("python-sidecar").join("main.py");
+            if script.exists() && script.is_file() {
+                let mut child = Command::new("python3")
+                    .arg(&script)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .map_err(|e| format!("Failed to start Python process (resource script): {}", e))?;
+                let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+                let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+                let reader = BufReader::new(stdout);
+                eprintln!("[sidecar] started python3 with resource script: {}", script.display());
+                return Ok(PythonProcess { child, stdin, stdout: reader });
+            }
         }
     }
 
