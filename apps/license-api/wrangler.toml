@@ -26,4 +26,3 @@ database_id = "8ebc1f43-b946-46af-beda-b5d0a1e8086c"
 ISSUER = "https://stg.license.nuriemon.jp"
 AUDIENCE = "https://stg.ctrl.nuriemon.jp"
 TOKEN_TTL_SECONDS = 1209600 # 14 days
-

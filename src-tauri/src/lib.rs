@@ -59,7 +59,7 @@ static PYTHON_PROCESS: Mutex<Option<PythonProcess>> = Mutex::new(None);
 static DEVTOOLS_OPEN: Lazy<Mutex<HashMap<String, bool>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn spawn_python_process() -> Result<PythonProcess, String> {
-    // Sidecar (bundled binary) > dev script の順に起動を試行
+    // 1) Bundled native sidecar (preferred if provided)
     if let Ok(sidecar) = std::env::var("NURIEMON_SIDECAR") {
         let p = std::path::PathBuf::from(&sidecar);
         if p.exists() && p.is_file() {
@@ -73,11 +73,11 @@ fn spawn_python_process() -> Result<PythonProcess, String> {
                     let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
                     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
                     let reader = BufReader::new(stdout);
+                    eprintln!("[sidecar] started native sidecar: {}", p.display());
                     return Ok(PythonProcess { child, stdin, stdout: reader });
                 }
                 Err(e) => {
-                    eprintln!("[sidecar] failed to start, falling back to python3: {}", e);
-                    // フォールバックに進む
+                    eprintln!("[sidecar] failed to start native sidecar, will try python3: {}", e);
                 }
             }
         } else {
@@ -85,7 +85,28 @@ fn spawn_python_process() -> Result<PythonProcess, String> {
         }
     }
 
-    // Dev fallback: run python3 with script
+    // 2) Packaged script under resource_dir/python-sidecar/main.py
+    if let Ok(resource_dir) = tauri::api::path::resource_dir() {
+        let script = resource_dir.join("python-sidecar").join("main.py");
+        if script.exists() && script.is_file() {
+            let mut child = Command::new("python3")
+                .arg(&script)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("Failed to start Python process (resource script): {}", e))?;
+            let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+            let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+            let reader = BufReader::new(stdout);
+            eprintln!("[sidecar] started python3 with resource script: {}", script.display());
+            return Ok(PythonProcess { child, stdin, stdout: reader });
+        } else {
+            eprintln!("[sidecar] resource script not found: {}", script.display());
+        }
+    }
+
+    // 3) Dev fallback: run python3 with workspace script
     let python_script = std::env::current_dir()
         .map_err(|e| e.to_string())?
         .join("../python-sidecar/main.py");
@@ -96,12 +117,13 @@ fn spawn_python_process() -> Result<PythonProcess, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to start Python process: {}", e))?;
+        .map_err(|e| format!("Failed to start Python process (dev script): {}", e))?;
 
     let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
     let reader = BufReader::new(stdout);
 
+    eprintln!("[sidecar] started python3 with dev script: {}", python_script.display());
     Ok(PythonProcess { child, stdin, stdout: reader })
 }
 
