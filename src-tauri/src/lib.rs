@@ -103,18 +103,31 @@ fn spawn_python_process() -> Result<PythonProcess, String> {
         }
         for base in candidates {
             let script = base.join("python-sidecar").join("main.py");
+            let reqs = base.join("python-sidecar").join("requirements.txt");
             if script.exists() && script.is_file() {
-                let mut child = Command::new("python3")
+                // Try to use per-user virtualenv to ensure deps exist
+                let venv_python = ensure_user_venv(&reqs).ok();
+                let mut cmd = if let Some(ref py) = venv_python { Command::new(py) } else { Command::new("python3") };
+                let mut child = cmd
                     .arg(&script)
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()
                     .map_err(|e| format!("Failed to start Python process (resource script): {}", e))?;
+                // stderr forwarder
+                if let Some(mut es) = child.stderr.take() {
+                    std::thread::spawn(move || {
+                        let reader = BufReader::new(&mut es);
+                        for line in reader.lines() {
+                            if let Ok(l) = line { eprintln!("[sidecar:stderr] {}", l); } else { break; }
+                        }
+                    });
+                }
                 let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
                 let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
                 let reader = BufReader::new(stdout);
-                eprintln!("[sidecar] started python3 with resource script: {}", script.display());
+                eprintln!("[sidecar] started {} with resource script: {}", venv_python.as_deref().unwrap_or("python3"), script.display());
                 return Ok(PythonProcess { child, stdin, stdout: reader });
             }
         }
@@ -139,6 +152,37 @@ fn spawn_python_process() -> Result<PythonProcess, String> {
 
     eprintln!("[sidecar] started python3 with dev script: {}", python_script.display());
     Ok(PythonProcess { child, stdin, stdout: reader })
+}
+
+fn ensure_user_venv(requirements: &std::path::Path) -> Result<String, String> {
+    // Determine user-level data dir for venv
+    let home = std::env::var("HOME").map_err(|e| format!("HOME not set: {}", e))?;
+    #[cfg(target_os = "macos")]
+    let base = std::path::Path::new(&home).join("Library").join("Application Support").join("nuriemon");
+    #[cfg(not(target_os = "macos"))]
+    let base = std::path::Path::new(&home).join(".config").join("nuriemon");
+    let venv_dir = base.join("pyvenv");
+    let py_path = if cfg!(target_os = "windows") {
+        venv_dir.join("Scripts").join("python.exe")
+    } else {
+        venv_dir.join("bin").join("python3")
+    };
+    // If python binary exists, assume ready
+    if py_path.exists() {
+        return Ok(py_path.to_string_lossy().to_string());
+    }
+    // Create base dir
+    if let Some(parent) = venv_dir.parent() { let _ = fs::create_dir_all(parent); }
+    // Create venv
+    let status = Command::new("python3").args(["-m", "venv", venv_dir.to_string_lossy().as_ref()]).status()
+        .map_err(|e| format!("venv create failed: {}", e))?;
+    if !status.success() { return Err(format!("venv create exit={}", status.code().unwrap_or(-1))); }
+    // Upgrade pip and install requirements (best effort)
+    let _ = Command::new(&py_path).args(["-m", "pip", "install", "--upgrade", "pip"]).status();
+    if requirements.exists() {
+        let _ = Command::new(&py_path).args(["-m", "pip", "install", "-r", requirements.to_string_lossy().as_ref()]).status();
+    }
+    if py_path.exists() { Ok(py_path.to_string_lossy().to_string()) } else { Err("venv python not found".into()) }
 }
 
 fn ensure_python_process() -> Result<(), String> {
