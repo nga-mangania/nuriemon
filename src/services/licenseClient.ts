@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { GlobalSettingsService } from './globalSettings';
+import { LazyStore } from '@tauri-apps/plugin-store';
 
 type ActivateInput = { licenseCode: string };
 
@@ -29,6 +30,7 @@ export async function activateDevice(input: ActivateInput & { pcId: string; plat
     const token: string | undefined = data?.deviceToken;
     if (!token) return { ok: false, error: 'E_NO_TOKEN' };
     await saveDeviceToken(token);
+    await markHasDeviceToken(true);
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: e?.message || String(e) };
@@ -59,9 +61,24 @@ export async function loadDeviceToken(): Promise<string | null> {
 }
 export async function deleteDeviceToken(): Promise<void> {
   try { await invoke('delete_license_token'); } catch {}
+  try { await markHasDeviceToken(false); } catch {}
 }
 
 export function parseJwtExp(token: string): number | null {
   try { const p = JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); return typeof p?.exp === 'number' ? p.exp : null; } catch { return null; }
 }
 
+// ===== Lightweight flag to avoid touching Keychain on startup =====
+const store = new LazyStore('app.bin');
+
+export async function markHasDeviceToken(has: boolean): Promise<void> {
+  await store.set('license.hasDeviceToken', has);
+  await store.save();
+}
+
+export async function hasDeviceTokenFlag(): Promise<boolean> {
+  try {
+    const v = await store.get<boolean>('license.hasDeviceToken');
+    return v === true;
+  } catch { return false; }
+}

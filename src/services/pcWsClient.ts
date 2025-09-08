@@ -1,6 +1,6 @@
 import { emit } from '@tauri-apps/api/event';
 import { currentRelayEnvAsSecretEnv, getEventSetupSecret } from './secureSecrets';
-import { loadDeviceToken } from './licenseClient';
+import { loadDeviceToken, hasDeviceTokenFlag, markHasDeviceToken } from './licenseClient';
 import { resolveBaseUrl } from './relayClient';
 import { registerPc, retryWithBackoff } from './relayClient';
 import { loadImage } from './imageStorage';
@@ -35,11 +35,18 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
   async function start() {
     stopping = false;
     emit('pc-bridge-status', { state: 'starting' });
-    // Require device token (JWT) in production to avoid HMAC fallback and keychain prompts.
-    const bearerForStart = await loadDeviceToken();
-    if (!bearerForStart) {
+    // Require device token (JWT) but avoid touching Keychain unless flag indicates presence
+    const hasFlag = await hasDeviceTokenFlag();
+    if (!hasFlag) {
       emit('pc-bridge-status', { state: 'token-missing' });
       return; // do not start until license activation is completed
+    }
+    const bearerForStart = await loadDeviceToken();
+    if (!bearerForStart) {
+      // flag was stale; clear and skip
+      try { await markHasDeviceToken(false); } catch {}
+      emit('pc-bridge-status', { state: 'token-missing' });
+      return;
     }
     const base = await resolveBaseUrl();
     // 事前にPCを登録（リージョンピン/整合のため）

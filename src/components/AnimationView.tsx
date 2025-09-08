@@ -671,9 +671,12 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       {/* 動画背景の場合 */}
       {backgroundUrl && backgroundType === 'video' && (
         <video
+          src={backgroundUrl}
           autoPlay
           loop
           muted
+          playsInline
+          preload="auto"
           style={{
             position: 'absolute',
             top: 0,
@@ -683,9 +686,11 @@ const AnimationView: React.FC<AnimationViewProps> = ({
             objectFit: 'cover',
             zIndex: 0
           }}
-        >
-          <source src={backgroundUrl} type={`video/${backgroundUrl.includes('.mov') ? 'quicktime' : 'mp4'}`} />
-        </video>
+          onError={(e) => {
+            console.error('[AnimationView] Background video load error', e);
+            console.error('[AnimationView] URL:', backgroundUrl);
+          }}
+        />
       )}
       <div className={styles.imagesWrapper}>
         {animatedImages.map(image => (

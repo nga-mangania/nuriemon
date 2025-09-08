@@ -31,6 +31,7 @@ python-sidecar/__pycache__/
 python-sidecar/*.pyc
 python-sidecar/dist/
 python-sidecar/build/
+python-sidecar/python-sidecar
 *.egg-info/
 
 # Local data
