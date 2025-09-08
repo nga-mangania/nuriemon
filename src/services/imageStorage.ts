@@ -2,6 +2,7 @@
 import { join } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
 import { ensureDirectory, writeFileAbsolute, readFileAbsolute, fileExistsAbsolute } from './customFileOperations';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { DatabaseService, migrateFromJSON, AppSettingsService } from './database';
 
 // 既存の型定義（後方互換性のため維持）
@@ -341,6 +342,36 @@ export async function getAllMetadata(): Promise<ImageMetadata[]> {
     console.error('メタデータ取得エラー:', error);
     return [];
   }
+}
+
+/**
+ * 任意メタデータに対する実ファイルの絶対パスを解決
+ */
+export async function getFilePathForMetadata(metadata: ImageMetadata | any): Promise<string> {
+  const dbMetadataList = await DatabaseService.getAllImages();
+  const dbMetadata = dbMetadataList.find((m: any) => m.id === (metadata as any).id);
+  let storageLocation = dbMetadata?.storage_location || await AppSettingsService.getSaveDirectory();
+  const imageType = (dbMetadata as any)?.image_type || (metadata as any)?.image_type || metadata.type;
+  const saved = (metadata as any).savedFileName || (metadata as any).saved_file_name;
+  if (!storageLocation || !saved) throw new Error('missing storageLocation or savedFileName');
+  let subDir: string;
+  if (imageType === 'bgm' || imageType === 'soundEffect') {
+    subDir = 'audio';
+    return await join(storageLocation, subDir, saved);
+  } else if (imageType === 'background') {
+    subDir = 'backgrounds';
+    return await join(storageLocation, 'images', subDir, saved);
+  } else {
+    subDir = metadata.type === 'original' ? ORIGINALS_DIR : PROCESSED_DIR;
+    return await join(storageLocation, IMAGES_DIR, subDir, saved);
+  }
+}
+
+/**
+ * ファイル絶対パスをWebViewで参照可能なURLに変換
+ */
+export function filePathToUrl(absPath: string): string {
+  return convertFileSrc(absPath);
 }
 
 /**

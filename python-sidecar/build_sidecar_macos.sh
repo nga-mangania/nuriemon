@@ -14,8 +14,8 @@ fi
 python3 -m pip install --upgrade pip
 python3 -m pip install pyinstaller rembg pillow opencv-python-headless numpy
 
-# Build
-pyinstaller --clean --onefile -n python-sidecar main.py
+# Build (use module form to avoid PATH issues under pyenv/non-login shells)
+python3 -m PyInstaller --clean --onefile -n python-sidecar main.py
 
 # Place output at repo's python-sidecar root for bundling (Resources/python-sidecar)
 if [[ -f dist/python-sidecar ]]; then
@@ -28,4 +28,3 @@ else
 fi
 
 echo "[sidecar] Done"
-

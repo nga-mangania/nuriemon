@@ -781,4 +781,283 @@ A. **初回セットアップ画面**で入力してもらう設計に変更済�
 * **Per-image control** と **pc-offline/online 通知**を仕様化。
 * 文言・図表・コードブロックの体裁を全体で整えました。
 
+---------------------------------------------
+
+
+# 次の予定 (2025/09/08)
+
+結論：**はい、いまは“手動発行（API 直叩き）”まで実装済み**で、
+\*\*「Webで購入→自動で購入者へライセンスコード配布」\*\*は “これから” です。
+ただし、**license-api（Cloudflare Workers）に Webhook を1本追加**すれば、**今日から自動配布**にできます。
+
+以下、**最短の完成形（Stripe想定）**→そのまま使える**実装手順とサンプルコード**→**運用チェックリスト**の順でまとめます。
+
 ---
+
+## 速攻で完成させる構成（MVP）
+
+1. **Webサイトの「購入」ボタン** → Stripe Checkout へ遷移
+2. **Stripe Webhook（checkout.session.completed）** → **license-api** の `POST /webhooks/stripe` を呼ぶ
+3. Worker が **ライセンスを自動発行**（D1へ保存）→ **購入者へメール送信**（コードと手順）
+4. 返金・キャンセル Webhook を**受け取ったら自動失効**（任意）
+
+> 決済代行は Stripe が最も一般的。Paddle/Gumroad などでも同じ考え方（Webhook → 自動発行）です。
+
+---
+
+## 具体的な実装手順（Cloudflare Workers / license-api に追加）
+
+### 0. 前提：価格とSKUの対応を決める
+
+* 例）`price_XXXX` → `sku="NRM-STD"`, `seats=2`
+  ※ Checkout で **quantity** を使う場合、`seats = base_seats * quantity` にするなど、ルールを決めます。
+
+### 1. Stripe ダッシュボード設定
+
+* Product/Price を作成（テストモードでOK）
+* Webhook 追加
+
+  * **エンドポイントURL**：`https://license.nuriemon.jp/webhooks/stripe`（stg なら `https://stg.license...`）
+  * イベント：`checkout.session.completed`（＋返金系は後述）
+  * 生成された **Signing secret** を控える（`whsec_***`）
+
+### 2. license-api の Secrets を登録
+
+```bash
+# staging / production それぞれで登録
+wrangler secret put STRIPE_WEBHOOK_SECRET --env=staging
+wrangler secret put STRIPE_WEBHOOK_SECRET --env=""       # prodの top-level
+wrangler secret put STRIPE_API_KEY        --env=staging  # line_items取得に使う（任意）
+wrangler secret put STRIPE_API_KEY        --env=""
+wrangler secret put MAIL_FROM             --env=staging   # 送信元メール (例 no-reply@nuriemon.jp)
+wrangler secret put MAIL_FROM             --env=""
+```
+
+### 3. D1 に“重複防止”と“注文ログ”用テーブルを足す（任意だが推奨）
+
+```sql
+-- migrations に追加
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id TEXT PRIMARY KEY,           -- Stripe event id (evt_...)
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY,           -- checkout.session id (cs_...)
+  email TEXT,
+  sku TEXT,
+  seats INTEGER,
+  license_code TEXT,
+  status TEXT,                   -- issued/refunded/canceled/...
+  created_at INTEGER NOT NULL
+);
+```
+
+### 4. Worker に `POST /webhooks/stripe` を追加（サンプル）
+
+> ポイント：**署名検証**→**重複防止**→**line\_itemsからSKU/数量取得**→**ライセンス発行**→**メール送信**。
+
+```ts
+// apps/license-api/src/webhooks/stripe.ts (例)
+export async function handleStripeWebhook(req: Request, env: Env, ctx: ExecutionContext) {
+  const sig = req.headers.get('stripe-signature') || "";
+  const body = await req.text();
+
+  // 1) Stripe署名検証（v1署名）
+  if (!await verifyStripeSignature(body, sig, env.STRIPE_WEBHOOK_SECRET)) {
+    return new Response(JSON.stringify({ ok: false, error: { code: "E_BAD_SIG" } }), { status: 400 });
+  }
+
+  const event = JSON.parse(body);
+  const eventId = event.id as string;
+
+  // 2) 重複防止（同一イベント2回処理しない）
+  const existed = await env.DB.prepare(
+    "SELECT id FROM webhook_events WHERE id=?"
+  ).bind(eventId).first<string>("id");
+  if (existed) return json({ ok: true, dedup: true });
+
+  // 3) checkout.session.completed のみ処理
+  if (event.type !== "checkout.session.completed") {
+    await env.DB.prepare("INSERT INTO webhook_events(id, created_at) VALUES (?, strftime('%s','now'))")
+      .bind(eventId).run();
+    return json({ ok: true, skipped: event.type });
+  }
+
+  const session = event.data.object;
+  // 3a) 顧客メール
+  const email: string | null = session.customer_details?.email || session.customer_email || null;
+
+  // 3b) line_items を取得（APIキーがある場合）
+  let items: Array<{ price: string; quantity: number; }> = [];
+  if (env.STRIPE_API_KEY) {
+    const r = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session.id}?expand[]=line_items`, {
+      headers: { Authorization: `Bearer ${env.STRIPE_API_KEY}` }
+    });
+    const js = await r.json();
+    items = (js.line_items?.data || []).map((li: any) => ({
+      price: li.price?.id,
+      quantity: li.quantity || 1
+    }));
+  } else {
+    // 代替案：Checkout側で metadata に sku/seats を埋めておき、ここで取り出す
+    // items = [{ price: session.metadata.price_id, quantity: Number(session.metadata.qty || 1) }];
+  }
+
+  // 3c) price_id → SKU/SEATS のマッピング（例）
+  const map: Record<string, { sku: string; seats: number }> = {
+    "price_XXXX_STANDARD": { sku: "NRM-STD", seats: 2 },
+    "price_YYYY_PRO":      { sku: "NRM-PRO", seats: 5 }
+  };
+
+  // 4) ライセンス発行（itemsを走査して合計seatsを計算、1決済1コードにする例）
+  let totalSeats = 0;
+  let sku = "NRM-STD";
+  for (const it of items) {
+    const def = map[it.price];
+    if (!def) continue;
+    sku = def.sku;                         // 単一SKU前提なら最後の定義を採用
+    totalSeats += def.seats * (it.quantity || 1);
+  }
+  if (totalSeats === 0) totalSeats = 2;    // フォールバック
+
+  const code = genLicenseCode("NRM-STD-"); // 例：NRM-STD-<16桁>
+  // 既存の発行ロジックに合わせて D1 へ insert
+  await env.DB.prepare(
+    "INSERT INTO licenses(code, sku, seats, status, issued_at) VALUES (?, ?, ?, 'active', strftime('%s','now'))"
+  ).bind(code, sku, totalSeats).run();
+
+  // orders へ記録
+  await env.DB.prepare(
+    "INSERT INTO orders(id, email, sku, seats, license_code, status, created_at) VALUES (?, ?, ?, ?, ?, 'issued', strftime('%s','now'))"
+  ).bind(session.id, email, sku, totalSeats, code).run();
+
+  // webhook_events へ記録（重複防止）
+  await env.DB.prepare("INSERT INTO webhook_events(id, created_at) VALUES (?, strftime('%s','now'))")
+    .bind(eventId).run();
+
+  // 5) 送信（MailChannels 例：追加のAPIキー不要でWorkersから送れる）
+  if (email) {
+    await sendMailViaMailchannels(env.MAIL_FROM, email, "Nuriemon ライセンスのご案内",
+`ご購入ありがとうございます。
+以下があなたのライセンスコードです。
+
+ライセンスコード: ${code}
+
+セットアップ手順:
+1) アプリを起動 → Settings → License
+2) ライセンスコードを入力して「有効化」
+3) Event ID を入力し接続
+
+不明点はサポートへご連絡ください。`);
+  }
+
+  return json({ ok: true, issued: { code, sku, seats: totalSeats } });
+
+  // --- helpers ---
+  function json(obj: any, init: ResponseInit = {}) {
+    return new Response(JSON.stringify(obj), {
+      status: 200, headers: { "content-type": "application/json" }, ...init
+    });
+  }
+}
+
+function genLicenseCode(prefix = "NRM-STD-") {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  const s = [...arr].map(n => alphabet[n % alphabet.length]).join("");
+  // 4-4-4-4 など区切りたい場合は適宜整形
+  return prefix + s.slice(0,4)+"-"+s.slice(4,8)+"-"+s.slice(8,12)+"-"+s.slice(12,16);
+}
+
+async function verifyStripeSignature(payload: string, sigHeader: string, secret: string) {
+  try {
+    // header: t=timestamp, v1=signature
+    const parts = Object.fromEntries(sigHeader.split(",").map(kv => {
+      const [k, v] = kv.split("=");
+      return [k.trim(), v];
+    }));
+    const signedPayload = `${parts["t"]}.${payload}`;
+    const key = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]
+    );
+    const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signedPayload));
+    const expected = [...new Uint8Array(mac)].map(b => b.toString(16).padStart(2, "0")).join("");
+    // 比較（一定時間比較に簡略化：実運用はタイムリークを避けた比較関数に差し替え可）
+    return (parts["v1"] || "").toLowerCase() === expected.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+async function sendMailViaMailchannels(from: string, to: string, subject: string, text: string) {
+  const payload = {
+    personalizations: [{ to: [{ email: to }] }],
+    from: { email: from, name: "Nuriemon" },
+    subject, content: [{ type: "text/plain", value: text }]
+  };
+  await fetch("https://api.mailchannels.net/tx/v1/send", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+```
+
+> すでに `POST /license/issue` があるなら、**同一Worker内の関数呼び出し**に寄せるか、**内部関数を共通化**してください。
+> **idempotency** は `webhook_events` テーブルで担保。**二重送信しても二重発行しない**ようにしています。
+
+### 5. 返金・キャンセルで自動失効（任意）
+
+* Webhook に `charge.refunded`, `payment_intent.canceled`, `customer.subscription.deleted` などを追加
+* `orders.status` を更新し、該当ライセンスを `status='revoked'` に更新（必要なら `revoked_jti` へも反映）
+
+---
+
+## テストの流れ（Stripe テストモード）
+
+1. Checkout（テストカード 4242…）で購入
+2. Stripe が Webhook を license-api に送る
+3. D1 の `orders` と `licenses` に insert され、購入者メールに **ライセンスコード**が飛ぶ
+4. アプリの **\[Settings] → \[License]** にコードを入力 → **有効化 → 接続**
+
+---
+
+## よくある質問
+
+* **Q. 成約後、画面にもコードを出したい**
+
+  * `success_url` に `?session_id={CHECKOUT_SESSION_ID}` を付けて遷移 →
+    フロントから **GET `/purchase/license?session_id=...`** を叩いて、
+    サーバ側で Stripe API から session を再確認（paid か＆未発行か）→ ライセンスを返す。
+  * ただし **画面表示だけだと控えを失いがち**なので **メール送付は必須**を推奨。
+
+* **Q. どのディレクトリで作業する？**
+
+  * **license-api プロジェクト内**（あなたの `apps/license-api`）に上記エンドポイントを追加、Secrets を設定して **`wrangler deploy`**。
+  * Webhook のURLは **stg/prod それぞれのカスタムドメイン**を指定。
+
+---
+
+## 運用チェックリスト（本番移行前）
+
+* [ ] Stripe の **Webhook Signing Secret** を stg/prod で Secrets 登録
+* [ ] price\_id ↔ sku/seats の **マッピング**をコードに反映
+* [ ] `webhook_events` / `orders` テーブルの **migration** を適用
+* [ ] **二重発行なし**（同一イベント複投でも1コード）を確認
+* [ ] **メール送信**が届く（MailChannels or 既存の送信サービス）
+* [ ] 返金時の **自動失効**が期待通り（任意）
+
+---
+
+## 他サービス（Paddle/Gumroad）でも？
+
+* 仕組みは同じ：**Webhook** を受けて **ライセンス発行** → **メール**
+* 署名検証やイベント名が異なるだけ。Workers 側に検証関数を足すだけで対応可能です。
+
+---
+
+**ここまでやれば**、一般的な SaaS と同様に
+\*\*「Web購入 → 自動でライセンスメール」\*\*が完成します。
+上記の追加コードを入れる形で進めましょう。もし望めば、**実プロジェクトに合わせた差分パッチ**（ファイル単位）を作ってお渡しします。

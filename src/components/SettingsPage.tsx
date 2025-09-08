@@ -91,8 +91,10 @@ export function SettingsPage() {
       // legacy relay_base_url は effective 解決に委譲（ここでは読み込まない）
       await GlobalSettingsService.loadEffective();
       const eff = GlobalSettingsService.getEffective();
-      setHideRelaySettings(!!eff?.ui?.hideRelaySettings);
-      setLockRelaySettings(!!eff?.ui?.lockRelaySettings);
+      const hide = !!eff?.ui?.hideRelaySettings;
+      const lock = !!eff?.ui?.lockRelaySettings;
+      setHideRelaySettings(hide);
+      setLockRelaySettings(lock);
       try { setEffectiveJson(JSON.stringify(eff, null, 2)); } catch {}
       const eid = eff?.relay?.eventId || await GlobalSettingsService.get('relay_event_id');
       if (eid) setRelayEventId(eid);
@@ -113,14 +115,16 @@ export function SettingsPage() {
         setPcId(generated);
         try { await GlobalSettingsService.save('pcid', generated); } catch {}
       }
-      // 秘密鍵は OS キーチェーンから取得
-      try {
-        const envForSecret = await currentRelayEnvAsSecretEnv();
-        const secret = await getEventSetupSecret(envForSecret);
-        if (secret) setStoredSecretPreview(maskSecret(secret));
-        setSecretFallback(isUsingMemoryFallback());
-      } catch (_) {
-        setSecretFallback(isUsingMemoryFallback());
+      // 本番UI（Relay設定を隠してロック）の場合は EVENT_SETUP_SECRET に触れない
+      if (!(hide && lock)) {
+        try {
+          const envForSecret = await currentRelayEnvAsSecretEnv();
+          const secret = await getEventSetupSecret(envForSecret);
+          if (secret) setStoredSecretPreview(maskSecret(secret));
+          setSecretFallback(isUsingMemoryFallback());
+        } catch (_) {
+          setSecretFallback(isUsingMemoryFallback());
+        }
       }
       // License status (device token)
       try {
@@ -139,15 +143,20 @@ export function SettingsPage() {
 
     // レガシー移行（旧: ワークスペースJSONに平文保存）
     try {
-      const legacy = await AppSettingsService.getAppSetting('event_setup_secret');
-      if (legacy && legacy.trim()) {
-        const envForSecret = await currentRelayEnvAsSecretEnv();
-        await setEventSetupSecret(envForSecret, legacy.trim());
-        try { await AppSettingsService.saveAppSetting('event_setup_secret', ''); } catch {}
-        console.log('[SettingsPage] EVENT_SETUP_SECRET migrated to OS keychain');
-        const s = await getEventSetupSecret(envForSecret);
-        if (s) setStoredSecretPreview(maskSecret(s));
-        setSecretFallback(isUsingMemoryFallback());
+      const eff = GlobalSettingsService.getEffective();
+      const hide = !!eff?.ui?.hideRelaySettings;
+      const lock = !!eff?.ui?.lockRelaySettings;
+      if (!(hide && lock)) {
+        const legacy = await AppSettingsService.getAppSetting('event_setup_secret');
+        if (legacy && legacy.trim()) {
+          const envForSecret = await currentRelayEnvAsSecretEnv();
+          await setEventSetupSecret(envForSecret, legacy.trim());
+          try { await AppSettingsService.saveAppSetting('event_setup_secret', ''); } catch {}
+          console.log('[SettingsPage] EVENT_SETUP_SECRET migrated to OS keychain');
+          const s = await getEventSetupSecret(envForSecret);
+          if (s) setStoredSecretPreview(maskSecret(s));
+          setSecretFallback(isUsingMemoryFallback());
+        }
       }
     } catch (e) {
       console.warn('[SettingsPage] legacy secret migration failed/ignored:', e);
@@ -159,10 +168,16 @@ export function SettingsPage() {
       const background = metadata.find(m => (m as any).image_type === 'background');
       if (background) {
         console.log('[SettingsPage] Loading background:', background);
-        const backgroundData = await loadImage(background);
-        console.log('[SettingsPage] Background loaded, data URL length:', backgroundData.length);
-        const bgType = background.originalFileName.match(/\.(mp4|mov)$/i) ? 'video' : 'image' as const;
-        setBackground(backgroundData, bgType);
+        const isVideo = /\.(mp4|mov)$/i.test(background.originalFileName);
+        if (isVideo) {
+          const { getFilePathForMetadata, filePathToUrl } = await import('../services/imageStorage');
+          const abs = await getFilePathForMetadata({ ...background, image_type: 'background' } as any);
+          const url = filePathToUrl(abs);
+          setBackground(url, 'video');
+        } else {
+          const backgroundData = await loadImage(background);
+          setBackground(backgroundData, 'image');
+        }
       } else {
         console.log('[SettingsPage] No background found in metadata');
       }
@@ -217,9 +232,16 @@ export function SettingsPage() {
         const metadata = await getAllMetadata();
         const backgroundMeta = metadata.find(m => (m as any).image_type === 'background');
         if (backgroundMeta) {
-          const backgroundData = await loadImage(backgroundMeta);
-          const bgType = backgroundMeta.originalFileName.match(/\.(mp4|mov)$/i) ? 'video' : 'image' as const;
-          setBackground(backgroundData, bgType);
+          const isVideo = /\.(mp4|mov)$/i.test(backgroundMeta.originalFileName);
+          if (isVideo) {
+            const { getFilePathForMetadata, filePathToUrl } = await import('../services/imageStorage');
+            const abs = await getFilePathForMetadata({ ...backgroundMeta, image_type: 'background' } as any);
+            const url = filePathToUrl(abs);
+            setBackground(url, 'video');
+          } else {
+            const backgroundData = await loadImage(backgroundMeta);
+            setBackground(backgroundData, 'image');
+          }
         } else {
           setBackground(null, 'image');
         }

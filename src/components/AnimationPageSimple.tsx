@@ -32,13 +32,21 @@ const AnimationPageSimple: React.FC = () => {
 
   const loadBackground = useCallback(async () => {
     try {
-      const { getAllMetadata, loadImage } = await import('../services/imageStorage');
+      const { getAllMetadata, loadImage, getFilePathForMetadata, filePathToUrl } = await import('../services/imageStorage');
       const metadata = await getAllMetadata();
       const background = metadata.find(m => (m as any).image_type === 'background');
       if (background) {
-        const backgroundData = await loadImage(background);
-        const bgType = background.originalFileName.match(/\.(mp4|mov)$/i) ? 'video' : 'image' as const;
-        setBackground(backgroundData, bgType);
+        const isVideo = /\.(mp4|mov)$/i.test(background.originalFileName);
+        if (isVideo) {
+          // Use file URL for video to avoid base64 overhead and stutter
+          const abs = await getFilePathForMetadata({ ...background, image_type: 'background' } as any);
+          const url = filePathToUrl(abs);
+          setBackground(url, 'video');
+        } else {
+          // Images can remain as data URL (or also file URL if desired)
+          const backgroundData = await loadImage(background);
+          setBackground(backgroundData, 'image');
+        }
       } else {
         setBackground(null, 'image');
       }

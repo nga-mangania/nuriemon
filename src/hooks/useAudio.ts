@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getAllMetadata, loadImage } from '../services/imageStorage';
+import { getAllMetadata, getFilePathForMetadata, filePathToUrl } from '../services/imageStorage';
 
 export const useAudio = () => {
   const [bgmUrl, setBgmUrl] = useState<string | null>(null);
@@ -16,15 +16,15 @@ export const useAudio = () => {
       const soundEffectFile = metadata.find(m => (m as any).type === 'soundEffect' || (m as any).image_type === 'soundEffect');
       
       if (bgmFile) {
-        const bgmData = await loadImage(bgmFile);
-        setBgmUrl(bgmData);
+        const p = await getFilePathForMetadata({ ...bgmFile, image_type: 'bgm' });
+        setBgmUrl(filePathToUrl(p));
       } else {
         setBgmUrl(null);
       }
       
       if (soundEffectFile) {
-        const soundData = await loadImage(soundEffectFile);
-        setSoundEffectUrl(soundData);
+        const p = await getFilePathForMetadata({ ...soundEffectFile, image_type: 'soundEffect' });
+        setSoundEffectUrl(filePathToUrl(p));
       } else {
         setSoundEffectUrl(null);
       }
@@ -35,10 +35,27 @@ export const useAudio = () => {
 
   useEffect(() => {
     if (bgmUrl && bgmRef.current) {
-      bgmRef.current.volume = 0.5;
-      bgmRef.current.play().catch(e => {
-        if (e.name === 'NotAllowedError') setAudioPermissionNeeded(true);
-      });
+      const el = bgmRef.current;
+      el.preload = 'auto';
+      el.loop = true;
+      el.volume = 0.5;
+      // canplaythrough まで待つとカクつきが減る
+      const onReady = () => {
+        el.play().catch(e => {
+          if (e.name === 'NotAllowedError') setAudioPermissionNeeded(true);
+        });
+        el.removeEventListener('canplaythrough', onReady);
+      };
+      el.addEventListener('canplaythrough', onReady, { once: true });
+      // 既に読み込み済みなら即再生
+      if (el.readyState >= 3) {
+        el.removeEventListener('canplaythrough', onReady);
+        el.play().catch(e => {
+          if (e.name === 'NotAllowedError') setAudioPermissionNeeded(true);
+        });
+      } else {
+        el.load();
+      }
     }
   }, [bgmUrl]);
 
