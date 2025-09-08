@@ -8,8 +8,8 @@
   },
   "license": {
     "endpoint": "https://license.nuriemon.jp",
-    "activationRequired": false
+    "activationRequired": true
   },
   "defaults": { "operationMode": "relay" },
-  "ui": { "hideRelaySettings": false, "lockRelaySettings": false }
+  "ui": { "hideRelaySettings": true, "lockRelaySettings": true }
 }

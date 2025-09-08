@@ -58,6 +58,16 @@ npm run tauri build -- --target x86_64-apple-darwin
 C) Universal（arm64 + x86_64）
 npm run tauri build -- --target universal-apple-darwin
 
+D) Windows（x64） 向け
+原則 Windows 上でビルド（推奨：GitHub Actions のマトリクスで windows-latest を追加）。
+ローカル Windows で：
+npm run tauri build
+# 生成物（例）: src-tauri\target\release\bundle\nsis\Nuriemon_*_x64-setup.exe
+# または msi フォルダ（設定による）
+
+Mac からのクロスビルドは実用的ではないので、CI で Windows ジョブを足すのが最短です。
+（必要なら、Actions 用の最小 yml も出します）
+
 
 3) 起動できない場合のよくある対処
 - rollupのoptional dependencyエラー: `rm -rf node_modules package-lock.json && npm i`
