@@ -436,7 +436,7 @@ export const QrDisplayWindow: React.FC = () => {
         delay += stepMs;
       }
     });
-  }, [regenTick, processedImages, sessions, operationMode, useRelay, relayBaseUrl, relayEventId, pcId, isServerStarted, uiReady]);
+  }, [regenTick, processedImages, sessions, operationMode, useRelay, relayBaseUrl, relayEventId, pcId, isServerStarted, uiReady, visibleIds]);
 
   // グローバル再生成ボタン
   const regenerateAll = () => {

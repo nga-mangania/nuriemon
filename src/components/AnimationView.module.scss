@@ -21,8 +21,8 @@
   position: absolute;
   left: 0;
   top: 0;
-  width: 15%;
-  height: 15%;
+  width: 25%;
+  height: 25%;
   will-change: transform;
 }
 
@@ -50,7 +50,7 @@
   will-change: transform;
   contain: layout paint;
   pointer-events: none;
-  
+
   img {
     width: 100%;
     height: 100%;
@@ -79,13 +79,13 @@
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
   flex-direction: column;
   z-index: 900;
-  
+
   p {
     line-height: 1;
     font-size: 1.6rem;
     margin: 0;
   }
-  
+
   span {
     font-size: .7rem;
   }
@@ -100,7 +100,7 @@
   background: #8B7355;
   z-index: 10;
   display: none; // デフォルトでは非表示
-  
+
   &::after {
     content: '';
     position: absolute;
@@ -108,8 +108,8 @@
     right: 0;
     top: 2px;
     height: 100vh;
-    background: linear-gradient(to bottom, 
-      rgba(139, 115, 85, 0.1) 0%, 
+    background: linear-gradient(to bottom,
+      rgba(139, 115, 85, 0.1) 0%,
       rgba(139, 115, 85, 0.05) 20px,
       transparent 40px
     );
