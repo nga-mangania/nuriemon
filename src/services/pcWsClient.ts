@@ -11,6 +11,8 @@ function b64url(bytes: Uint8Array): string {
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
+const EMPTY_SHA256_HEX = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
 
 async function hmacBase64Url(secret: string, message: string): Promise<string> {
   const enc = new TextEncoder();
@@ -31,23 +33,41 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
   let connected = false;
   let stopping = false;
   let ackTimer: any = null;
+  let authMode: 'jwt' | 'hmac' = 'jwt';
+  let bearerForStart: string | null = null;
+  let secretForStart: string | null = null;
+  let lastSecretEnv: Awaited<ReturnType<typeof currentRelayEnvAsSecretEnv>> | null = null;
 
   async function start() {
     stopping = false;
     emit('pc-bridge-status', { state: 'starting' });
-    // Require device token (JWT) but avoid touching Keychain unless flag indicates presence
+    authMode = 'jwt';
+    bearerForStart = null;
+    secretForStart = null;
+    lastSecretEnv = null;
+
     const hasFlag = await hasDeviceTokenFlag();
-    if (!hasFlag) {
-      emit('pc-bridge-status', { state: 'token-missing' });
-      return; // do not start until license activation is completed
+    if (hasFlag) {
+      const bearer = await loadDeviceToken();
+      if (bearer) {
+        bearerForStart = bearer;
+      } else {
+        try { await markHasDeviceToken(false); } catch {}
+      }
     }
-    const bearerForStart = await loadDeviceToken();
+
     if (!bearerForStart) {
-      // flag was stale; clear and skip
-      try { await markHasDeviceToken(false); } catch {}
-      emit('pc-bridge-status', { state: 'token-missing' });
-      return;
+      const env = await currentRelayEnvAsSecretEnv();
+      const secret = await getEventSetupSecret(env);
+      if (!secret) {
+        emit('pc-bridge-status', { state: 'token-missing' });
+        return;
+      }
+      authMode = 'hmac';
+      secretForStart = secret;
+      lastSecretEnv = env;
     }
+
     const base = await resolveBaseUrl();
     // 事前にPCを登録（リージョンピン/整合のため）
     try {
@@ -60,9 +80,10 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
     }
     const url = base.replace(/^http/i, 'ws') + `/e/${encodeURIComponent(params.eventId)}/ws`;
     try {
-      const bearer = bearerForStart; // already required above
-      const protos = [`bearer.${bearer}`, 'v1'];
-      ws = new WebSocket(url, protos as any);
+      const protocols = authMode === 'jwt' && bearerForStart
+        ? [`bearer.${bearerForStart}`, 'v1']
+        : ['v1'];
+      ws = new WebSocket(url, protocols as any);
     } catch (e) {
       console.error('[pcWsClient] WS open failed:', e);
       return;
@@ -72,11 +93,31 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
       console.log('[pcWsClient] ws open:', url, 'protocol=', ws?.protocol);
       emit('pc-bridge-status', { state: 'open', url });
       try {
-        const bearer = bearerForStart;
-        const authMsg = { v: 1, type: 'pc-auth', op: 'ws-auth-bearer', token: bearer, pcid: params.pcid };
-        ws!.send(JSON.stringify(authMsg));
-        console.log('[pcWsClient] pc-auth (jwt) sent');
-        emit('pc-bridge-status', { state: 'auth-sent' });
+        if (authMode === 'jwt' && bearerForStart) {
+          const authMsg = { v: 1, type: 'pc-auth', op: 'ws-auth-bearer', token: bearerForStart, pcid: params.pcid };
+          ws!.send(JSON.stringify(authMsg));
+          console.log('[pcWsClient] pc-auth (jwt) sent');
+          emit('pc-bridge-status', { state: 'auth-sent', mode: 'jwt' });
+        } else {
+          const env = lastSecretEnv ?? await currentRelayEnvAsSecretEnv();
+          lastSecretEnv = env;
+          const secret = secretForStart ?? await getEventSetupSecret(env);
+          if (!secret) {
+            emit('pc-bridge-status', { state: 'error', detail: 'missing-event-secret' });
+            return;
+          }
+          secretForStart = secret;
+          const iat = Math.floor(Date.now() / 1000);
+          const nonceBytes = crypto.getRandomValues(new Uint8Array(16));
+          const nonce = b64url(nonceBytes);
+          const path = new URL(url).pathname;
+          const canonical = ['ws-auth', path, EMPTY_SHA256_HEX, String(iat), nonce].join('\n');
+          const sig = await hmacBase64Url(secret, canonical);
+          const authMsg = { v: 1, type: 'pc-auth', op: 'ws-auth', path, iat, nonce, payloadHash: EMPTY_SHA256_HEX, sig, pcid: params.pcid };
+          ws!.send(JSON.stringify(authMsg));
+          console.log('[pcWsClient] pc-auth (hmac) sent');
+          emit('pc-bridge-status', { state: 'auth-sent', mode: 'hmac' });
+        }
         // fallback: send pc-hello once if ack does not arrive quickly
         setTimeout(() => {
           try {
@@ -198,21 +239,23 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
   }
 
   async function resendAuthWithIat(iat: number) {
+    if (authMode !== 'hmac') return;
     try {
       if (!ws || ws.readyState !== ws.OPEN) return;
-      const env = await currentRelayEnvAsSecretEnv();
-      const secret = await getEventSetupSecret(env);
+      const env = lastSecretEnv ?? await currentRelayEnvAsSecretEnv();
+      lastSecretEnv = env;
+      const secret = secretForStart ?? await getEventSetupSecret(env);
       if (!secret) return;
+      secretForStart = secret;
       const nonceBytes = crypto.getRandomValues(new Uint8Array(16));
       const nonce = b64url(nonceBytes);
-      const EMPTY_SHA256_HEX = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
       const path = new URL(ws.url).pathname;
       const canonical = ['ws-auth', path, EMPTY_SHA256_HEX, String(iat), nonce].join('\n');
       const sig = await hmacBase64Url(secret, canonical);
       const authMsg = { v: 1, type: 'pc-auth', op: 'ws-auth', path, iat, nonce, payloadHash: EMPTY_SHA256_HEX, sig, pcid: params.pcid };
       ws.send(JSON.stringify(authMsg));
       console.log('[pcWsClient] pc-auth resent with serverTime:', iat);
-      emit('pc-bridge-status', { state: 'auth-resent', iat });
+      emit('pc-bridge-status', { state: 'auth-resent', iat, mode: 'hmac' });
     } catch (e) {
       console.warn('[pcWsClient] resendAuth failed:', e);
       emit('pc-bridge-status', { state: 'error', detail: String(e) });
