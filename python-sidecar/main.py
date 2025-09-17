@@ -24,6 +24,33 @@ def remove_noise(image):
     denoised = cv2.medianBlur(open_cv_image, 5)
     return Image.fromarray(denoised)
 
+
+def trim_transparent_borders(image, padding: int = 4, alpha_threshold: int = 8) -> Image.Image:
+    """Crop away fully transparent edges to make the subject fill the canvas."""
+    if image.mode != 'RGBA':
+        image = image.convert('RGBA')
+
+    arr = np.array(image)
+    if arr.shape[-1] < 4:
+        return image
+
+    alpha = arr[:, :, 3]
+    mask = alpha > alpha_threshold
+    if not np.any(mask):
+        return image
+
+    ys, xs = np.where(mask)
+    top = max(int(ys.min()) - padding, 0)
+    bottom = min(int(ys.max()) + padding, arr.shape[0] - 1)
+    left = max(int(xs.min()) - padding, 0)
+    right = min(int(xs.max()) + padding, arr.shape[1] - 1)
+
+    # right/lower are exclusive in PIL's crop arguments
+    if top == 0 and left == 0 and bottom == arr.shape[0] - 1 and right == arr.shape[1] - 1:
+        return image
+
+    return image.crop((left, top, right + 1, bottom + 1))
+
 def preprocess_image(image):
     image = convert_background_to_white(image)
     image = enhance_contrast(image, factor=1.0)
@@ -92,7 +119,8 @@ def process_image(base64_image):
             alpha_matting_erode_size=10,
             mask=custom_mask
         )
-        print(json.dumps({"type": "progress", "value": 90}), flush=True)
+        output = trim_transparent_borders(output)
+        print(json.dumps({"type": "progress", "value": 95}), flush=True)
         
         # 結果をBase64に変換
         output_buffer = io.BytesIO()
