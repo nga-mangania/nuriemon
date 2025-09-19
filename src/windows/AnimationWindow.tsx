@@ -3,6 +3,8 @@ import AnimationPageSimple from "../components/AnimationPageSimple";
 import { useWorkspace } from "../hooks/useWorkspace";
 import "../styles/reset.scss";
 import styles from "./AnimationWindow.module.scss";
+import { rehydrateStore } from "../stores/workspaceStore";
+import { TauriEventListener } from "../events/tauriEventListener";
 
 // 初期ローディング画面を非表示にする（App.tsxと同じ）
 function hideInitialLoading() {
@@ -18,6 +20,32 @@ function hideInitialLoading() {
 
 function AnimationWindow() {
   const { isLoading, needsWorkspace, isReady } = useWorkspace();
+
+  useEffect(() => {
+    if (!isReady) {
+      return;
+    }
+
+    let isMounted = true;
+    const initialize = async () => {
+      try {
+        await rehydrateStore();
+        if (!isMounted) return;
+        const eventListener = TauriEventListener.getInstance();
+        await eventListener.setupListeners();
+      } catch (error) {
+        console.error('[AnimationWindow] 初期化エラー:', error);
+      }
+    };
+
+    void initialize();
+
+    return () => {
+      isMounted = false;
+      const eventListener = TauriEventListener.getInstance();
+      eventListener.cleanup();
+    };
+  }, [isReady]);
 
   // 状態に基づいて初期ローディング画面を制御
   useEffect(() => {

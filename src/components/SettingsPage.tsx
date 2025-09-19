@@ -22,18 +22,19 @@ console.log('[SettingsPage] All imports completed');
 
 export function SettingsPage() {
   // Zustandストアから状態を取得
-  const { 
-    currentWorkspace, 
-    groundPosition, 
-    deletionTime, 
+  const {
+    currentWorkspace,
+    groundPosition,
+    deletionTime,
     backgroundUrl,
     backgroundType,
-    setGroundPosition, 
+    imageDisplaySize,
+    setGroundPosition,
     setDeletionTime,
-    setBackground 
+    setBackground,
+    setImageDisplaySize
   } = useWorkspaceStore();
-  
-  const [isAnimationWindowOpen, setIsAnimationWindowOpen] = useState(false);
+
   const [isChangingWorkspace, setIsChangingWorkspace] = useState(false);
   const [operationMode, setOperationMode] = useState<'auto' | 'relay' | 'local'>('auto');
   // relayBaseUrl は UIでは直接使用しないため保持しない（effective に委譲）
@@ -53,15 +54,15 @@ export function SettingsPage() {
   const [licenseCode, setLicenseCode] = useState<string>('');
   const [licenseStatus, setLicenseStatus] = useState<string>('未有効化');
   const [licenseExp, setLicenseExp] = useState<number | null>(null);
-  
+
   // 背景アップロード関連のstate
   const [uploadingBackground, setUploadingBackground] = useState(false);
   const [backgroundProgress, setBackgroundProgress] = useState(0);
-  
+
   const loadSettings = async () => {
     // Zustandストアがすでに設定を管理しているため、背景画像の読み込みのみ行う
-    console.log('[SettingsPage] 現在の設定:', { 
-      groundPosition, 
+    console.log('[SettingsPage] 現在の設定:', {
+      groundPosition,
       deletionTime,
       currentWorkspace
     });
@@ -161,7 +162,7 @@ export function SettingsPage() {
     } catch (e) {
       console.warn('[SettingsPage] legacy secret migration failed/ignored:', e);
     }
-    
+
     // 背景画像の読み込み
     try {
       const metadata = await getAllMetadata();
@@ -260,7 +261,7 @@ export function SettingsPage() {
   const handleGroundPositionChange = async (value: number) => {
     // Zustandストアを更新
     setGroundPosition(value);
-    
+
     // WorkspaceManagerを使用して設定を保存
     try {
       const manager = WorkspaceManager.getInstance();
@@ -274,13 +275,25 @@ export function SettingsPage() {
     const newTime = e.target.value;
     // Zustandストアを更新
     setDeletionTime(newTime);
-    
+
     // WorkspaceManagerのみに保存（責務の一元化）
     try {
       const manager = WorkspaceManager.getInstance();
       await manager.saveWorkspaceSettings({ deletionTime: newTime });
     } catch (error) {
       console.error('[SettingsPage] 削除時間の保存エラー:', error);
+    }
+  };
+
+  const handleImageDisplaySizeChange = async (value: number) => {
+    const normalized = Math.max(8, Math.min(40, Math.round(value)));
+    setImageDisplaySize(normalized);
+
+    try {
+      const manager = WorkspaceManager.getInstance();
+      await manager.saveWorkspaceSettings({ imageDisplaySize: normalized });
+    } catch (error) {
+      console.error('[SettingsPage] 画像表示サイズの保存エラー:', error);
     }
   };
 
@@ -297,7 +310,7 @@ export function SettingsPage() {
       if (selected) {
         setUploadingBackground(true);
         setBackgroundProgress(0);
-        
+
         const fileData = await readFile(selected as string);
         const base64 = btoa(
           new Uint8Array(fileData).reduce(
@@ -305,16 +318,16 @@ export function SettingsPage() {
             ''
           )
         );
-        
+
         const fileName = (selected as string).split(/[/\\]/).pop() || 'unknown';
         const extension = fileName.split('.').pop()?.toLowerCase();
         const isVideo = extension === 'mp4' || extension === 'mov';
-        const mimeType = isVideo 
+        const mimeType = isVideo
           ? (extension === 'mp4' ? 'video/mp4' : 'video/quicktime')
           : (extension === 'png' ? 'image/png' : 'image/jpeg');
-        
+
         const dataUrl = `data:${mimeType};base64,${base64}`;
-        
+
         // 即時アップロードを実行
         await handleBackgroundUploadInternal(dataUrl, fileName);
       }
@@ -332,7 +345,7 @@ export function SettingsPage() {
   const handleBackgroundUploadInternal = async (dataUrl: string, fileName: string) => {
     try {
       setBackgroundProgress(30);
-      
+
       // 既存の背景を削除
       const metadata = await getAllMetadata();
       const existingBackground = metadata.find(m => (m as any).image_type === 'background');
@@ -341,16 +354,16 @@ export function SettingsPage() {
       }
 
       setBackgroundProgress(60);
-      
+
       // 新しい背景を保存
       await saveBackgroundFile(dataUrl, fileName);
-      
+
       setBackgroundProgress(100);
-      
+
       // 背景を再読み込み
       await loadSettings();
       emit('background-change');
-      
+
       // 成功メッセージを一時的に表示
       console.log('[SettingsPage] 背景アップロード成功');
       setTimeout(() => {
@@ -366,7 +379,7 @@ export function SettingsPage() {
 
   const handleRemoveBackground = async () => {
     if (!backgroundUrl) return;
-    
+
     const confirmed = await confirm('現在の背景を削除しますか？');
     if (!confirmed) return;
 
@@ -381,32 +394,6 @@ export function SettingsPage() {
     } catch (error) {
       console.error('背景削除エラー:', error);
       alert('背景の削除に失敗しました');
-    }
-  };
-
-  const openAnimationWindow = async () => {
-    try {
-      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-      
-      const animationWindow = new WebviewWindow('animation', {
-        url: '/animation',
-        title: 'ぬりえもん - アニメーション',
-        width: 1200,
-        height: 800,
-        resizable: true,
-        alwaysOnTop: false,
-      });
-
-      animationWindow.once('tauri://created', () => {
-        setIsAnimationWindowOpen(true);
-      });
-
-      animationWindow.once('tauri://destroyed', () => {
-        setIsAnimationWindowOpen(false);
-      });
-    } catch (error) {
-      console.error('[SettingsPage] アニメーションウィンドウのオープンに失敗しました:', error);
-      alert('アニメーションウィンドウを開けませんでした');
     }
   };
 
@@ -448,8 +435,8 @@ export function SettingsPage() {
               checked={operationMode === 'auto'}
               onChange={async () => {
                 setOperationMode('auto');
-                try { 
-                  await AppSettingsService.saveAppSetting('operation_mode', 'auto'); 
+                try {
+                  await AppSettingsService.saveAppSetting('operation_mode', 'auto');
                   emit('app-settings-changed', { key: 'operation_mode', value: 'auto' });
                 } catch {}
               }}
@@ -464,8 +451,8 @@ export function SettingsPage() {
               checked={operationMode === 'relay'}
               onChange={async () => {
                 setOperationMode('relay');
-                try { 
-                  await AppSettingsService.saveAppSetting('operation_mode', 'relay'); 
+                try {
+                  await AppSettingsService.saveAppSetting('operation_mode', 'relay');
                   emit('app-settings-changed', { key: 'operation_mode', value: 'relay' });
                 } catch {}
               }}
@@ -480,8 +467,8 @@ export function SettingsPage() {
               checked={operationMode === 'local'}
               onChange={async () => {
                 setOperationMode('local');
-                try { 
-                  await AppSettingsService.saveAppSetting('operation_mode', 'local'); 
+                try {
+                  await AppSettingsService.saveAppSetting('operation_mode', 'local');
                   emit('app-settings-changed', { key: 'operation_mode', value: 'local' });
                 } catch {}
               }}
@@ -640,8 +627,8 @@ export function SettingsPage() {
             const v = sanitizeId(vRaw);
             setPcId(v);
             if (isValidId(v)) {
-              try { 
-                await GlobalSettingsService.save('pcid', v); 
+              try {
+                await GlobalSettingsService.save('pcid', v);
                 emit('app-settings-changed', { key: 'pcid', value: v });
               } catch {}
             }
@@ -717,7 +704,7 @@ export function SettingsPage() {
           <div className={styles.workspacePath}>
             {currentWorkspace || 'ワークスペースが選択されていません'}
           </div>
-          <button 
+          <button
             className={styles.changeWorkspaceButton}
             onClick={handleChangeWorkspace}
             disabled={isChangingWorkspace}
@@ -745,7 +732,7 @@ export function SettingsPage() {
                 {uploadingBackground ? 'アップロード中...' : '背景を選択'}
               </button>
             </div>
-            
+
             {uploadingBackground && (
               <div className={styles.progressBarContainer}>
                 <div className={styles.progressBar} style={{ width: `${backgroundProgress}%` }}>
@@ -753,27 +740,27 @@ export function SettingsPage() {
                 </div>
               </div>
             )}
-            
+
             {backgroundUrl && (
               <div className={styles.currentBackground}>
                 <h4>現在の背景</h4>
                 <div className={styles.backgroundPreview}>
                   {backgroundType === 'video' ? (
-                    <video 
-                      src={backgroundUrl} 
+                    <video
+                      src={backgroundUrl}
                       className={styles.previewVideo}
                       autoPlay
                       loop
                       muted
                     />
                   ) : (
-                    <img 
-                      src={backgroundUrl} 
-                      alt="現在の背景" 
+                    <img
+                      src={backgroundUrl}
+                      alt="現在の背景"
                       className={styles.previewImage}
                     />
                   )}
-                  <button 
+                  <button
                     className={styles.removeButton}
                     onClick={handleRemoveBackground}
                   >
@@ -783,7 +770,7 @@ export function SettingsPage() {
               </div>
             )}
           </div>
-          
+
           <div className={styles.note}>
             <p>対応ファイル：jpg、png、mp4、mov（50MB以下）</p>
             <p>※アニメーションの背景に使用されます。</p>
@@ -842,22 +829,31 @@ export function SettingsPage() {
         </div>
       </section>
 
-      {/* ステップ6: スクリーンを表示 */}
+      {/* ステップ6: 画像の表示サイズ */}
       <section className={styles.section}>
-        <h2>ステップ6: スクリーンを表示</h2>
-        <button 
-          onClick={openAnimationWindow}
-          disabled={isAnimationWindowOpen}
-          className={styles.animationButton}
-        >
-          {isAnimationWindowOpen ? 'アニメーション表示中' : 'アニメーションを表示'}
-        </button>
+        <h2>ステップ6: 画像の表示サイズ</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <input
+            type="range"
+            min={8}
+            max={40}
+            step={1}
+            value={imageDisplaySize}
+            onChange={(event) => { void handleImageDisplaySizeChange(Number(event.target.value)); }}
+            style={{ flexGrow: 1, maxWidth: 320 }}
+          />
+          <div style={{ fontSize: '1.1rem', fontWeight: 600 }}>{imageDisplaySize}%</div>
+        </div>
+        <div className={styles.note}>
+          <p>スクリーン上のお絵かきの基準サイズを調整できます（8〜40%）。値を大きくすると全体的に拡大されます。</p>
+          <p>設定はすぐに反映されます。リセットしたい場合は15%に戻してください。</p>
+        </div>
       </section>
 
       {/* データベースメンテナンス */}
       <section className={styles.section}>
         <h2>データベース管理</h2>
-        <button 
+        <button
           onClick={async () => {
             const confirmed = await confirm('データベースをクリーンアップしますか？\n\n重複ファイルや存在しないファイルへの参照が削除されます。');
             if (confirmed) {

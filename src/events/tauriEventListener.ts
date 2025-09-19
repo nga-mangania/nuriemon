@@ -1,6 +1,6 @@
 import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
 import { useWorkspaceStore } from '../stores/workspaceStore';
-import { WorkspaceManager } from '../services/workspaceManager';
+import { WorkspaceManager, WorkspaceSettings } from '../services/workspaceManager';
 import { DatabaseService } from '../services/database';
 
 export interface DataChangeEvent {
@@ -84,6 +84,17 @@ export class TauriEventListener {
     });
     
     this.unlisteners.push(workspaceChangedUnlisten);
+
+    const workspaceSettingsUpdatedUnlisten = await listen<WorkspaceSettings>('workspace-settings-updated', (event) => {
+      const payload = event.payload;
+      if (!payload) {
+        return;
+      }
+      const store = useWorkspaceStore.getState();
+      store.setSettings(payload);
+    });
+
+    this.unlisteners.push(workspaceSettingsUpdatedUnlisten);
   }
   
   /**

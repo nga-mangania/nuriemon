@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { createNoise2D } from 'simplex-noise';
 import {
@@ -36,8 +36,15 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     deletionTime,
     groundPosition,
     backgroundUrl,
-    backgroundType
+    backgroundType,
+    imageDisplaySize
   } = useWorkspaceStore();
+
+  const baseImageSize = Math.max(8, Math.min(40, imageDisplaySize || 18));
+  const containerSizeStyle = useMemo<React.CSSProperties>(() => ({
+    width: `${baseImageSize}%`,
+    height: `${baseImageSize}%`
+  }), [baseImageSize]);
   
   // 表示用のリスト（追加/削除のときだけ更新し、毎フレームは更新しない）
   const [animatedImages, setAnimatedImages] = useState<AnimatedImage[]>([]);
@@ -701,6 +708,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
               if (el) containerRefs.current.set(image.id, el);
               else containerRefs.current.delete(image.id);
             }}
+            style={containerSizeStyle}
           >
             <img
               ref={(el) => {

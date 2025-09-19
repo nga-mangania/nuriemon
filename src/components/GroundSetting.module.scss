@@ -11,7 +11,7 @@ $text-color: #2d334a;
   position: relative;
   width: 100%;
   height: 300px;
-  background-color: $bg-color;
+  background-color: #000;
   border-radius: $border-radius;
   overflow: hidden;
   cursor: pointer;
@@ -26,10 +26,12 @@ $text-color: #2d334a;
   left: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
   z-index: 0;
   // 背景として表示
   pointer-events: none;
+  background-color: #000;
 }
 
 .placeholder {
@@ -38,8 +40,9 @@ $text-color: #2d334a;
   justify-content: center;
   width: 100%;
   height: 100%;
-  color: $text-color;
+  color: #f4f4f4;
   font-size: 1rem;
+  background-color: rgba(0, 0, 0, 0.6);
 }
 
 .groundLine {

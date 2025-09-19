@@ -22,6 +22,7 @@ interface WorkspaceState {
   settings: any | null;
   isLoading: boolean;
   images: ImageMetadata[];
+  imageDisplaySize: number;
 
   // アクション
   setCurrentWorkspace: (path: string | null) => void;
@@ -33,6 +34,7 @@ interface WorkspaceState {
   setLoading: (loading: boolean) => void;
   resetStore: () => void;
   setImages: (images: ImageMetadata[]) => void;
+  setImageDisplaySize: (size: number) => void;
 }
 
 // --- 手動同期のためのヘルパー関数 ---
@@ -67,6 +69,7 @@ async function doSave() {
     images: state.images,
     groundPosition: state.groundPosition,
     deletionTime: state.deletionTime,
+    imageDisplaySize: state.imageDisplaySize,
   });
   await store.save();
   lastSaveTs = Date.now();
@@ -81,6 +84,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   settings: null,
   isLoading: false,
   images: [],
+  imageDisplaySize: 18,
 
   // --- アクション ---
   setCurrentWorkspace: (path) => {
@@ -118,12 +122,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   },
   
   setSettings: (settings) => {
-    set({
+    set((state) => ({
       settings,
       groundPosition: settings.groundPosition || 80,
       deletionTime: settings.deletionTime || 'unlimited',
-      currentWorkspace: settings.customPath
-    });
+      currentWorkspace: settings.customPath,
+      imageDisplaySize: typeof settings.imageDisplaySize === 'number'
+        ? settings.imageDisplaySize
+        : state.imageDisplaySize ?? 18
+    }));
   },
   
   updateSettings: (partialSettings) => {
@@ -134,11 +141,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       return {
         settings: newSettings,
         groundPosition: partialSettings.groundPosition ?? state.groundPosition,
-        deletionTime: partialSettings.deletionTime ?? state.deletionTime
+        deletionTime: partialSettings.deletionTime ?? state.deletionTime,
+        imageDisplaySize: typeof partialSettings.imageDisplaySize === 'number' ? partialSettings.imageDisplaySize : state.imageDisplaySize
       };
     });
   },
-  
+
   setLoading: (loading) => {
     set({ isLoading: loading });
     // ローディング状態は保存対象外
@@ -153,13 +161,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       backgroundType: 'image',
       settings: null,
       isLoading: false,
-      images: []
+      images: [],
+      imageDisplaySize: 18
     });
   },
 
   setImages: (images) => {
     set({ images });
     // 画像リストの更新は重要なので保存
+    saveStateToFile();
+  },
+
+  setImageDisplaySize: (size) => {
+    set({ imageDisplaySize: size });
     saveStateToFile();
   },
 }));
@@ -173,10 +187,14 @@ export async function loadStateFromFile() {
       images: ImageMetadata[];
       groundPosition: number;
       deletionTime: string;
+      imageDisplaySize?: number;
     } | null;
     
     if (stateFromFile) {
-      useWorkspaceStore.setState(stateFromFile);
+      useWorkspaceStore.setState({
+        ...stateFromFile,
+        imageDisplaySize: typeof stateFromFile.imageDisplaySize === 'number' ? stateFromFile.imageDisplaySize : 18
+      });
       console.log('[loadStateFromFile] State loaded from store:', stateFromFile);
     }
   } catch (error) {

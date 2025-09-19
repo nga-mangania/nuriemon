@@ -17,6 +17,7 @@ export interface WorkspaceSettings {
   version: string;
   groundPosition: number;
   deletionTime: string;
+  imageDisplaySize: number;
   saveLocation: 'workspace'; // ワークスペース内固定
   customPath: string; // ワークスペースのパス
 }
@@ -86,7 +87,11 @@ export class WorkspaceManager {
         // Rust側でファイル読み込み（権限問題を回避）
         const bytes = await invoke<number[]>('read_file_absolute', { path: settingsPath });
         const content = new TextDecoder().decode(new Uint8Array(bytes));
-        settings = JSON.parse(content);
+        const parsed = JSON.parse(content);
+        if (typeof parsed.imageDisplaySize !== 'number') {
+          parsed.imageDisplaySize = 18;
+        }
+        settings = parsed;
       } catch (error) {
         console.error('[WorkspaceManager] 設定ファイルの読み込みエラー:', error);
       }
@@ -126,6 +131,7 @@ export class WorkspaceManager {
         version: '1.0.0',
         groundPosition: 80,
         deletionTime: 'unlimited',
+        imageDisplaySize: 18,
         saveLocation: 'workspace',
         customPath: path
       };
@@ -328,7 +334,11 @@ export class WorkspaceManager {
       }
       
       try {
-        return JSON.parse(content);
+        const parsed = JSON.parse(content);
+        if (typeof parsed.imageDisplaySize !== 'number') {
+          parsed.imageDisplaySize = 18;
+        }
+        return parsed;
       } catch (parseError) {
         console.error('[WorkspaceManager] JSON解析エラー詳細:', parseError);
         console.error('[WorkspaceManager] 問題のあるJSON:', content);
@@ -356,11 +366,16 @@ export class WorkspaceManager {
       console.log('[WorkspaceManager] 現在の設定が読み込めないため、初期設定を作成します');
       current = {
         version: '1.0.0',
-        groundPosition: 50,
+        groundPosition: 80,
         deletionTime: 'unlimited',
+        imageDisplaySize: 18,
         saveLocation: 'workspace',
         customPath: currentWorkspace
       };
+    }
+
+    if (typeof current.imageDisplaySize !== 'number') {
+      current.imageDisplaySize = 18;
     }
 
     const updated = { ...current, ...settings };

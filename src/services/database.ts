@@ -294,6 +294,7 @@ export class AppSettingsService {
     customPath: string;
     groundPosition: number;
     deletionTime: string;
+    imageDisplaySize: number;
   }> {
     const manager = WorkspaceManager.getInstance();
     const workspace = manager.getCurrentWorkspace();
@@ -304,7 +305,8 @@ export class AppSettingsService {
         saveLocation: 'workspace',
         customPath: '',
         groundPosition: 80,
-        deletionTime: 'unlimited'
+        deletionTime: 'unlimited',
+        imageDisplaySize: 18
       };
     }
     
@@ -312,7 +314,8 @@ export class AppSettingsService {
       saveLocation: 'workspace',
       customPath: workspace,
       groundPosition: settings.groundPosition || 80,
-      deletionTime: settings.deletionTime || 'unlimited'
+      deletionTime: settings.deletionTime || 'unlimited',
+      imageDisplaySize: typeof (settings as any).imageDisplaySize === 'number' ? (settings as any).imageDisplaySize : 18
     };
   }
 }

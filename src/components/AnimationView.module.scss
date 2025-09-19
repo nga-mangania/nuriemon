@@ -21,8 +21,8 @@
   position: absolute;
   left: 0;
   top: 0;
-  width: 25%;
-  height: 25%;
+  width: var(--nuriemon-image-size, 15%);
+  height: var(--nuriemon-image-size, 15%);
   will-change: transform;
 }
 
