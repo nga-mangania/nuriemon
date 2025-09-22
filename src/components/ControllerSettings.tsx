@@ -3,13 +3,13 @@ import { emit } from '@tauri-apps/api/event';
 import styles from './ControllerSettings.module.scss';
 import {
   DEFAULT_CONTROLLER_SETTINGS,
-  ControllerSettings,
   loadControllerSettings,
   saveControllerSettings,
 } from '../services/controllerSettings';
+import type { ControllerSettings as ControllerSettingsConfig } from '../services/controllerSettings';
 
 export function ControllerSettings() {
-  const [settings, setSettings] = useState<ControllerSettings>(DEFAULT_CONTROLLER_SETTINGS);
+  const [settings, setSettings] = useState<ControllerSettingsConfig>(DEFAULT_CONTROLLER_SETTINGS);
   const [isSaving, setIsSaving] = useState(false);
   const saveTimer = useRef<number | null>(null);
 
@@ -27,7 +27,7 @@ export function ControllerSettings() {
     };
   }, []);
 
-  const updateSetting = (partial: Partial<ControllerSettings>) => {
+  const updateSetting = (partial: Partial<ControllerSettingsConfig>) => {
     const next = { ...settings, ...partial };
     setSettings(next);
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
