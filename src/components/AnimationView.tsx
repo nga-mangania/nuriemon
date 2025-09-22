@@ -153,6 +153,89 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     };
   }, [backgroundType, backgroundUrl, ensureBackgroundVideoPlaying]);
 
+  const applyManualControl = useCallback((img: AnimatedImage, direction?: string, rawAction?: string) => {
+    const action = (rawAction || 'hold').toLowerCase();
+    const currentX = img.manualAxisX ?? 0;
+    const currentY = img.manualAxisY ?? 0;
+
+    const resetIfIdle = () => {
+      if ((img.manualAxisX ?? 0) === 0 && (img.manualAxisY ?? 0) === 0) {
+        img.velocityX = 0;
+        img.velocityY = 0;
+        img.directionChangeTimer = Math.random() * 60 + 45;
+        img.nextMovementUpdate = Date.now() + 600;
+      }
+    };
+
+    if (action === 'stop' && (!direction || direction === 'all')) {
+      img.manualAxisX = 0;
+      img.manualAxisY = 0;
+      resetIfIdle();
+      return;
+    }
+
+    if (!direction) {
+      return;
+    }
+
+    switch (action) {
+      case 'start':
+      case 'hold': {
+        if (direction === 'left') {
+          img.manualAxisX = -1;
+          img.flipped = true;
+          img.velocityX = 0;
+        } else if (direction === 'right') {
+          img.manualAxisX = 1;
+          img.flipped = false;
+          img.velocityX = 0;
+        } else if (direction === 'up') {
+          img.manualAxisY = -1;
+          img.velocityY = 0;
+        } else if (direction === 'down') {
+          img.manualAxisY = 1;
+          img.velocityY = 0;
+        }
+        img.directionChangeTimer = Math.max(img.directionChangeTimer, 45);
+        break;
+      }
+      case 'stop': {
+        if (direction === 'left' && currentX < 0) {
+          img.manualAxisX = 0;
+        } else if (direction === 'right' && currentX > 0) {
+          img.manualAxisX = 0;
+        } else if (direction === 'up' && currentY < 0) {
+          img.manualAxisY = 0;
+        } else if (direction === 'down' && currentY > 0) {
+          img.manualAxisY = 0;
+        } else if (direction === 'all') {
+          img.manualAxisX = 0;
+          img.manualAxisY = 0;
+        }
+        resetIfIdle();
+        break;
+      }
+      case 'pulse': {
+        const accel = 0.18;
+        const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v));
+        if (direction === 'left') {
+          img.velocityX = clamp((img.velocityX || 0) - accel, 2.2);
+        } else if (direction === 'right') {
+          img.velocityX = clamp((img.velocityX || 0) + accel, 2.2);
+        } else if (direction === 'up') {
+          img.velocityY = clamp((img.velocityY || 0) - accel, 2.2);
+        } else if (direction === 'down') {
+          img.velocityY = clamp((img.velocityY || 0) + accel, 2.2);
+        }
+        img.manualAxisX = 0;
+        img.manualAxisY = 0;
+        break;
+      }
+      default:
+        break;
+    }
+  }, []);
+
   // モバイル操作の受信（move/action/emote）
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -189,19 +272,11 @@ const AnimationView: React.FC<AnimationViewProps> = ({
         switch (type) {
           case 'move': {
             const dir = payload.direction as string | undefined;
+            const action = payload.action as string | undefined;
             apply((img) => {
-              // スムーズな操作: 即時位置変更はせず、なだらかに速度へ加算
-              const accel = 0.25;
-              if (dir === 'left') { img.velocityX += -accel; }
-              if (dir === 'right') { img.velocityX += accel; }
-              if (dir === 'up') { img.velocityY += -accel; }
-              if (dir === 'down') { img.velocityY += accel; }
-              // 速度の過度な増加を抑制
-              const clamp = (v: number, a: number) => Math.max(-a, Math.min(a, v));
-              img.velocityX = clamp(img.velocityX, 2);
-              img.velocityY = clamp(img.velocityY, 2);
-              // ランダム方向切替を短く抑えて、操作の方向性を少し維持
-              img.directionChangeTimer = 18;
+              applyManualControl(img, dir, action);
+              img.lastMovementUpdate = Date.now();
+              img.isNewImage = false;
             });
             break;
           }
@@ -397,6 +472,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       isNewImage: markAsNew,
       specialMovementCooldown: 0,
       specialScale: 1,
+      manualAxisX: 0,
+      manualAxisY: 0,
       highlightEffect: markAsNew ? { startTime: now, duration: 1600 } : null,
       highlightScale: markAsNew ? 1.6 : 1,
       highlightGlow: markAsNew ? 0.9 : 0,
@@ -435,45 +512,76 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     const scaledVelocityX = image.velocityX * baseVelocity * currentSpeed;
     const scaledVelocityY = image.velocityY * baseVelocity * currentSpeed;
 
-    const noiseScale = 0.05;
+    const manualAxisX = image.manualAxisX ?? 0;
+    const manualAxisY = image.manualAxisY ?? 0;
+    const manualActive = manualAxisX !== 0 || manualAxisY !== 0;
+    const manualSpeedBase = manualActive ? (0.9 * currentSpeed + 0.35) : 0;
+    const manualHorizontal = manualAxisX * manualSpeedBase;
+    const manualVertical = manualAxisY * (image.type === 'fly' ? manualSpeedBase : manualSpeedBase * 0.6);
+
+    const noiseScale = manualActive ? 0 : 0.05;
     const sm = getSmoothedNoise(image as any, currentTime);
     const noiseX = sm.x * noiseScale * currentSpeed;
     const noiseY = sm.y * noiseScale * currentSpeed;
 
     if (image.type === "walk") {
       image.y = groundPosition;
-      image.x += scaledVelocityX + noiseX;
+      const baseX = manualActive ? 0 : scaledVelocityX;
+      image.x += baseX + noiseX + manualHorizontal;
+      if (manualAxisX < 0) {
+        image.flipped = true;
+      } else if (manualAxisX > 0) {
+        image.flipped = false;
+      }
 
       if (image.x <= -5 || image.x >= 95) {
-        image.velocityX *= -1;
         image.x = Math.max(-5, Math.min(95, image.x));
-        image.flipped = !image.flipped;
+        if (!manualActive) {
+          image.velocityX *= -1;
+          image.flipped = !image.flipped;
+        }
       }
     } else if (image.type === "fly") {
-      image.x += scaledVelocityX + noiseX;
-      image.y += scaledVelocityY + noiseY;
+      const baseX = manualActive ? 0 : scaledVelocityX;
+      const baseY = manualActive ? 0 : scaledVelocityY;
+      image.x += baseX + noiseX + manualHorizontal;
+      image.y += baseY + noiseY + manualVertical;
+
+      if (manualAxisX < 0) {
+        image.flipped = true;
+      } else if (manualAxisX > 0) {
+        image.flipped = false;
+      }
 
       if (image.x <= -5 || image.x >= 95) {
-        image.velocityX *= -1;
         image.x = Math.max(-5, Math.min(95, image.x));
-        image.flipped = !image.flipped;
+        if (!manualActive) {
+          image.velocityX *= -1;
+          image.flipped = !image.flipped;
+        }
       }
 
       const maxHeight = 5;
       const minHeight = groundPosition;
 
       if (image.y <= maxHeight || image.y >= minHeight) {
-        image.velocityY *= -1;
         image.y = Math.max(maxHeight, Math.min(minHeight, image.y));
+        if (!manualActive) {
+          image.velocityY *= -1;
+        }
       }
     }
 
     // 方向変更
-    image.directionChangeTimer -= 1;
-    if (image.directionChangeTimer <= 0) {
-      image.velocityX = (Math.random() - 0.5) * 1;
-      image.velocityY = (Math.random() - 0.5) * 1;
-      image.directionChangeTimer = Math.random() * 50 + 25;
+    if (manualActive) {
+      image.directionChangeTimer = Math.max(image.directionChangeTimer, 45);
+    } else {
+      image.directionChangeTimer -= 1;
+      if (image.directionChangeTimer <= 0) {
+        image.velocityX = (Math.random() - 0.5) * 1;
+        image.velocityY = (Math.random() - 0.5) * 1;
+        image.directionChangeTimer = Math.random() * 50 + 25;
+      }
     }
 
     // グローバルスケールの変更
@@ -501,8 +609,10 @@ const AnimationView: React.FC<AnimationViewProps> = ({
         image.phaseOffset
       );
 
-      image.x += x;
-      image.y += y;
+      if (!manualActive) {
+        image.x += x;
+        image.y += y;
+      }
 
       if (rotation !== undefined) {
         image.rotation = rotation;

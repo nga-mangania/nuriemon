@@ -150,6 +150,8 @@ export interface AnimatedImage {
   specialMovement?: SpecialMovement | null;
   specialMovementCooldown: number;
   specialScale?: number;
+  manualAxisX?: number;
+  manualAxisY?: number;
   highlightEffect?: {
     startTime: number;
     duration: number;

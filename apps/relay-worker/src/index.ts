@@ -27,7 +27,12 @@ export default {
     // Minimal mobile controller UI (staging): GET /app
     if (req.method === 'GET' && (url.pathname === '/app' || url.pathname === '/app/')) {
       const html = appHtml();
-      const h = new Headers({ ...cors, 'content-type': 'text/html; charset=utf-8' });
+      const h = new Headers({
+        ...cors,
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store, no-cache, must-revalidate',
+        'pragma': 'no-cache',
+      });
       return new Response(html, { status: 200, headers: h });
     }
 
@@ -672,6 +677,7 @@ function appHtml(): string {
     .actions{margin-top:8px}
     .dpad{display:grid;grid-template-columns:64px 64px 64px;grid-template-rows:64px 64px 64px;gap:8px;justify-content:center;margin-top:8px}
     .dpad .sp{visibility:hidden}
+    .dpadHint{margin-top:4px;text-align:center;font-size:13px;color:#475569;letter-spacing:.02em}
     button{padding:14px;border-radius:12px;border:1px solid #dbeafe;background:#eef2ff;color:#0b1324;font-weight:600;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
     button:active{transform:scale(.98)}
     .ok{color:#16a34a}
@@ -711,15 +717,16 @@ function appHtml(): string {
     </div>
     <div class="dpad">
       <div class="sp"></div>
-      <button onmousedown="startHold('up')" ontouchstart="startHold('up')" onmouseup="stopHold()" ontouchend="stopHold()" ontouchcancel="stopHold()">▲</button>
+      <button onmousedown="ctrlStartHold(event,'up')" onpointerdown="ctrlStartHold(event,'up')" ontouchstart="ctrlStartHold(event,'up')" onmouseup="ctrlStopHold(event,'up')" onpointerup="ctrlStopHold(event,'up')" ontouchend="ctrlStopHold(event,'up')" ontouchcancel="ctrlStopHold(event,'up')">▲</button>
       <div class="sp"></div>
-      <button onmousedown="startHold('left')" ontouchstart="startHold('left')" onmouseup="stopHold()" ontouchend="stopHold()" ontouchcancel="stopHold()">◀</button>
+      <button onmousedown="ctrlStartHold(event,'left')" onpointerdown="ctrlStartHold(event,'left')" ontouchstart="ctrlStartHold(event,'left')" onmouseup="ctrlStopHold(event,'left')" onpointerup="ctrlStopHold(event,'left')" ontouchend="ctrlStopHold(event,'left')" ontouchcancel="ctrlStopHold(event,'left')">◀</button>
       <div class="sp"></div>
-      <button onmousedown="startHold('right')" ontouchstart="startHold('right')" onmouseup="stopHold()" ontouchend="stopHold()" ontouchcancel="stopHold()">▶</button>
+      <button onmousedown="ctrlStartHold(event,'right')" onpointerdown="ctrlStartHold(event,'right')" ontouchstart="ctrlStartHold(event,'right')" onmouseup="ctrlStopHold(event,'right')" onpointerup="ctrlStopHold(event,'right')" ontouchend="ctrlStopHold(event,'right')" ontouchcancel="ctrlStopHold(event,'right')">▶</button>
       <div class="sp"></div>
-      <button onmousedown="startHold('down')" ontouchstart="startHold('down')" onmouseup="stopHold()" ontouchend="stopHold()" ontouchcancel="stopHold()">▼</button>
+      <button onmousedown="ctrlStartHold(event,'down')" onpointerdown="ctrlStartHold(event,'down')" ontouchstart="ctrlStartHold(event,'down')" onmouseup="ctrlStopHold(event,'down')" onpointerup="ctrlStopHold(event,'down')" ontouchend="ctrlStopHold(event,'down')" ontouchcancel="ctrlStopHold(event,'down')">▼</button>
       <div class="sp"></div>
     </div>
+    <p class="dpadHint">長押しで移動</p>
     <button id="reconnect" style="display:none" onclick="manualReconnect()">再接続</button>
   </div>
   <script>
@@ -770,15 +777,49 @@ function appHtml(): string {
       }
       window.manualReconnect = ()=>{ attempt=0; if(ws){ try{ ws.close(); }catch{} } connect(); };
       function send(cmd){ try{ if(ws && ws.readyState===1){ ws.send(JSON.stringify({ v:1, type:'cmd', payload:{ cmd, imageId } })); } }catch{} }
-      // Hold-to-repeat for D-pad
-      let holdTimer = null;
-      function startHold(c){ try{ send(c); if(holdTimer) clearInterval(holdTimer); holdTimer=setInterval(()=>send(c), 120); }catch{} }
-      function stopHold(){ if(holdTimer){ try{ clearInterval(holdTimer); }catch{} holdTimer=null; } }
-      try { document.addEventListener('mouseup', stopHold); document.addEventListener('touchend', stopHold); document.addEventListener('touchcancel', stopHold); } catch {}
+      const activeDirections = new Set();
+      function startHold(evtOrDir, maybeDir){
+        const evt = evtOrDir && typeof evtOrDir.preventDefault === 'function' ? evtOrDir : null;
+        const dir = evt ? maybeDir : evtOrDir;
+        if(evt){ try{ evt.preventDefault(); evt.stopPropagation(); }catch{} }
+        if(!dir) return;
+        try{
+          if(!activeDirections.has(dir)){
+            activeDirections.add(dir);
+            send('move/start/'+dir);
+          }
+        }catch{}
+      }
+      function stopHold(evtOrDir, maybeDir){
+        const evt = evtOrDir && typeof evtOrDir.preventDefault === 'function' ? evtOrDir : null;
+        const dir = evt ? maybeDir : evtOrDir;
+        if(evt){ try{ evt.preventDefault(); evt.stopPropagation(); }catch{} }
+        try{
+          if(dir){
+            if(activeDirections.delete(dir)){
+              send('move/stop/'+dir);
+            }
+          } else if(activeDirections.size){
+            activeDirections.forEach(d=>{ send('move/stop/'+d); });
+            activeDirections.clear();
+          }
+        }catch{}
+      }
+      function stopAllDirections(){ stopHold(); }
+      try {
+        document.addEventListener('mouseup', stopAllDirections);
+        document.addEventListener('touchend', stopAllDirections);
+        document.addEventListener('touchcancel', stopAllDirections);
+        document.addEventListener('pointerup', stopAllDirections);
+        document.addEventListener('pointercancel', stopAllDirections);
+        document.addEventListener('contextmenu', (e)=>{ try{ e.preventDefault(); }catch{} });
+      } catch {}
       window.sendCmd = (c)=> send(c);
       window.dir = (d)=> send(d);
       window.action = (a)=> send(a);
       window.emote = (t)=> send('emote:'+t);
+      window.ctrlStartHold = (evt, dir)=> startHold(evt, dir);
+      window.ctrlStopHold = (evt, dir)=> stopHold(evt, dir);
       connect();
     }
   </script>

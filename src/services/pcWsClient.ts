@@ -220,8 +220,15 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
       emit('mobile-control', { type: 'emote', emoteType, imageId });
       return;
     }
+    if (cmd.startsWith('move/')) {
+      const [, actionRaw, directionRaw] = cmd.split('/');
+      const action = actionRaw || 'start';
+      const direction = directionRaw || undefined;
+      emit('mobile-control', { type: 'move', action, direction, imageId });
+      return;
+    }
     if (cmd === 'left' || cmd === 'right' || cmd === 'up' || cmd === 'down') {
-      emit('mobile-control', { type: 'move', direction: cmd, imageId });
+      emit('mobile-control', { type: 'move', direction: cmd, action: 'pulse', imageId });
       return;
     }
     emit('mobile-control', { type: 'action', actionType: cmd, imageId });

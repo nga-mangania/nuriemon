@@ -190,9 +190,11 @@ async fn handle_websocket_message(
         "move" => {
             // 移動コマンドの処理
             if let Some(direction) = msg.payload.get("direction").and_then(|v| v.as_str()) {
+                let action = msg.payload.get("action").and_then(|v| v.as_str()).unwrap_or("pulse");
                 let _ = app_handle.emit("mobile-control", serde_json::json!({
                     "type": "move",
                     "direction": direction,
+                    "action": action,
                     "imageId": msg.payload.get("imageId"),
                 }));
             }
@@ -249,7 +251,7 @@ async fn handle_cmd_string(
     cmd: &str,
     image_id_val: Option<&serde_json::Value>,
 ) {
-    // cmd 例: 'jump', 'left', 'right', 'emote:happy'
+    // cmd 例: 'jump', 'left', 'move/start/right', 'emote:happy'
     if let Some(rest) = cmd.strip_prefix("emote:") {
         let _ = app_handle.emit("mobile-control", serde_json::json!({
             "type": "emote",
@@ -259,11 +261,32 @@ async fn handle_cmd_string(
         return;
     }
 
+    if let Some(rest) = cmd.strip_prefix("move/") {
+        let mut parts = rest.split('/');
+        let action = parts.next().unwrap_or("start");
+        let direction = parts.next().unwrap_or("");
+        if !direction.is_empty() {
+            let normalized_action = match action {
+                "start" | "hold" => "start",
+                "stop" | "end" => "stop",
+                other => other,
+            };
+            let _ = app_handle.emit("mobile-control", serde_json::json!({
+                "type": "move",
+                "direction": direction,
+                "action": normalized_action,
+                "imageId": image_id_val,
+            }));
+            return;
+        }
+    }
+
     match cmd {
         "left" | "right" | "up" | "down" => {
             let _ = app_handle.emit("mobile-control", serde_json::json!({
                 "type": "move",
                 "direction": cmd,
+                "action": "pulse",
                 "imageId": image_id_val,
             }));
         }

@@ -83,7 +83,7 @@ export const useAnimationData = () => {
   const updateImages = useCallback(async (isInitialLoad = false) => {
     const processedImages = await getProcessedImages();
     const movementSettingsMap = await getAllMovementSettings();
-    
+
     const animatedImagesData = await Promise.all(
       processedImages.map(img => transformImageData(img, movementSettingsMap))
     );
@@ -107,11 +107,51 @@ export const useAnimationData = () => {
     }
     
     // AnimatedImage型のデータをローカルステートに保存
-    setAnimatedImages(validImages);
-    
-    // メタデータのみをZustandストアに保存
-    setImages(processedImages);
-  }, [isFirstLoad, animatedImages, setImages]);
+    const shouldReplaceAnimated = (() => {
+      if (animatedImages.length !== validImages.length) return true;
+      for (let i = 0; i < validImages.length; i++) {
+        const prev = animatedImages[i];
+        const next = validImages[i];
+        if (!prev || !next) return true;
+        if (prev.id !== next.id) return true;
+        if (
+          prev.type !== next.type ||
+          prev.movement !== next.movement ||
+          prev.size !== next.size ||
+          prev.speed !== next.speed
+        ) {
+          return true;
+        }
+      }
+      return false;
+    })();
+
+    if (shouldReplaceAnimated) {
+      setAnimatedImages(validImages);
+    }
+
+    const shouldUpdateStore = (() => {
+      if (storedMetadata.length !== processedImages.length) return true;
+      const prevMap = new Map(storedMetadata.map(img => [img.id, img]));
+      for (const img of processedImages) {
+        const prev = prevMap.get(img.id);
+        if (!prev) return true;
+        if (
+          (prev as any).updated_at !== (img as any).updated_at ||
+          (prev as any).display_started_at !== (img as any).display_started_at ||
+          (prev as any).is_hidden !== (img as any).is_hidden ||
+          ((prev as any).image_type || (prev as any).type) !== ((img as any).image_type || (img as any).type)
+        ) {
+          return true;
+        }
+      }
+      return false;
+    })();
+
+    if (shouldUpdateStore) {
+      setImages(processedImages);
+    }
+  }, [animatedImages, isFirstLoad, setImages, storedMetadata]);
 
   // バックエンドからの更新通知をリッスン
   useEffect(() => {

@@ -464,7 +464,7 @@ Rust Backend
 * マルチウィンドウ / イベント集中化 / Zustand 統一
 * 効果音・削除挙動修正、画像更新リアルタイム化
 
-### Phase 5（子ども操作：QR + Auto/Relay/Local）
+### Phase 5（子ども操作：QR + Auto/Relay/Local）（完了）
 
 * **共通**：画像ごとに QR 表示／スマホをコントローラ化／WS でリアルタイム操作
 * **Auto**：Relay 到達性ヘルスで自動判断→不可時は Local 案内
@@ -473,7 +473,7 @@ Rust Backend
 * **UI**：アニメ窓に QR は出さない（体験優先）。モバイル UI はシンプル/アドバンス切替。
 * **Per-image control**：`img=<imageId>` により個別制御。`payload.imageId` がある場合のみ対象へ反映。
 
-### Phase 6（ユーザー管理・配布準備）
+### Phase 6（ユーザー管理・配布準備）（途中）
 
 * **自動アップデート**（GitHub Releases）
 * **配布ビルド**（macOS DMG / Windows MSI）
