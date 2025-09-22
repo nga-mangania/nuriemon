@@ -156,8 +156,15 @@ function App() {
         const eff = GlobalSettingsService.getEffective();
         const eid = eff?.relay?.eventId || null;
         const pcid = eff?.relay?.pcId || null;
-        let relayActive = mode === 'relay';
-        if (mode === 'auto') {
+
+        const defaultMode = eff?.defaults?.operationMode || 'auto';
+        const resolvedMode: 'relay' | 'auto' | 'local' =
+          mode === 'relay' || mode === 'auto' || mode === 'local'
+            ? mode
+            : (defaultMode === 'relay' || defaultMode === 'local' ? defaultMode : 'auto');
+
+        let relayActive = resolvedMode === 'relay';
+        if (resolvedMode === 'auto') {
           try {
             const base = await resolveBaseUrl();
             const health = await checkRelayHealth(base);
