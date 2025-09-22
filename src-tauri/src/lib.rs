@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::fs;
 use std::path::Path;
 use tauri::{State, Manager, Emitter, LogicalSize, Size, LogicalPosition, Position};
+#[cfg(debug_assertions)]
+use tauri::menu::{Menu, SubmenuBuilder};
 
 mod db;
 mod events;
@@ -818,6 +820,34 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build());
+
+    #[cfg(debug_assertions)]
+    {
+        builder = builder
+            .menu(|app_handle| {
+                let developer_menu = SubmenuBuilder::new(app_handle, "Developer")
+                    .text("toggle-devtools-main", "Toggle DevTools (Main)")
+                    .text("toggle-devtools-animation", "Toggle DevTools (Animation)")
+                    .text("toggle-devtools-qr", "Toggle DevTools (QR)")
+                    .build()?;
+
+                let menu = Menu::default(app_handle)?;
+                menu.append(&developer_menu)?;
+                Ok(menu)
+            })
+            .on_menu_event(|app, event| {
+                let menu_id = event.id().as_ref();
+                let target = match menu_id {
+                    "toggle-devtools-main" => Some("main"),
+                    "toggle-devtools-animation" => Some("animation"),
+                    "toggle-devtools-qr" => Some("qr-display"),
+                    _ => None,
+                };
+                if let Some(label) = target {
+                    let _ = toggle_devtools(Some(label.to_string()), app.clone());
+                }
+            });
+    }
 
     // Updater plugin is temporarily disabled until release keys/config are provisioned.
 
