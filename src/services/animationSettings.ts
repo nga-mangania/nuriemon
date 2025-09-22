@@ -150,6 +150,13 @@ export interface AnimatedImage {
   specialMovement?: SpecialMovement | null;
   specialMovementCooldown: number;
   specialScale?: number;
+  highlightEffect?: {
+    startTime: number;
+    duration: number;
+  } | null;
+  highlightScale?: number;
+  highlightGlow?: number;
+  highlightOpacity?: number;
   emote?: Emote | null;
   emoteTimer?: number;
   lastUpdateTime?: number;

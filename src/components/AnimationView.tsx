@@ -51,6 +51,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   const animatedImagesRef = useRef<Record<string, AnimatedImage>>({});
   const animationRef = useRef<number>();
   const canvasRef = useRef<HTMLDivElement>(null);
+  const backgroundVideoRef = useRef<HTMLVideoElement>(null);
   // DOM 直更新用の参照
   const containerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const imgRefs = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -100,6 +101,57 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   useEffect(() => {
     console.log('[AnimationView] 地面位置が変更されました:', groundPosition);
   }, [groundPosition]);
+
+  const ensureBackgroundVideoPlaying = useCallback(() => {
+    const video = backgroundVideoRef.current;
+    if (!video) {
+      return;
+    }
+    if (video.readyState >= 2 && video.paused) {
+      const playPromise = video.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch((err) => {
+          console.warn('[AnimationView] 背景動画の自動再生に失敗しました', err);
+        });
+      }
+    } else if (video.paused) {
+      const handler = () => {
+        video.removeEventListener('canplay', handler);
+        requestAnimationFrame(() => ensureBackgroundVideoPlaying());
+      };
+      video.addEventListener('canplay', handler, { once: true });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (backgroundType !== 'video' || !backgroundUrl) {
+      return;
+    }
+    ensureBackgroundVideoPlaying();
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        ensureBackgroundVideoPlaying();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    const video = backgroundVideoRef.current;
+    const onPause = () => {
+      ensureBackgroundVideoPlaying();
+    };
+    if (video) {
+      video.addEventListener('pause', onPause);
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (video) {
+        video.removeEventListener('pause', onPause);
+      }
+    };
+  }, [backgroundType, backgroundUrl, ensureBackgroundVideoPlaying]);
 
   // モバイル操作の受信（move/action/emote）
   useEffect(() => {
@@ -306,7 +358,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   }, []);
 
   // 画像を初期化
-  const initializeImage = useCallback((data: any): AnimatedImage => {
+  const initializeImage = useCallback((data: any, markAsNew: boolean): AnimatedImage => {
+    const now = Date.now();
     // Y座標を動的に計算
     let initialY: number;
     if (data.type === 'walk') {
@@ -327,7 +380,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       velocityX: (Math.random() - 0.5) * 0.5,
       velocityY: data.type === 'walk' ? 0 : (Math.random() - 0.5) * 0.5,
       scale: 1,
-      createdAt: Date.now(), // 画像が作成された時刻を記録
+      createdAt: now, // 画像が作成された時刻を記録
       deletionTime: deletionTime, // 現在の削除時間設定を適用
       rotation: 0,
       zRotation: 0,
@@ -335,14 +388,19 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       directionChangeTimer: Math.random() * 200 + 100,
       offset: Math.random() * 10000,
       phaseOffset: Math.random() * Math.PI * 2,
-      lastMovementUpdate: Date.now(),
-      nextMovementUpdate: Date.now() + Math.random() * 5000,
+      lastMovementUpdate: now,
+      nextMovementUpdate: now + Math.random() * 5000,
       globalScale: 1,
       scaleDirection: Math.random() < 0.5 ? 1 : -1,
       scaleSpeed: Math.random() * 0.001 + 0.0005,
-      animationStartTime: Date.now(),
-      isNewImage: false,
+      animationStartTime: now,
+      isNewImage: markAsNew,
       specialMovementCooldown: 0,
+      specialScale: 1,
+      highlightEffect: markAsNew ? { startTime: now, duration: 1600 } : null,
+      highlightScale: markAsNew ? 1.6 : 1,
+      highlightGlow: markAsNew ? 0.9 : 0,
+      highlightOpacity: markAsNew ? 0.05 : 1,
     };
   }, [groundPosition, deletionTime]);
 
@@ -501,6 +559,30 @@ const AnimationView: React.FC<AnimationViewProps> = ({
 
         // 画像の移動処理
         const moved = moveImage(image);
+
+        if (moved.highlightEffect) {
+          const effect = moved.highlightEffect;
+          const duration = Math.max(effect.duration || 1, 1);
+          const elapsed = currentTime - effect.startTime;
+          if (elapsed >= duration) {
+            moved.highlightEffect = null;
+            moved.highlightScale = 1;
+            moved.highlightGlow = 0;
+            moved.highlightOpacity = 1;
+          } else {
+            const t = Math.max(0, Math.min(1, elapsed / duration));
+            const pulse = Math.sin(t * Math.PI);
+            moved.highlightScale = 1 + 0.3 * (1 - t) + 0.2 * pulse;
+            moved.highlightGlow = Math.max(0, 0.75 * (1 - t));
+            const fadeIn = Math.min(1, t / 0.2);
+            moved.highlightOpacity = 0.6 + 0.4 * fadeIn;
+          }
+        } else {
+          moved.highlightScale = moved.highlightScale ?? 1;
+          moved.highlightGlow = moved.highlightGlow ?? 0;
+          moved.highlightOpacity = moved.highlightOpacity ?? 1;
+        }
+
         updatedImages.push(moved);
         // DOMへスタイル反映（transform移動＋回転・スケール）
         const div = containerRefs.current.get(moved.id);
@@ -508,11 +590,24 @@ const AnimationView: React.FC<AnimationViewProps> = ({
           const t = `translate3d(${moved.x}vw, ${moved.y}vh, 0) translate(-50%, -50%) perspective(500px) ${moved.zRotation ? `rotateY(${moved.zRotation}deg)` : ''}`;
           if (div.style.transform !== t) div.style.transform = t;
           if (div.style.display !== '') div.style.display = '';
+          const glow = moved.highlightGlow ?? 0;
+          if (glow > 0) {
+            const blur = (12 + glow * 28).toFixed(1);
+            const alpha = Math.min(1, 0.55 + glow * 0.35).toFixed(2);
+            const filter = `drop-shadow(0 0 ${blur}px rgba(255,255,255,${alpha}))`;
+            if (div.style.filter !== filter) div.style.filter = filter;
+          } else if (div.style.filter !== '') {
+            div.style.filter = '';
+          }
+          const opacity = moved.highlightOpacity ?? 1;
+          const opacityStr = opacity >= 0.999 ? '' : String(opacity);
+          if (div.style.opacity !== opacityStr) div.style.opacity = opacityStr;
         }
         const imgEl = imgRefs.current.get(moved.id);
         if (imgEl) {
-          const sx = (moved.scaleX || 1) * (moved.specialScale || 1);
-          const sy = (moved.scaleY || 1) * (moved.specialScale || 1);
+          const highlightScale = moved.highlightScale ?? 1;
+          const sx = (moved.scaleX || 1) * (moved.specialScale || 1) * highlightScale;
+          const sy = (moved.scaleY || 1) * (moved.specialScale || 1) * highlightScale;
           const st = `scale(${sx}, ${sy}) rotate(${moved.rotation}deg) scaleX(${moved.flipped ? -1 : 1})`;
           if (imgEl.style.transform !== st) imgEl.style.transform = st;
         }
@@ -624,10 +719,11 @@ const AnimationView: React.FC<AnimationViewProps> = ({
           movement: img.movement,
           size: img.size,
           speed: img.speed,
+          isNewImage: false,
         };
       }
       // 新しい画像を初期化
-      return initializeImage(img);
+      return initializeImage(img, true);
     });
 
     // 削除された画像を除外
@@ -678,12 +774,14 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       {/* 動画背景の場合 */}
       {backgroundUrl && backgroundType === 'video' && (
         <video
+          ref={backgroundVideoRef}
           src={backgroundUrl}
           autoPlay
           loop
           muted
           playsInline
           preload="auto"
+          onLoadedData={ensureBackgroundVideoPlaying}
           style={{
             position: 'absolute',
             top: 0,
