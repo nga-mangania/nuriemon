@@ -42,11 +42,30 @@ export function UploadPage() {
     console.log('[UploadPage] 現在の保存設定:', settings);
 
     // 自動取り込み設定を読み込み
-    const autoImportService = AutoImportService.getInstance();
     const importPath = await AppSettingsService.getAutoImportPath();
     const importEnabled = await AppSettingsService.getAutoImportEnabled();
     setAutoImportPath(importPath);
-    setAutoImportEnabled(importEnabled && autoImportService.isCurrentlyWatching());
+
+    if (importEnabled && importPath) {
+      const autoImportService = AutoImportService.getInstance();
+      if (!autoImportService.isCurrentlyWatching()) {
+        try {
+          setIsStartingAutoImport(true);
+          await autoImportService.startWatching(importPath);
+          setAutoImportEnabled(true);
+        } catch (error) {
+          console.error('[UploadPage] 自動取り込みの自動再開に失敗しました:', error);
+          setAutoImportEnabled(false);
+          await AppSettingsService.setAutoImportEnabled(false);
+        } finally {
+          setIsStartingAutoImport(false);
+        }
+      } else {
+        setAutoImportEnabled(true);
+      }
+    } else {
+      setAutoImportEnabled(false);
+    }
   };
 
   // 設定を読み込み
@@ -89,8 +108,10 @@ export function UploadPage() {
           // Rust側で新しいワークスペースパスを使うように再開始
           await autoImportService.startWatching(currentPath);
           console.log('[UploadPage] 自動取り込み再開始完了');
+          setAutoImportEnabled(true);
         } catch (error) {
           console.error('[UploadPage] 自動取り込み再開始エラー:', error);
+          setAutoImportEnabled(false);
         }
       }
     });
