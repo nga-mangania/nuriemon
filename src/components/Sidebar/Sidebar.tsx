@@ -2,15 +2,18 @@ import { FC } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import styles from './Sidebar.module.scss';
 
+type TabId = 'settings' | 'controller' | 'upload' | 'gallery' | 'animation';
+
 interface SidebarProps {
-  activeTab: 'settings' | 'upload' | 'gallery' | 'animation';
-  onTabChange: (tab: 'settings' | 'upload' | 'gallery' | 'animation') => void;
+  activeTab: TabId;
+  onTabChange: (tab: TabId) => void;
   onAnimationClick: () => void;
 }
 
 export const Sidebar: FC<SidebarProps> = ({ activeTab, onTabChange, onAnimationClick }) => {
   const menuItems = [
     { id: 'settings' as const, label: '初期設定', icon: '⚙️' },
+    { id: 'controller' as const, label: 'コントローラー設定', icon: '🎮' },
     { id: 'upload' as const, label: 'アップロード', icon: '📤' },
     { id: 'gallery' as const, label: 'ギャラリー', icon: '🖼️' },
     { id: 'animation' as const, label: 'アニメーション', icon: '🎬' },

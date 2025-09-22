@@ -1,0 +1,62 @@
+.controllerSettings {
+  display: grid;
+  gap: 24px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+  display: grid;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0;
+}
+
+.description {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+}
+
+.sliderRow {
+  display: grid;
+  gap: 8px;
+}
+
+.sliderRow label {
+  font-weight: 600;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.sliderRow input[type="range"] {
+  width: 100%;
+}
+
+.valueNote {
+  font-size: 12px;
+  color: #475569;
+}
+
+.futureNote {
+  font-size: 12px;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px dashed #cbd5f5;
+  padding: 12px;
+  border-radius: 8px;
+}

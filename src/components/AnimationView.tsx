@@ -9,6 +9,10 @@ import {
   textEmotes,
   svgEmotes,
 } from '../services/animationSettings';
+import {
+  DEFAULT_CONTROLLER_SETTINGS,
+  loadControllerSettings,
+} from '../services/controllerSettings';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import styles from './AnimationView.module.scss';
 
@@ -58,7 +62,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   const emoteRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   // ブロードキャスト用エモートキュー
   const emoteBroadcastRef = useRef<null | { type: 'text'|'svg', content: string, pending: string[] }>(null);
-  
+  const [controllerSettings, setControllerSettings] = useState(DEFAULT_CONTROLLER_SETTINGS);
+
   // ノイズ簡易キャッシュ・負荷制御用の可変パラメータ
   const noiseIntervalMsRef = useRef(66);   // 約15Hz（重い時は100msへ）
   const emoteBatchSizeRef = useRef(8);     // 1フレームあたりのエモート適用数
@@ -101,6 +106,24 @@ const AnimationView: React.FC<AnimationViewProps> = ({
   useEffect(() => {
     console.log('[AnimationView] 地面位置が変更されました:', groundPosition);
   }, [groundPosition]);
+
+  useEffect(() => {
+    let mounted = true;
+    loadControllerSettings().then((settings) => {
+      if (mounted) setControllerSettings(settings);
+    });
+    const unlistenPromise = listen('app-settings-changed', async (event) => {
+      const payload: any = event.payload;
+      if (payload?.key === 'controller_settings') {
+        const updated = await loadControllerSettings();
+        setControllerSettings(updated);
+      }
+    });
+    return () => {
+      mounted = false;
+      unlistenPromise.then((un) => { try { un(); } catch (_) {} }).catch(() => {});
+    };
+  }, []);
 
   const ensureBackgroundVideoPlaying = useCallback(() => {
     const video = backgroundVideoRef.current;
@@ -515,7 +538,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     const manualAxisX = image.manualAxisX ?? 0;
     const manualAxisY = image.manualAxisY ?? 0;
     const manualActive = manualAxisX !== 0 || manualAxisY !== 0;
-    const manualSpeedBase = manualActive ? (0.9 * currentSpeed + 0.35) : 0;
+    const speedFactor = Math.min(2, Math.max(0.2, controllerSettings.manualSpeedFactor));
+    const manualSpeedBase = manualActive ? (0.9 * currentSpeed + 0.35) * speedFactor : 0;
     const manualHorizontal = manualAxisX * manualSpeedBase;
     const manualVertical = manualAxisY * (image.type === 'fly' ? manualSpeedBase : manualSpeedBase * 0.6);
 
@@ -628,7 +652,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
 
     // 特殊な動きを適用
     return applySpecialMovement(image, currentTime);
-  }, [groundPosition, applySpecialMovement]);
+  }, [groundPosition, applySpecialMovement, controllerSettings.manualSpeedFactor]);
 
   // アニメーションループ
   useEffect(() => {

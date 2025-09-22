@@ -15,6 +15,7 @@ import { emit } from '@tauri-apps/api/event';
 import styles from "./App.module.scss";
 import { InitialSetup } from "./components/InitialSetup";
 import { createPcWsClient } from "./services/pcWsClient";
+import { ControllerSettings } from "./components/ControllerSettings";
 import { checkRelayHealth } from "./services/connectivityProbe";
 import { resolveBaseUrl } from "./services/relayClient";
 import { checkForUpdatesOnStartup } from "./services/updater";
@@ -35,7 +36,7 @@ function hideInitialLoading() {
 
 function App() {
   console.log('[App] Component rendering');
-  const [activeTab, setActiveTab] = useState<'settings' | 'upload' | 'gallery' | 'animation'>('upload');
+  const [activeTab, setActiveTab] = useState<'settings' | 'controller' | 'upload' | 'gallery' | 'animation'>('upload');
   const { isLoading, needsWorkspace, isReady, currentWorkspace } = useWorkspace();
   const [showSetup, setShowSetup] = useState(false);
   const relayBridgeRef = useRef<ReturnType<typeof createPcWsClient> | null>(null);
@@ -226,6 +227,7 @@ function App() {
         
         <main className={styles.mainContent}>
           {activeTab === 'settings' && <SettingsPage />}
+          {activeTab === 'controller' && <ControllerSettings />}
           {activeTab === 'upload' && <UploadPage />}
           {activeTab === 'gallery' && <GalleryPage />}
         </main>
