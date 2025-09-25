@@ -983,9 +983,6 @@ pub fn run() {
             get_qr_session_status,
             open_qr_window,
             open_animation_window
-            ,save_event_secret
-            ,load_event_secret
-            ,delete_event_secret
             ,save_license_token
             ,load_license_token
             ,delete_license_token
@@ -1006,14 +1003,6 @@ fn warmup_python() -> Result<(), String> {
     // 応答は待たずに即時戻す（レンダラをブロックしない）
     python_send_nowait(serde_json::json!({"command":"warmup"}))?;
     Ok(())
-}
-
-// ================== Secure Secrets (OS Keychain) ==================
-
-fn keychain_account(env: &str) -> (String, String) {
-    let service = "nuriemon".to_string();
-    let account = format!("event_setup_secret:{}", env);
-    (service, account)
 }
 
 fn license_token_account() -> (String, String) {
@@ -1103,65 +1092,6 @@ fn read_env_overrides() -> Result<Option<String>, String> {
     let s = serde_json::to_string(&obj).map_err(|e| format!("json error: {}", e))?;
     if s == "{}" { return Ok(None); }
     Ok(Some(s))
-}
-
-#[tauri::command]
-fn save_event_secret(env: String, secret: String) -> Result<(), String> {
-    let (service, account) = keychain_account(env.trim());
-    Entry::new(&service, &account)
-        .map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?
-        .set_password(&secret)
-        .map_err(|e| format!("KEYCHAIN_WRITE_ERROR: {}", e))
-}
-
-#[tauri::command]
-fn load_event_secret(env: String) -> Result<Option<String>, String> {
-    let env = env.trim().to_string();
-    let (service, account) = keychain_account(&env);
-    let entry = Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
-    match entry.get_password() {
-        Ok(pw) => Ok(Some(pw)),
-        Err(keyring::Error::NoEntry) => {
-            // 互換: 旧サービス名 "Nuriemon" からの移行を試みる
-            let legacy_service = "Nuriemon".to_string();
-            let legacy_entry = Entry::new(&legacy_service, &account)
-                .map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
-            match legacy_entry.get_password() {
-                Ok(pw) => {
-                    // 新サービス名に保存し直し、旧エントリは削除（ベストエフォート）
-                    let _ = Entry::new(&service, &account)
-                        .map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?
-                        .set_password(&pw);
-                    let _ = legacy_entry.delete_password();
-                    Ok(Some(pw))
-                }
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(e) => Err(format!("KEYCHAIN_READ_ERROR: {}", e)),
-            }
-        }
-        Err(e) => Err(format!("KEYCHAIN_READ_ERROR: {}", e)),
-    }
-}
-
-#[tauri::command]
-fn delete_event_secret(env: String) -> Result<(), String> {
-    let env = env.trim().to_string();
-    let (service, account) = keychain_account(&env);
-    let entry = Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
-    match entry.delete_password() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => {
-            // 旧サービス名でも削除ベストエフォート
-            let legacy_service = "Nuriemon".to_string();
-            let legacy_entry = Entry::new(&legacy_service, &account)
-                .map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
-            match legacy_entry.delete_password() {
-                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                Err(e) => Err(format!("KEYCHAIN_DELETE_ERROR: {}", e)),
-            }
-        }
-        Err(e) => Err(format!("KEYCHAIN_DELETE_ERROR: {}", e)),
-    }
 }
 
 // ===== License device token (OS Keychain) =====

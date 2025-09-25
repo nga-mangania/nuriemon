@@ -6,6 +6,7 @@ import { AppSettingsService } from '../services/database';
 import { GlobalSettingsService } from '../services/globalSettings';
 import { checkRelayHealth } from '../services/connectivityProbe';
 import { pendingSid, registerPc, retryWithBackoff, resolveBaseUrl, getSidStatus } from '../services/relayClient';
+import { loadDeviceToken } from '../services/licenseClient';
 import styles from './QrDisplayWindow.module.scss';
 // Relayブリッジはグローバル（App側）で起動するためQR画面では起動しない
 
@@ -15,6 +16,8 @@ interface QrSession {
   qrCode: string;
   connected: boolean;
   envKey: string;
+  blockedReason?: 'missing' | 'invalid' | 'error';
+  errorMessage?: string;
 }
 
 export const QrDisplayWindow: React.FC = () => {
@@ -51,6 +54,10 @@ export const QrDisplayWindow: React.FC = () => {
     setVisibleIds(next);
   };
   const inflightRef = useRef<Set<string>>(new Set());
+  const licenseAlertShownRef = useRef<boolean>(false);
+  const [licenseBlocked, setLicenseBlocked] = useState<boolean>(false);
+  const [licenseBlockedReason, setLicenseBlockedReason] = useState<'missing' | 'invalid' | null>(null);
+  const generalAlertShownRef = useRef<boolean>(false);
   const debug = (msg: string) => {
     try {
       const ts = new Date().toISOString().split('T')[1]?.replace('Z','');
@@ -249,6 +256,41 @@ export const QrDisplayWindow: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    (async () => {
+      try {
+        cleanup = await listen('pc-bridge-status', (event) => {
+          const payload: any = event.payload || {};
+          const state = typeof payload === 'string' ? payload : payload.state;
+          if (state === 'token-missing') {
+            setLicenseBlocked(true);
+            setLicenseBlockedReason(prev => prev || 'missing');
+          }
+          if (state === 'auth-sent' || state === 'ack' || state === 'open') {
+            licenseAlertShownRef.current = false;
+            setLicenseBlocked(false);
+            setLicenseBlockedReason(null);
+            setBanner(null);
+            setSessions(prev => {
+              let changed = false;
+              const next = new Map(prev);
+              prev.forEach((value, key) => {
+                if ((value as any)?.blockedReason) {
+                  next.delete(key);
+                  changed = true;
+                }
+              });
+              return changed ? next : prev;
+            });
+            setRegenTick(t => t + 1);
+          }
+        });
+      } catch {}
+    })();
+    return () => { try { cleanup && cleanup(); } catch {} };
+  }, []);
+
   // QRコードの生成
   const generateQr = async (imageId: string) => {
     debug(`generateQr called imageId=${imageId}`);
@@ -256,6 +298,15 @@ export const QrDisplayWindow: React.FC = () => {
       debug(`generateQr skipped (inflight) imageId=${imageId}`);
       return;
     }
+    generalAlertShownRef.current = false;
+    setSessions(prev => {
+      const next = new Map(prev);
+      const session = next.get(imageId);
+      if (session && (session as any).blockedReason) {
+        next.delete(imageId);
+      }
+      return next;
+    });
     inflightRef.current.add(imageId);
     const relayActive = operationMode === 'relay' || (operationMode === 'auto' && useRelay);
     if (!relayActive && !isServerStarted) {
@@ -271,6 +322,17 @@ export const QrDisplayWindow: React.FC = () => {
       let session: QrSession;
       const envKey = `${relayBaseUrl}|${relayEventId}|${pcId}|${operationMode}`;
       if (relayActive) {
+        if (licenseBlocked) {
+          handleLicenseBlocking(licenseBlockedReason || 'missing', imageId, sessionKey, envKey);
+          inflightRef.current.delete(imageId);
+          return;
+        }
+        const bearer = await loadDeviceToken();
+        if (!bearer) {
+          handleLicenseBlocking('missing', imageId, sessionKey, envKey);
+          inflightRef.current.delete(imageId);
+          return;
+        }
         // Relay: sid を発行し、pending-sid に登録
         if (!relayEventId || !pcId) {
           // Autoモード時はローカルへフォールバック、Relay固定時はエラー表示
@@ -303,12 +365,52 @@ export const QrDisplayWindow: React.FC = () => {
         }
 
         // 必要ならPC登録（ベストエフォート + リトライ）
-        try { 
+        try {
           debug(`registerPc start eid=${relayEventId} pcid=${pcId}`);
           const r = await retryWithBackoff(() => registerPc({ eventId: relayEventId, pcid: pcId }));
-          debug(`registerPc done ok=${r.ok} status=${(r as any).status}`);
+          debug(`registerPc done ok=${r.ok} status=${(r as any).status} code=${(r as any).code} err=${(r as any).error}`);
+          if (!r.ok) {
+            const errCode = (r as any)?.code || (r as any)?.error;
+            const status = (r as any)?.status;
+            if (errCode === 'E_MISSING_TOKEN' || errCode === 'E_TOKEN_REQUIRED') {
+              handleLicenseBlocking('missing', imageId, sessionKey, envKey);
+              inflightRef.current.delete(imageId);
+              return;
+            }
+            if (errCode === 'E_BAD_TOKEN' || status === 401) {
+              handleLicenseBlocking('invalid', imageId, sessionKey, envKey);
+              inflightRef.current.delete(imageId);
+              return;
+            }
+            if (operationMode === 'auto') {
+              setBanner('Relay接続に失敗したためローカル接続に切替えました');
+              debug('registerPc failed; fallback to local');
+              const result = await invoke<{ sessionId: string; qrCode: string; imageId: string }>('generate_qr_code', { imageId });
+              session = {
+                imageId: result.imageId,
+                sessionId: result.sessionId,
+                qrCode: result.qrCode,
+                connected: false,
+                envKey,
+              };
+              setSessions(prev => {
+                const m = new Map(prev);
+                (session as any).sessionKey = sessionKey;
+                m.set(imageId, session);
+                return m;
+              });
+              inflightRef.current.delete(imageId);
+              return;
+            }
+            handleGeneralFailure('QRの事前登録に失敗しました。時間をおいて再試行してください。', imageId, sessionKey, envKey);
+            inflightRef.current.delete(imageId);
+            return;
+          }
         } catch (e:any) {
           debug(`registerPc error ${e?.message || e}`);
+          handleGeneralFailure('Relay 接続に失敗しました。ネットワーク環境を確認してから再試行してください。', imageId, sessionKey, envKey);
+          inflightRef.current.delete(imageId);
+          return;
         }
 
         const sid = generateSid();
@@ -319,9 +421,13 @@ export const QrDisplayWindow: React.FC = () => {
         if (!res.ok) {
           console.error('[QrDisplayWindow] pending-sid 登録に失敗:', res);
           setBanner(`pending-sid失敗: status=${(res as any).status || '-'} code=${(res as any).code || (res as any).error || '-'}`);
-          if ((res as any)?.error === 'E_MISSING_SECRET') {
-            alert('秘密鍵が未設定です。設定画面からEVENT_SETUP_SECRETを登録してください。');
-            debug('missing secret');
+          const errCode = (res as any)?.error || (res as any)?.code;
+          if (errCode === 'E_MISSING_TOKEN' || errCode === 'E_TOKEN_REQUIRED') {
+            handleLicenseBlocking('missing', imageId, sessionKey, envKey);
+            return;
+          }
+          if (errCode === 'E_BAD_TOKEN') {
+            handleLicenseBlocking('invalid', imageId, sessionKey, envKey);
             return;
           }
           if (operationMode === 'auto') {
@@ -329,15 +435,15 @@ export const QrDisplayWindow: React.FC = () => {
             setBanner('ネットワーク不安定のためローカル接続に切替えました');
             debug('fallback to local');
             const result = await invoke<{ sessionId: string; qrCode: string; imageId: string }>('generate_qr_code', { imageId });
-          session = {
-            imageId: result.imageId,
-            sessionId: result.sessionId,
-            qrCode: result.qrCode,
-            connected: false,
-            envKey,
-          };
-        } else {
-            alert('QRの事前登録に失敗しました。時間をおいて再試行してください。');
+            session = {
+              imageId: result.imageId,
+              sessionId: result.sessionId,
+              qrCode: result.qrCode,
+              connected: false,
+              envKey,
+            };
+          } else {
+            handleGeneralFailure('QRの事前登録に失敗しました。時間をおいて再試行してください。', imageId, sessionKey, envKey);
             debug('pending-sid failed in relay mode; abort');
             return;
           }
@@ -422,6 +528,10 @@ export const QrDisplayWindow: React.FC = () => {
     const ready = uiReady;
     const envKey = `${relayBaseUrl}|${relayEventId}|${pcId}|${operationMode}`;
     if (!ready) return;
+    const relayActive = operationMode === 'relay' || (operationMode === 'auto' && useRelay);
+    if (licenseBlocked && relayActive) {
+      return;
+    }
     let delay = 0;
     const stepMs = 60;
     const noVisible = visibleIdsRef.current.size === 0;
@@ -436,7 +546,7 @@ export const QrDisplayWindow: React.FC = () => {
         delay += stepMs;
       }
     });
-  }, [regenTick, processedImages, sessions, operationMode, useRelay, relayBaseUrl, relayEventId, pcId, isServerStarted, uiReady, visibleIds]);
+  }, [regenTick, processedImages, sessions, operationMode, useRelay, relayBaseUrl, relayEventId, pcId, isServerStarted, uiReady, visibleIds, licenseBlocked]);
 
   // グローバル再生成ボタン
   const regenerateAll = () => {
@@ -526,6 +636,66 @@ export const QrDisplayWindow: React.FC = () => {
       out += alphabet[Math.floor(Math.random() * alphabet.length)];
     }
     return out;
+  }
+
+  function handleLicenseBlocking(kind: 'missing' | 'invalid', imageId?: string, sessionKey?: string, envKey?: string) {
+    setLicenseBlocked(true);
+    setLicenseBlockedReason(kind);
+    const message = kind === 'missing'
+      ? 'ライセンスが未有効化のため Relay へ接続できません。設定画面でライセンスコードを有効化してから再試行してください。'
+      : '保存済みのライセンス情報が無効になっています。設定画面でライセンスを再有効化してください。';
+    const bannerMessage = kind === 'missing'
+      ? 'ライセンスを有効化してから再試行してください'
+      : 'ライセンス情報を再有効化してください';
+    if (!licenseAlertShownRef.current) {
+      try { alert(message); } catch {}
+      licenseAlertShownRef.current = true;
+    }
+    setBanner(bannerMessage);
+    debug(kind === 'missing' ? 'missing device token' : 'invalid device token');
+    if (imageId && sessionKey && envKey) {
+      setSessions(prev => {
+        const existing = prev.get(imageId);
+        if (existing && (existing as any).blockedReason === kind) {
+          return prev;
+        }
+        const next = new Map(prev);
+        const placeholder: QrSession = {
+          imageId,
+          sessionId: '',
+          qrCode: '',
+          connected: false,
+          envKey,
+          blockedReason: kind,
+        };
+        (placeholder as any).sessionKey = sessionKey;
+        next.set(imageId, placeholder);
+        return next;
+      });
+    }
+  }
+
+  function handleGeneralFailure(message: string, imageId: string, sessionKey: string, envKey: string) {
+    setBanner(message);
+    if (!generalAlertShownRef.current) {
+      try { alert(message); } catch {}
+      generalAlertShownRef.current = true;
+    }
+    setSessions(prev => {
+      const next = new Map(prev);
+      const placeholder: QrSession = {
+        imageId,
+        sessionId: '',
+        qrCode: '',
+        connected: false,
+        envKey,
+        blockedReason: 'error',
+        errorMessage: message,
+      };
+      (placeholder as any).sessionKey = sessionKey;
+      next.set(imageId, placeholder);
+      return next;
+    });
   }
 
   return (
@@ -639,19 +809,32 @@ const ImageQrItem: React.FC<ImageQrItemProps> = ({ image, session, onGenerateQr,
       
       <div className={styles.qrSection}>
         {session ? (
-          <>
-            <QrCodeDisplay qrCode={session.qrCode} />
-            <div className={styles.qrStatus}>
-              {session.connected ? (
-                <span className={styles.connected}>接続済み</span>
-              ) : (
-                <span className={styles.timer}>接続待ち</span>
-              )}
+          session.blockedReason ? (
+            <div className={styles.qrLoading}>
+              {session.blockedReason === 'missing'
+                ? 'ライセンスが未有効化です'
+                : session.blockedReason === 'invalid'
+                  ? 'ライセンス情報が無効です'
+                  : (session.errorMessage || 'QRの生成に失敗しました')}
+              <div style={{ marginTop: 6 }}>
+                <button onClick={onGenerateQr} disabled={!ready} style={{ fontSize: 12 }}>再試行</button>
+              </div>
             </div>
-            <div style={{ marginTop: 6 }}>
-              <button onClick={onGenerateQr} disabled={!ready} style={{ fontSize: 12 }}>QR再生成</button>
-            </div>
-          </>
+          ) : (
+            <>
+              <QrCodeDisplay qrCode={session.qrCode} />
+              <div className={styles.qrStatus}>
+                {session.connected ? (
+                  <span className={styles.connected}>接続済み</span>
+                ) : (
+                  <span className={styles.timer}>接続待ち</span>
+                )}
+              </div>
+              <div style={{ marginTop: 6 }}>
+                <button onClick={onGenerateQr} disabled={!ready} style={{ fontSize: 12 }}>QR再生成</button>
+              </div>
+            </>
+          )
         ) : (
           <div className={styles.qrLoading}>
             QR生成中...

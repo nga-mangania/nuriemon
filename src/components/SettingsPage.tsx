@@ -13,7 +13,6 @@ import { WorkspaceManager } from '../services/workspaceManager';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { AppSettingsService } from '../services/database';
 import { GlobalSettingsService } from '../services/globalSettings';
-import { currentRelayEnvAsSecretEnv, deleteEventSetupSecret, getEventSetupSecret, isUsingMemoryFallback, setEventSetupSecret } from '../services/secureSecrets';
 import styles from './SettingsPage.module.scss';
 import { checkForUpdatesManually } from '../services/updater';
 import { activateDevice, deleteDeviceToken, loadDeviceToken, parseJwtExp } from '../services/licenseClient';
@@ -40,10 +39,6 @@ export function SettingsPage() {
   // relayBaseUrl は UIでは直接使用しないため保持しない（effective に委譲）
   const [relayEventId, setRelayEventId] = useState<string>('');
   const [pcId, setPcId] = useState<string>('');
-  const [eventSetupSecretInput, setEventSetupSecretInput] = useState<string>('');
-  const [storedSecretPreview, setStoredSecretPreview] = useState<string>('');
-  const [revealSecret, setRevealSecret] = useState<boolean>(false);
-  const [secretFallback, setSecretFallback] = useState<boolean>(false);
   const [relayEnv, setRelayEnv] = useState<'prod'|'stg'>('prod');
   const [relayBaseUrlProd, setRelayBaseUrlProd] = useState<string>('https://ctrl.nuriemon.jp');
   const [relayBaseUrlStg, setRelayBaseUrlStg] = useState<string>('https://stg.ctrl.nuriemon.jp');
@@ -116,17 +111,6 @@ export function SettingsPage() {
         setPcId(generated);
         try { await GlobalSettingsService.save('pcid', generated); } catch {}
       }
-      // 本番UI（Relay設定を隠してロック）の場合は EVENT_SETUP_SECRET に触れない
-      if (!(hide && lock)) {
-        try {
-          const envForSecret = await currentRelayEnvAsSecretEnv();
-          const secret = await getEventSetupSecret(envForSecret);
-          if (secret) setStoredSecretPreview(maskSecret(secret));
-          setSecretFallback(isUsingMemoryFallback());
-        } catch (_) {
-          setSecretFallback(isUsingMemoryFallback());
-        }
-      }
       // License status (device token)
       try {
         const tok = await loadDeviceToken();
@@ -141,27 +125,6 @@ export function SettingsPage() {
     } catch (_) {}
 
     // （生成は上で一度だけ行う）
-
-    // レガシー移行（旧: ワークスペースJSONに平文保存）
-    try {
-      const eff = GlobalSettingsService.getEffective();
-      const hide = !!eff?.ui?.hideRelaySettings;
-      const lock = !!eff?.ui?.lockRelaySettings;
-      if (!(hide && lock)) {
-        const legacy = await AppSettingsService.getAppSetting('event_setup_secret');
-        if (legacy && legacy.trim()) {
-          const envForSecret = await currentRelayEnvAsSecretEnv();
-          await setEventSetupSecret(envForSecret, legacy.trim());
-          try { await AppSettingsService.saveAppSetting('event_setup_secret', ''); } catch {}
-          console.log('[SettingsPage] EVENT_SETUP_SECRET migrated to OS keychain');
-          const s = await getEventSetupSecret(envForSecret);
-          if (s) setStoredSecretPreview(maskSecret(s));
-          setSecretFallback(isUsingMemoryFallback());
-        }
-      }
-    } catch (e) {
-      console.warn('[SettingsPage] legacy secret migration failed/ignored:', e);
-    }
 
     // 背景画像の読み込み
     try {
@@ -517,7 +480,7 @@ export function SettingsPage() {
                     if (tok) setLicenseExp(parseJwtExp(tok));
                     alert('有効化しました');
                   } else {
-                    alert('有効化に失敗しました: ' + (res.error || 'unknown'));
+                    alert('有効化に失敗しました: ' + mapLicenseActivationError(res.error));
                   }
                 }}
                 className={styles.animationButton}
@@ -618,65 +581,45 @@ export function SettingsPage() {
             />
           </label>
           <label>
-            PC ID（任意、空なら自動）
-            <input
-              type="text"
-              value={pcId}
-              onChange={async (e) => {
-            const vRaw = e.target.value.trim().toLowerCase();
-            const v = sanitizeId(vRaw);
-            setPcId(v);
-            if (isValidId(v)) {
-              try {
-                await GlobalSettingsService.save('pcid', v);
-                emit('app-settings-changed', { key: 'pcid', value: v });
-              } catch {}
-            }
-              }}
-              placeholder="例: booth-01"
-              style={{ width: '100%' }}
-            />
-          </label>
-          <fieldset style={{ border: '1px solid #eee', padding: 12, borderRadius: 6 }}>
-            <legend>EVENT_SETUP_SECRET（安全保存）</legend>
-            <div style={{ display: 'grid', gap: 8 }}>
-              <div>
-                <label>現在（保存済み）: <span style={{ fontFamily: 'monospace' }}>{storedSecretPreview || '(未設定)'}</span></label>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  type={revealSecret ? 'text' : 'password'}
-                  value={eventSetupSecretInput}
-                  onChange={(e) => setEventSetupSecretInput(e.target.value)}
-                  placeholder="イベント登録用シークレット（base64url推奨）"
-                  style={{ width: '100%' }}
-                  disabled={lockRelaySettings}
-                />
-                <button onClick={() => setRevealSecret(s => !s)}>{revealSecret ? 'Hide' : 'Reveal'}</button>
-                <button onClick={async () => {
-                  const envForSecret = await currentRelayEnvAsSecretEnv();
-                  await setEventSetupSecret(envForSecret, eventSetupSecretInput.trim());
-                  const s = await getEventSetupSecret(envForSecret);
-                  setStoredSecretPreview(s ? maskSecret(s) : '');
-                  setEventSetupSecretInput('');
-                  setSecretFallback(isUsingMemoryFallback());
-                  alert(isUsingMemoryFallback() ? '秘密鍵をメモリに保存しました（この環境では再起動で消えます）' : '秘密鍵を安全領域に保存しました');
-                }}>Save</button>
-                <button onClick={async () => {
-                  if (await confirm('保存済みの秘密鍵を削除しますか？')) {
-                    const envForSecret = await currentRelayEnvAsSecretEnv();
-                    await deleteEventSetupSecret(envForSecret);
-                    setStoredSecretPreview('');
-                    setSecretFallback(isUsingMemoryFallback());
-                  }
-                }}>Delete</button>
-              </div>
-              <div className={styles.note}>
-                <p>鍵はOSの安全領域に保存され、平文ファイルには保存されません。stg/prodで別々に管理されます。</p>
-                {secretFallback && <p style={{ color: '#a60' }}>この環境では安全領域が利用できないため、メモリに一時保存します（再起動で消えます）。</p>}
-              </div>
+            PC ID（自動採番・変更不可）
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="text"
+                value={pcId}
+                readOnly
+                style={{ width: '100%', background: '#f5f5f5', color: '#555', border: '1px solid #ddd', padding: 8, borderRadius: 6 }}
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard?.writeText(pcId).catch(() => {});
+                  alert('PC ID をコピーしました');
+                }}
+                className={styles.animationButton}
+              >Copy</button>
             </div>
-          </fieldset>
+            <div style={{ marginTop: 4, fontSize: 12, color: '#666' }}>
+              端末を入れ替える場合は「PC ID 再生成」を押してライセンスを再有効化してください。
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <button
+                onClick={async () => {
+                  if (!confirm('PC ID を再生成すると現在のライセンスが無効化され、再有効化が必要になります。続行しますか？')) return;
+                  const newId = generateDefaultPcid();
+                  setPcId(newId);
+                  try {
+                    await GlobalSettingsService.save('pcid', newId);
+                    emit('app-settings-changed', { key: 'pcid', value: newId });
+                  } catch {}
+                  try { await deleteDeviceToken(); } catch {}
+                  setLicenseStatus('未有効化');
+                  setLicenseExp(null);
+                  alert('PC ID を再生成しました。ライセンスコードを再入力して有効化してください。');
+                }}
+                className={styles.animationButton}
+                style={{ backgroundColor: '#f97316', borderColor: '#ea580c' }}
+              >PC ID 再生成</button>
+            </div>
+          </label>
         </div>
         <div className={styles.note}>
           <p>QRは `e` と `sid` のみを含み、WS用トークンはPOSTで取得します（URLにトークンは載せません）。</p>
@@ -892,11 +835,6 @@ export function SettingsPage() {
 }
 
 // ========= helpers =========
-function maskSecret(s: string): string {
-  const t = (s || '').toString();
-  if (t.length <= 6) return '******';
-  return `${t.slice(0, 3)}…${t.slice(-3)}`;
-}
 function sanitizeId(input: string): string {
   // 小文字英数とハイフンのみ、最大32
   return input.replace(/[^a-z0-9-]/g, '').slice(0, 32);
@@ -912,4 +850,27 @@ function generateDefaultPcid(): string {
   let s = '';
   for (let i = 0; i < 6; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
   return `pc-${s}`;
+}
+
+function mapLicenseActivationError(code?: string): string {
+  if (!code) return '原因不明のエラーが発生しました。時間を置いて再試行してください。';
+  switch (code) {
+    case 'E_LICENSE_NOT_FOUND':
+      return 'ライセンスコードが認識できません。入力内容をご確認ください。';
+    case 'E_LICENSE_INACTIVE':
+      return 'このライセンスは無効化されています。サポートへご連絡ください。';
+    case 'E_LICENSE_EXPIRED':
+      return 'ライセンスの有効期限が切れています。更新手続きを行ってください。';
+    case 'E_SEAT_LIMIT':
+      return '利用可能な端末数の上限に達しています。別端末のライセンスを解除してから再試行してください。';
+    case 'E_BAD_REQUEST':
+      return 'リクエスト内容が正しくありません。ライセンスコードと端末IDを確認してください。';
+    case 'E_ADMIN_REQUIRED':
+      return '管理者権限が必要な操作です。';
+    default:
+      if (code.startsWith('HTTP_')) {
+        return `サーバーエラーが発生しました (HTTP ${code.replace('HTTP_', '')})`;
+      }
+      return `エラーコード: ${code}`;
+  }
 }

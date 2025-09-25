@@ -40,3 +40,7 @@ app-data/
 
 REQUIREMENTS.md
 /apps/license-api/keys/
+
+# Tooling
+.serena/
+

@@ -48,7 +48,9 @@ export default {
           return cors(error(400, 'E_BAD_REQUEST'));
         }
         const now = Math.floor(Date.now() / 1000);
-        const license = await findLicenseByCode(env.DB, body.licenseCode.trim());
+        const code = body.licenseCode.trim();
+        const pcId = String(body.device.pcId).trim();
+        const license = await findLicenseByCode(env.DB, code);
         if (!license) return cors(error(404, 'E_LICENSE_NOT_FOUND'));
         if (license.status !== 'active') return cors(error(403, 'E_LICENSE_INACTIVE'));
         if (license.expires_at && Number(license.expires_at) > 0 && Number(license.expires_at) < now) {
@@ -58,13 +60,14 @@ export default {
         // enforce seats: deactivate oldest active devices if necessary
         const seats = Math.max(1, Number(license.seats || 1));
         const active = await countActiveDevices(env.DB, license.id);
-        if (active >= seats) {
-          await deactivateOldest(env.DB, license.id, active - seats + 1);
+        const existingDevice = await findDeviceByPcId(env.DB, license.id, pcId);
+        if (!existingDevice && active >= seats) {
+          return cors(error(409, 'E_SEAT_LIMIT'));
         }
         // upsert device
         const device = {
-          id: crypto.randomUUID(),
-          pc_id: String(body.device.pcId).trim(),
+          id: existingDevice?.id || crypto.randomUUID(),
+          pc_id: pcId,
           platform: String(body.device.platform || ''),
           created_at: now,
           last_seen_at: now,
@@ -164,10 +167,9 @@ async function countActiveDevices(DB: D1Database, licenseId: string): Promise<nu
   const r = await DB.prepare('SELECT COUNT(1) as c FROM devices WHERE license_id = ? AND status = ?').bind(licenseId, 'active').first();
   return Number((r as any)?.c || 0);
 }
-async function deactivateOldest(DB: D1Database, licenseId: string, n: number) {
-  const rows = await DB.prepare('SELECT id FROM devices WHERE license_id = ? AND status = ? ORDER BY last_seen_at ASC LIMIT ?').bind(licenseId, 'active', n).all();
-  const ids = (rows?.results || []).map((r: any) => r.id);
-  for (const id of ids) await DB.prepare('UPDATE devices SET status = ? WHERE id = ?').bind('deactivated', id).run();
+async function findDeviceByPcId(DB: D1Database, licenseId: string, pcId: string) {
+  const row = await DB.prepare('SELECT * FROM devices WHERE license_id = ? AND pc_id = ? LIMIT 1').bind(licenseId, pcId).first();
+  return row as any || null;
 }
 async function upsertDevice(DB: D1Database, d: any) {
   // Try update by pc_id + license
