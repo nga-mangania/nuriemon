@@ -20,6 +20,17 @@ interface QrSession {
   errorMessage?: string;
 }
 
+type PollController = {
+  timer: number;
+  stopped: boolean;
+  attempts: number;
+};
+
+const FALLBACK_DELAY_MS = 8000;
+const FALLBACK_BASE_INTERVAL_MS = 2000;
+const FALLBACK_MAX_INTERVAL_MS = 15000;
+const FALLBACK_MAX_ATTEMPTS = 6;
+
 export const QrDisplayWindow: React.FC = () => {
   console.log('[QrDisplayWindow] Component rendering...'); // ログ1: コンポーネントがレンダリングされているか
   
@@ -58,6 +69,32 @@ export const QrDisplayWindow: React.FC = () => {
   const [licenseBlocked, setLicenseBlocked] = useState<boolean>(false);
   const [licenseBlockedReason, setLicenseBlockedReason] = useState<'missing' | 'invalid' | null>(null);
   const generalAlertShownRef = useRef<boolean>(false);
+  const [pcBridgeHealthy, setPcBridgeHealthy] = useState<boolean>(false);
+  const sessionsRef = useRef<Map<string, QrSession>>(sessions);
+  const sessionByIdRef = useRef<Map<string, string>>(new Map());
+  const fallbackTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const pollControllersRef = useRef<Map<string, PollController>>(new Map());
+  const relayEventIdRef = useRef<string>(relayEventId);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
+  useEffect(() => {
+    relayEventIdRef.current = relayEventId;
+  }, [relayEventId]);
+
+  useEffect(() => {
+    return () => {
+      fallbackTimeoutsRef.current.forEach(timeout => window.clearTimeout(timeout));
+      fallbackTimeoutsRef.current.clear();
+      pollControllersRef.current.forEach(controller => {
+        controller.stopped = true;
+        window.clearTimeout(controller.timer);
+      });
+      pollControllersRef.current.clear();
+    };
+  }, []);
   const debug = (msg: string) => {
     try {
       const ts = new Date().toISOString().split('T')[1]?.replace('Z','');
@@ -72,6 +109,146 @@ export const QrDisplayWindow: React.FC = () => {
         });
       }
     } catch {}
+  };
+
+  const updateSessions = (updater: (prev: Map<string, QrSession>) => Map<string, QrSession>) => {
+    setSessions(prev => {
+      const result = updater(prev);
+      sessionsRef.current = result;
+      return result;
+    });
+  };
+
+  const cancelFallbackForSession = (sessionId: string) => {
+    const timeout = fallbackTimeoutsRef.current.get(sessionId);
+    if (timeout !== undefined) {
+      window.clearTimeout(timeout);
+      fallbackTimeoutsRef.current.delete(sessionId);
+    }
+    const controller = pollControllersRef.current.get(sessionId);
+    if (controller) {
+      controller.stopped = true;
+      window.clearTimeout(controller.timer);
+      pollControllersRef.current.delete(sessionId);
+    }
+  };
+
+  const startFallbackPolling = (sessionId: string, imageId: string) => {
+    if (pollControllersRef.current.has(sessionId) || !sessionId) return;
+    const controller: PollController = { timer: 0, stopped: false, attempts: 0 };
+    const run = async () => {
+      if (controller.stopped) return;
+      const mappedImageId = sessionByIdRef.current.get(sessionId);
+      if (!mappedImageId || mappedImageId !== imageId) {
+        cancelFallbackForSession(sessionId);
+        return;
+      }
+      const current = sessionsRef.current.get(imageId);
+      if (!current || current.sessionId !== sessionId || current.connected) {
+        cancelFallbackForSession(sessionId);
+        return;
+      }
+      const eventId = relayEventIdRef.current;
+      if (!eventId) {
+        cancelFallbackForSession(sessionId);
+        return;
+      }
+      try {
+        const res = await getSidStatus(eventId, sessionId);
+        debug(`fallback poll sid=${sessionId} attempt=${controller.attempts} ok=${res.ok} status=${(res as any).status ?? '-'} connected=${(res as any).data?.connected ?? false}`);
+        if (res.ok && (res as any).data?.connected) {
+          markSessionConnected(sessionId, imageId);
+          cancelFallbackForSession(sessionId);
+          return;
+        }
+      } catch (error) {
+        debug(`fallback poll error sid=${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      controller.attempts += 1;
+      if (controller.attempts >= FALLBACK_MAX_ATTEMPTS) {
+        cancelFallbackForSession(sessionId);
+        return;
+      }
+      const nextDelay = Math.min(
+        FALLBACK_MAX_INTERVAL_MS,
+        FALLBACK_BASE_INTERVAL_MS * Math.pow(2, controller.attempts - 1)
+      );
+      controller.timer = window.setTimeout(run, nextDelay);
+    };
+    controller.timer = window.setTimeout(run, 0);
+    pollControllersRef.current.set(sessionId, controller);
+  };
+
+  const scheduleFallback = (sessionId: string, imageId: string, delay: number) => {
+    if (!sessionId || fallbackTimeoutsRef.current.has(sessionId) || pollControllersRef.current.has(sessionId)) return;
+    const timeout = window.setTimeout(() => {
+      fallbackTimeoutsRef.current.delete(sessionId);
+      startFallbackPolling(sessionId, imageId);
+    }, Math.max(0, delay));
+    fallbackTimeoutsRef.current.set(sessionId, timeout);
+  };
+
+  const ensureFallbackForSession = (sessionId: string, imageId: string, immediate = false) => {
+    if (!sessionId) return;
+    if (immediate) {
+      startFallbackPolling(sessionId, imageId);
+    } else {
+      scheduleFallback(sessionId, imageId, FALLBACK_DELAY_MS);
+    }
+  };
+
+  const markSessionConnected = (sessionId: string, explicitImageId?: string) => {
+    const resolvedImageId = explicitImageId || sessionByIdRef.current.get(sessionId);
+    if (!resolvedImageId) return;
+    cancelFallbackForSession(sessionId);
+    updateSessions(prev => {
+      const next = new Map(prev);
+      const target = next.get(resolvedImageId);
+      if (!target || target.sessionId !== sessionId || target.connected) {
+        return prev;
+      }
+      next.set(resolvedImageId, { ...target, connected: true });
+      return next;
+    });
+  };
+
+  const triggerFallbackForAllSessions = (immediate = false) => {
+    sessionsRef.current.forEach(session => {
+      if (!session.connected && session.sessionId) {
+        ensureFallbackForSession(session.sessionId, session.imageId, immediate);
+      }
+    });
+  };
+
+  const applyNewSession = (
+    imageId: string,
+    session: QrSession,
+    sessionKey: string,
+    usesRelayForSession: boolean,
+    previous?: QrSession
+  ) => {
+    if (previous && previous.sessionId && previous.sessionId !== session.sessionId) {
+      sessionByIdRef.current.delete(previous.sessionId);
+    }
+    sessionByIdRef.current.set(session.sessionId, imageId);
+    updateSessions(prev => {
+      const next = new Map(prev);
+      (session as any).sessionKey = sessionKey;
+      next.set(imageId, session);
+      return next;
+    });
+    if (!session.sessionId) {
+      return;
+    }
+    if (!usesRelayForSession) {
+      startTimer(imageId, session.sessionId);
+    } else {
+      if (pcBridgeHealthy) {
+        ensureFallbackForSession(session.sessionId, imageId, false);
+      } else {
+        ensureFallbackForSession(session.sessionId, imageId, true);
+      }
+    }
   };
   
   // メタデータから表示用データを生成
@@ -240,15 +417,11 @@ export const QrDisplayWindow: React.FC = () => {
   // モバイル接続イベントのリスナー
   useEffect(() => {
     const unlisten = listen('mobile-connected', (event) => {
-      const { sessionId, imageId } = event.payload as { sessionId: string; imageId: string };
-      setSessions(prev => {
-        const newSessions = new Map(prev);
-        const session = newSessions.get(imageId);
-        if (session && session.sessionId === sessionId) {
-          session.connected = true;
-        }
-        return newSessions;
-      });
+      const payload = event.payload as { sessionId?: string; sid?: string; imageId?: string };
+      const sessionId = payload?.sessionId || payload?.sid;
+      if (!sessionId) return;
+      const imageId = payload?.imageId || sessionByIdRef.current.get(sessionId);
+      markSessionConnected(sessionId, imageId);
     });
 
     return () => {
@@ -267,12 +440,16 @@ export const QrDisplayWindow: React.FC = () => {
             setLicenseBlocked(true);
             setLicenseBlockedReason(prev => prev || 'missing');
           }
-          if (state === 'auth-sent' || state === 'ack' || state === 'open') {
+          const healthy = state === 'ack' || state === 'open';
+          const semiHealthy = state === 'auth-sent' || state === 'starting';
+          const degraded = state === 'closed' || state === 'error' || state === 'auth-timeout' || state === 'token-missing';
+          if (healthy || semiHealthy) {
             licenseAlertShownRef.current = false;
             setLicenseBlocked(false);
             setLicenseBlockedReason(null);
             setBanner(null);
-            setSessions(prev => {
+            setPcBridgeHealthy(true);
+            updateSessions(prev => {
               let changed = false;
               const next = new Map(prev);
               prev.forEach((value, key) => {
@@ -284,6 +461,10 @@ export const QrDisplayWindow: React.FC = () => {
               return changed ? next : prev;
             });
             setRegenTick(t => t + 1);
+          }
+          if (degraded) {
+            setPcBridgeHealthy(false);
+            triggerFallbackForAllSessions(true);
           }
         });
       } catch {}
@@ -299,7 +480,11 @@ export const QrDisplayWindow: React.FC = () => {
       return;
     }
     generalAlertShownRef.current = false;
-    setSessions(prev => {
+    const previousSession = sessionsRef.current.get(imageId);
+    if (previousSession) {
+      cancelFallbackForSession(previousSession.sessionId);
+    }
+    updateSessions(prev => {
       const next = new Map(prev);
       const session = next.get(imageId);
       if (session && (session as any).blockedReason) {
@@ -309,6 +494,7 @@ export const QrDisplayWindow: React.FC = () => {
     });
     inflightRef.current.add(imageId);
     const relayActive = operationMode === 'relay' || (operationMode === 'auto' && useRelay);
+    let usesRelay = relayActive;
     if (!relayActive && !isServerStarted) {
       // 初期化未完了。少し待ってから再試行（regenTickで自動再試行）
       setBanner('初期化中です。数秒後に自動再試行します…');
@@ -351,15 +537,10 @@ export const QrDisplayWindow: React.FC = () => {
               connected: false,
               envKey,
             };
+            usesRelay = false;
             setBanner('Relay設定が未完了のため、ローカル接続に切替えました');
-            // store and return
-            setSessions(prev => {
-              const m = new Map(prev);
-              (session as any).sessionKey = sessionKey;
-              m.set(imageId, session);
-              return m;
-            });
             inflightRef.current.delete(imageId);
+            applyNewSession(imageId, session, sessionKey, usesRelay, previousSession);
             return;
           }
         }
@@ -393,13 +574,9 @@ export const QrDisplayWindow: React.FC = () => {
                 connected: false,
                 envKey,
               };
-              setSessions(prev => {
-                const m = new Map(prev);
-                (session as any).sessionKey = sessionKey;
-                m.set(imageId, session);
-                return m;
-              });
+              usesRelay = false;
               inflightRef.current.delete(imageId);
+              applyNewSession(imageId, session, sessionKey, usesRelay, previousSession);
               return;
             }
             handleGeneralFailure('QRの事前登録に失敗しました。時間をおいて再試行してください。', imageId, sessionKey, envKey);
@@ -442,6 +619,7 @@ export const QrDisplayWindow: React.FC = () => {
               connected: false,
               envKey,
             };
+            usesRelay = false;
           } else {
             handleGeneralFailure('QRの事前登録に失敗しました。時間をおいて再試行してください。', imageId, sessionKey, envKey);
             debug('pending-sid failed in relay mode; abort');
@@ -469,23 +647,6 @@ export const QrDisplayWindow: React.FC = () => {
             connected: false,
             envKey,
           };
-          // Relay: poll claimed status and update connected flag
-          const poll = setInterval(async () => {
-            try {
-              const st = await getSidStatus(relayEventId, sid);
-              debug(`sid-status: ok=${st.ok} status=${(st as any).status} connected=${(st as any).data?.connected}`);
-              if (st.ok && (st as any).data?.connected) {
-                setSessions(prev => {
-                  const m = new Map(prev);
-                  const s = m.get(imageId);
-                  if (s) s.connected = true;
-                  return m;
-                });
-                debug('connected=true (sid claimed)');
-                clearInterval(poll);
-              }
-            } catch {}
-          }, 2000);
         }
       } else {
         const result = await invoke<{ sessionId: string; qrCode: string; imageId: string }>('generate_qr_code', { imageId });
@@ -496,22 +657,13 @@ export const QrDisplayWindow: React.FC = () => {
           connected: false,
           envKey,
         };
+        usesRelay = false;
         debug(`local QR generated sessionId=${result.sessionId}`);
       }
 
-      setSessions(prev => {
-        const newSessions = new Map(prev);
-        // セッションキーで上書き判定（設定変更時の古いQRを無効化）
-        (session as any).sessionKey = sessionKey;
-        newSessions.set(imageId, session);
-        return newSessions;
-      });
+      applyNewSession(imageId, session, sessionKey, usesRelay, previousSession);
       debug(`session stored for imageId=${imageId}`);
 
-      // タイマーの開始
-      if (!relayActive) {
-        startTimer(imageId, session.sessionId);
-      }
     } catch (error) {
       console.error('QRコードの生成に失敗しました:', error);
       debug(`generateQr error: ${error instanceof Error ? error.message : String(error)}`);
@@ -610,17 +762,18 @@ export const QrDisplayWindow: React.FC = () => {
     const interval = setInterval(async () => {
       try {
         const status = await invoke<{ connected: boolean }>('get_qr_session_status', { sessionId });
-        setSessions(prev => {
-          const newSessions = new Map(prev);
-          const session = newSessions.get(imageId);
-          if (session) {
-            session.connected = !!status.connected;
-            // 接続済みになったらポーリング停止
-            if (session.connected) {
-              clearInterval(interval);
-            }
+        updateSessions(prev => {
+          const existing = prev.get(imageId);
+          if (!existing) return prev;
+          const nextConnected = !!status.connected;
+          if (existing.connected === nextConnected) {
+            if (nextConnected) clearInterval(interval);
+            return prev;
           }
-          return newSessions;
+          const next = new Map(prev);
+          next.set(imageId, { ...existing, connected: nextConnected });
+          if (nextConnected) clearInterval(interval);
+          return next;
         });
       } catch (error) {
         // 一時的なエラーは無視（サーバーはローカル）
@@ -654,9 +807,14 @@ export const QrDisplayWindow: React.FC = () => {
     setBanner(bannerMessage);
     debug(kind === 'missing' ? 'missing device token' : 'invalid device token');
     if (imageId && sessionKey && envKey) {
-      setSessions(prev => {
-        const existing = prev.get(imageId);
-        if (existing && (existing as any).blockedReason === kind) {
+      const existing = sessionsRef.current.get(imageId);
+      if (existing && existing.sessionId) {
+        cancelFallbackForSession(existing.sessionId);
+        sessionByIdRef.current.delete(existing.sessionId);
+      }
+      updateSessions(prev => {
+        const current = prev.get(imageId);
+        if (current && (current as any).blockedReason === kind) {
           return prev;
         }
         const next = new Map(prev);
@@ -681,7 +839,12 @@ export const QrDisplayWindow: React.FC = () => {
       try { alert(message); } catch {}
       generalAlertShownRef.current = true;
     }
-    setSessions(prev => {
+    const existing = sessionsRef.current.get(imageId);
+    if (existing && existing.sessionId) {
+      cancelFallbackForSession(existing.sessionId);
+      sessionByIdRef.current.delete(existing.sessionId);
+    }
+    updateSessions(prev => {
       const next = new Map(prev);
       const placeholder: QrSession = {
         imageId,

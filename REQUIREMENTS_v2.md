@@ -1,4 +1,50 @@
-了解！下記は **codex への実装指示書**（そのままチケット/PRの見出しに使える構成）です。
+# ライセンス & Relay 同期改善メモ (開発経緯)
+
+## 背景
+- Relay 側の JWT 認証は `sub` (pcId) とリクエストの `pcid` が一致することを前提にしている。
+- 開発環境では過去に CLI で任意の pcId を指定し、トークンを使い回していたため、アプリ自動採番の pcId と不整合が発生。
+- 不整合の結果、Relay が `E_BAD_TOKEN` を返し続け、QR 画面で「ライセンス情報を再有効化してください」のダイアログがループしていた。
+- さらに `secureSecrets` を利用した HMAC フォールバックが残っており、JWT を統一フローにできていなかった。
+
+## 目的
+1. 「ライセンス必須 ＋ JWT 接続」を開発・本番で統一する。
+2. pcId と JWT の `sub` を常に一致させ、誤って他の端末トークンを使えないようにする。
+3. 座席上限 (seats) を Activation 時に厳密に検証し、既に使用中のライセンスは 409 で弾く。
+4. QR 画面のエラー UI を改善し、失敗時の無限ダイアログを防止する。
+5. Tauri 開発環境でも本番と同じ `tauri://localhost` で動作させ、CORS を根本的に解消する。
+
+## 変更概要
+
+### ライセンス API (`apps/license-api/src/index.ts`)
+- `/activate` で座席数を超えて新規端末が登録される場合、既存端末を強制解除せず `409 E_SEAT_LIMIT` を返すよう修正。
+- 同じ pcId で再有効化する場合は既存レコードを上書きするため、端末入れ替えは UI から明示的に行う想定。
+
+### フロントエンド
+- `SettingsPage.tsx`: pcId は自動採番 & 表示のみ。再生成時はライセンストークンを削除し、再有効化を促すプロンプトを追加。
+- `licenseClient.ts`, `relayClient.ts`, `pcWsClient.ts`: HMAC フォールバックを廃止し、JWT 必須のコードパスに統一。
+- `QrDisplayWindow.tsx`: Relay 失敗時にプレースホルダーを挟み、無限リトライ／ダイアログループを防止。エラーメッセージを明示し、再試行ボタンを提供。
+- `secureSecrets.ts` は不要になったため削除。`docs/secure-secrets.md` も同様に削除。
+
+### Tauri (開発環境)
+- `tauri.conf.json` と `package.json` で `build.beforeDevCommand = "npm run dev:dist"` を維持しつつ、`tauri dev -- --dev-path ../dist` で dist を直接読めるよう `tauri:dist` スクリプトを追加。
+- Tauri CLI は `@tauri-apps/cli@2.6.2` と `@tauri-apps/cli-darwin-universal@2.6.2` を利用する想定（Apple シリコンで Rosetta を使うため）。
+- Tauri 側の npm パッケージ（`@tauri-apps/api` など）は Cargo 側 (tauri v2.6.x) と minor を合わせた。
+
+### CORS / 環境設定
+- `~/Library/Application Support/com.nuriemon.app/global_settings.json` が `relay_base_url` を最優先で読み込むため、本番 URL に書き換えてからライセンスを再有効化する手順を確認。
+- `window.location.origin` が `tauri://localhost` であることを DevTools で確認し、`http://127.0.0.1:1430` では操作しないことを運用手順に明記。
+
+## 残作業 / 注意点
+- `npm install` 時に Rollup や Tauri CLI のネイティブバイナリが欠けた場合は `rm -rf node_modules package-lock.json && npm install` で再取得。
+- Tauri CLI が見つからない場合は `npm install --save-dev @tauri-apps/cli@2.6.2 @tauri-apps/cli-darwin-universal@2.6.2` を手動で実行。
+- 開発時は `npm run build -- --watch` と `npm run tauri dev -- --dev-path ../dist` の組み合わせで起動し、CORS を避ける。
+- ライセンスコードを再発行したら、Settings 画面で再有効化し、JWT の `sub` と `pcId` の一致を保つ。
+- CLI から Relay API をテストする場合は、必ずアプリと同じ `pcId` を使う。
+
+
+
+
+
 バージョンを **V1: 吹き出しテキストのみ（Gemini 2.0 Flash‑Lite で短文生成）** → **V2: 端末内 STT/TTS を追加** の二段階で設計しています。
 既存のアーキテクチャ（Zustand 中心のイベント駆動・設定優先順位・配布モード等）に沿わせています。
 
@@ -349,7 +395,6 @@ export class SpeechBubbleScheduler {
   たい要件になっても、Cloudflare Worker を“設定配信サーバー”として使う
   ことで十分実現可能です。
 
-
 # ライセンス & Relay 同期改善メモ (開発経緯)
 
 ## 背景
@@ -392,4 +437,3 @@ export class SpeechBubbleScheduler {
 - 開発時は `npm run build -- --watch` と `npm run tauri dev -- --dev-path ../dist` の組み合わせで起動し、CORS を避ける。
 - ライセンスコードを再発行したら、Settings 画面で再有効化し、JWT の `sub` と `pcId` の一致を保つ。
 - CLI から Relay API をテストする場合は、必ずアプリと同じ `pcId` を使う。
-

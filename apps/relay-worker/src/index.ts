@@ -406,6 +406,16 @@ export class EventDO {
     const pc = this.pcByPcid.get(entry.pcid);
     if (pc) {
       try { this.safeSend(pc, { v: 1, type: 'req', req: 'preview', sid, imageId }); } catch {}
+      try {
+        this.safeSend(pc, {
+          v: 1,
+          type: 'evt',
+          evt: 'mobile-connected',
+          sid,
+          pcid: entry.pcid,
+          data: imageId ? { imageId } : {},
+        });
+      } catch {}
     }
   }
 

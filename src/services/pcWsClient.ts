@@ -92,6 +92,13 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
           if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
           return;
         }
+        if (t === 'evt' && msg.evt === 'mobile-connected') {
+          const imageId = msg?.data?.imageId ?? msg?.imageId ?? undefined;
+          const payload = { sessionId: msg?.sid as string | undefined, imageId };
+          try { console.log('[pcWsClient] mobile-connected evt', payload); } catch {}
+          void emit('mobile-connected', payload);
+          return;
+        }
         // Normalize cmds coming from Relay
         if (t === 'cmd') {
           try { console.log('[pcWsClient] recv cmd:', msg); } catch {}
