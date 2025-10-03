@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getAllMetadata, loadImage } from '../services/imageStorage';
+import { loadImage } from '../services/imageStorage';
+import { DatabaseService } from '../services/database';
 import { downscaleDataUrl } from '../utils/image';
 import { getAllMovementSettings } from '../services/movementStorage';
 import { listen } from '@tauri-apps/api/event';
@@ -7,7 +8,7 @@ import { useWorkspaceStore } from '../stores/workspaceStore';
 
 export const useAnimationData = () => {
   // ストアから状態とアクションを取得
-  const { images: storedMetadata, setImages } = useWorkspaceStore();
+  const { processedImages } = useWorkspaceStore();
   const [animatedImages, setAnimatedImages] = useState<any[]>([]);
   const [newImageAdded, setNewImageAdded] = useState(false);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
@@ -72,20 +73,36 @@ export const useAnimationData = () => {
   };
 
   const getProcessedImages = async () => {
-    const metadata = await getAllMetadata();
-    return metadata.filter(img => {
-      const imageType = (img as any).image_type || img.type;
-      const hidden = (img as any).is_hidden === 1;
-      return imageType === 'processed' && !hidden;
-    });
+    if (processedImages.length === 0) {
+      const preview = await DatabaseService.getProcessedImagesPreview();
+      return preview.map(item => ({
+        id: item.id,
+        originalFileName: item.originalFileName,
+        savedFileName: item.savedFileName,
+        type: 'processed',
+        createdAt: item.createdAt,
+        size: 0,
+        display_started_at: item.displayStartedAt,
+      }));
+    }
+
+    return processedImages.map(item => ({
+      id: item.id,
+      originalFileName: item.originalFileName,
+      savedFileName: item.savedFileName,
+      type: 'processed',
+      createdAt: item.createdAt,
+      size: 0,
+      display_started_at: item.displayStartedAt,
+    }));
   };
 
   const updateImages = useCallback(async (isInitialLoad = false) => {
-    const processedImages = await getProcessedImages();
+    const processedList = await getProcessedImages();
     const movementSettingsMap = await getAllMovementSettings();
 
     const animatedImagesData = await Promise.all(
-      processedImages.map(img => transformImageData(img, movementSettingsMap))
+      processedList.map(img => transformImageData(img, movementSettingsMap))
     );
     
     const validImages = animatedImagesData.filter(img => img !== null);
@@ -130,28 +147,7 @@ export const useAnimationData = () => {
       setAnimatedImages(validImages);
     }
 
-    const shouldUpdateStore = (() => {
-      if (storedMetadata.length !== processedImages.length) return true;
-      const prevMap = new Map(storedMetadata.map(img => [img.id, img]));
-      for (const img of processedImages) {
-        const prev = prevMap.get(img.id);
-        if (!prev) return true;
-        if (
-          (prev as any).updated_at !== (img as any).updated_at ||
-          (prev as any).display_started_at !== (img as any).display_started_at ||
-          (prev as any).is_hidden !== (img as any).is_hidden ||
-          ((prev as any).image_type || (prev as any).type) !== ((img as any).image_type || (img as any).type)
-        ) {
-          return true;
-        }
-      }
-      return false;
-    })();
-
-    if (shouldUpdateStore) {
-      setImages(processedImages);
-    }
-  }, [animatedImages, isFirstLoad, setImages, storedMetadata]);
+  }, [animatedImages, isFirstLoad, processedImages]);
 
   // バックエンドからの更新通知をリッスン
   useEffect(() => {
@@ -169,10 +165,10 @@ export const useAnimationData = () => {
 
   // 初回ロード時にストアのメタデータから画像を復元
   useEffect(() => {
-    if (storedMetadata.length > 0 && animatedImages.length === 0) {
+    if (processedImages.length > 0 && animatedImages.length === 0) {
       updateImages(true);
     }
-  }, [storedMetadata, animatedImages.length, updateImages]);
+  }, [processedImages, animatedImages.length, updateImages]);
 
   return {
     animatedImages, // ローカルステートから返す

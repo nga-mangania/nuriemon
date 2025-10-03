@@ -34,8 +34,8 @@ const FALLBACK_MAX_ATTEMPTS = 6;
 export const QrDisplayWindow: React.FC = () => {
   console.log('[QrDisplayWindow] Component rendering...'); // ログ1: コンポーネントがレンダリングされているか
   
-  const images = useWorkspaceStore(state => state.images);
-  console.log('[QrDisplayWindow] Images from Zustand:', images); // ログ2: ストアから取得した直後のデータ
+  const processedImagesState = useWorkspaceStore(state => state.processedImages);
+  console.log('[QrDisplayWindow] Images from Zustand:', processedImagesState); // ログ2: ストアから取得した直後のデータ
   
   const [sessions, setSessions] = useState<Map<string, QrSession>>(new Map());
   const [isServerStarted, setIsServerStarted] = useState(false);
@@ -252,7 +252,10 @@ export const QrDisplayWindow: React.FC = () => {
   };
   
   // メタデータから表示用データを生成
-  const processedImages = images.filter(img => img.type === 'processed');
+  const processedImages = processedImagesState.map(img => ({
+    ...img,
+    type: 'processed',
+  }));
 
   // Relay の有効/不足判定（表示の出し分け用）
   const relayActive = (operationMode === 'relay') || (operationMode === 'auto' && useRelay);

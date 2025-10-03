@@ -1,11 +1,13 @@
 use serde::{Serialize, Deserialize};
 use tauri::{AppHandle, Manager, Emitter};
 
+use crate::db::ImageMetadata;
+
 // データ変更イベントの種類
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum DataChangeEvent {
-    ImageAdded { id: String },
+    ImageUpserted { image: ImageMetadata },
     ImageDeleted { id: String },
     AudioUpdated { audio_type: String }, // "bgm" or "sound_effect"
     BackgroundChanged,

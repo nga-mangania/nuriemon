@@ -68,7 +68,7 @@ function renderRemaining(image: any, deletionTime: string) {
 export function GalleryPage() {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'processed' | 'original' | 'delete' | 'hidden'>('processed');
+  const [activeTab, setActiveTab] = useState<'processed' | 'original' | 'delete'>('processed');
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [editingImage, setEditingImage] = useState<GalleryImage | null>(null);
   const [tempSettings, setTempSettings] = useState({
@@ -97,8 +97,6 @@ export function GalleryPage() {
         return images.filter(img => img.type === 'original');
       case 'delete':
         return images;
-      case 'hidden':
-        return images.filter(img => (img as any).is_hidden === 1 && img.type === 'processed');
       default:
         return images;
     }
@@ -250,50 +248,6 @@ export function GalleryPage() {
     }
   };
 
-  // 画像を非表示（アニメから外す）
-  const handleHideImage = async (image: GalleryImage) => {
-    try {
-      const { DatabaseService } = await import('../services/database');
-      await DatabaseService.hideImage(image.id);
-      await loadGalleryImages();
-    } catch (e) {
-      console.error('非表示エラー:', e);
-      alert('非表示に失敗しました');
-    }
-  };
-
-  // 画像を再表示
-  const handleRestartDisplay = async (image: GalleryImage) => {
-    try {
-      const { DatabaseService } = await import('../services/database');
-      await DatabaseService.restartDisplay(image.id);
-      await loadGalleryImages();
-    } catch (e) {
-      console.error('再表示エラー:', e);
-      alert('再表示に失敗しました');
-    }
-  };
-
-  // すべて非表示（現在のフィルターに基づく processed のみ）
-  const handleHideAll = async () => {
-    const list = getFilteredImages().filter(img => img.type === 'processed' && (img as any).is_hidden !== 1);
-    try {
-      const { DatabaseService } = await import('../services/database');
-      for (const img of list) await DatabaseService.hideImage(img.id);
-      await loadGalleryImages();
-    } catch (e) { console.error('一括非表示エラー', e); }
-  };
-
-  // すべて再表示（非表示タブ）
-  const handleRestartAll = async () => {
-    const list = getFilteredImages();
-    try {
-      const { DatabaseService } = await import('../services/database');
-      for (const img of list) await DatabaseService.restartDisplay(img.id);
-      await loadGalleryImages();
-    } catch (e) { console.error('一括再表示エラー', e); }
-  };
-
   // 複数画像を一括削除
   const handleBulkDelete = async () => {
     if (selectedImages.size === 0) return;
@@ -392,12 +346,6 @@ export function GalleryPage() {
         </button>
         {/* 全て表示タブは削除 */}
         <button
-          className={`${styles.tabButton} ${activeTab === 'hidden' ? styles.active : ''}`}
-          onClick={() => setActiveTab('hidden')}
-        >
-          非表示
-        </button>
-        <button
           className={`${styles.tabButton} ${activeTab === 'delete' ? styles.active : ''}`}
           onClick={() => setActiveTab('delete')}
         >
@@ -479,12 +427,6 @@ export function GalleryPage() {
                   <p>アップロード: {new Date(image.createdAt).toLocaleString('ja-JP')}</p>
                 </div>
                 <div className={styles.imageActions}>
-                  {image.type === 'processed' && (image as any).is_hidden !== 1 && (
-                    <button className={styles.hideButton} onClick={() => handleHideImage(image)}>非表示</button>
-                  )}
-                  {(image as any).is_hidden === 1 && (
-                    <button className={styles.restartButton} onClick={() => handleRestartDisplay(image)}>再表示</button>
-                  )}
                   {image.type === 'processed' && (
                     <button className={styles.editButton} onClick={() => openEditModal(image)}>編集</button>
                   )}
@@ -494,16 +436,6 @@ export function GalleryPage() {
             ))}
           </div>
         )}
-      </div>
-
-      {/* 一括操作ボタン */}
-      <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-        {activeTab === 'processed' ? (
-          <button onClick={handleHideAll}>すべて非表示</button>
-        ) : null}
-        {activeTab === 'hidden' ? (
-          <button onClick={handleRestartAll}>すべて再表示</button>
-        ) : null}
       </div>
 
       {/* 編集モーダル */}

@@ -348,8 +348,7 @@ export async function getAllMetadata(): Promise<ImageMetadata[]> {
  * 任意メタデータに対する実ファイルの絶対パスを解決
  */
 export async function getFilePathForMetadata(metadata: ImageMetadata | any): Promise<string> {
-  const dbMetadataList = await DatabaseService.getAllImages();
-  const dbMetadata = dbMetadataList.find((m: any) => m.id === (metadata as any).id);
+  const dbMetadata = await DatabaseService.getImageMetadata((metadata as any).id);
   let storageLocation = dbMetadata?.storage_location || await AppSettingsService.getSaveDirectory();
   const imageType = (dbMetadata as any)?.image_type || (metadata as any)?.image_type || metadata.type;
   const saved = (metadata as any).savedFileName || (metadata as any).saved_file_name;
@@ -383,9 +382,8 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
   
   try {
     // SQLiteから最新の保存場所を取得
-    const dbMetadataList = await DatabaseService.getAllImages();
-    dbMetadata = dbMetadataList.find(m => m.id === metadata.id);
-    
+    dbMetadata = await DatabaseService.getImageMetadata(metadata.id);
+
     // file_pathがある場合はそれを使用
     if ((dbMetadata as any)?.file_path) {
       imagePath = (dbMetadata as any).file_path;
@@ -479,8 +477,7 @@ export async function loadImage(metadata: ImageMetadata): Promise<string> {
 export async function deleteImage(metadata: ImageMetadata): Promise<void> {
   try {
     // SQLiteから保存場所を取得
-    const dbMetadataList = await DatabaseService.getAllImages();
-    const dbMetadata = dbMetadataList.find(m => m.id === metadata.id);
+    const dbMetadata = await DatabaseService.getImageMetadata(metadata.id);
     
     // file_pathがある場合はそれを使用
     let imagePath: string;

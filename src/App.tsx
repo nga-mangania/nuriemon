@@ -241,7 +241,7 @@ function App() {
 
 // Zustandストアの変更を監視して他のウィンドウに通知
 useWorkspaceStore.subscribe((state, prev) => {
-  if (state.images !== prev.images) {
+  if (state.processedImages !== prev.processedImages) {
     console.log('[App] Images changed in store, emitting store-updated event');
     try {
       const p = emit('store-updated');

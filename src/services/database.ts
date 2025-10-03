@@ -16,6 +16,15 @@ export interface ImageMetadata {
   display_started_at?: string | null;
 }
 
+export interface ProcessedImagePreview {
+  cursor: number;
+  id: string;
+  originalFileName: string;
+  savedFileName: string;
+  createdAt: string;
+  displayStartedAt: string | null;
+}
+
 export interface UserSettings {
   id: string;
   storage_location: string;
@@ -65,15 +74,28 @@ export class DatabaseService {
     return await invoke<ImageMetadata[]>('get_all_images');
   }
 
-  // 表示状態の更新
-  static async hideImage(id: string): Promise<void> {
-    await invoke('hide_image', { id });
+  static async getImageMetadata(id: string): Promise<ImageMetadata | null> {
+    return await invoke<ImageMetadata | null>('get_image_metadata', { id });
   }
-  static async restartDisplay(id: string): Promise<void> {
-    await invoke('restart_display', { id });
-  }
-  static async markDisplayStarted(id: string): Promise<void> {
-    await invoke('mark_display_started', { id });
+
+  static async getProcessedImagesPreview(cursor?: number, limit?: number): Promise<ProcessedImagePreview[]> {
+    const raw = await invoke<Array<{
+      cursor: number;
+      id: string;
+      original_file_name: string;
+      saved_file_name: string;
+      created_at: string;
+      display_started_at?: string | null;
+    }>>('get_processed_images_preview', { cursor, limit });
+
+    return raw.map(item => ({
+      cursor: item.cursor,
+      id: item.id,
+      originalFileName: item.original_file_name,
+      savedFileName: item.saved_file_name,
+      createdAt: item.created_at,
+      displayStartedAt: item.display_started_at ?? null,
+    }));
   }
 
   // 画像の削除

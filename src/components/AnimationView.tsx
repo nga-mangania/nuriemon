@@ -788,12 +788,11 @@ const AnimationView: React.FC<AnimationViewProps> = ({
           const { DatabaseService } = await import('../services/database');
           try {
             for (const id of toHide) {
-              await DatabaseService.hideImage(id);
-              // DOMからは即座に見えなくする
+              await DatabaseService.deleteImage(id, 'auto');
               const div = containerRefs.current.get(id);
               if (div) div.style.display = 'none';
             }
-          } catch (e) { console.warn('[AnimationView] hideImage failed', e); }
+          } catch (e) { console.warn('[AnimationView] auto delete failed', e); }
         })();
       }
 

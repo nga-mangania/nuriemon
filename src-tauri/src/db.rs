@@ -23,6 +23,17 @@ pub struct ImageMetadata {
     pub display_started_at: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProcessedImagePreview {
+    pub cursor: i64,
+    pub id: String,
+    pub original_file_name: String,
+    pub saved_file_name: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub display_started_at: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserSettings {
     pub id: String,
@@ -250,6 +261,39 @@ impl Database {
         Ok(result)
     }
 
+    pub fn get_processed_images_preview(&self, last_cursor: Option<i64>, limit: i64) -> Result<Vec<ProcessedImagePreview>> {
+        let cursor = last_cursor.unwrap_or(0);
+        let limit = if limit <= 0 { 100 } else { limit.min(500) };
+
+        let mut stmt = self.conn.prepare(
+            "SELECT rowid, id, original_file_name, saved_file_name, created_at, display_started_at
+             FROM images
+             WHERE image_type = 'processed'
+               AND (is_hidden IS NULL OR is_hidden = 0)
+               AND rowid > ?1
+             ORDER BY rowid
+             LIMIT ?2"
+        )?;
+
+        let rows = stmt.query_map(params![cursor, limit], |row| {
+            Ok(ProcessedImagePreview {
+                cursor: row.get(0)?,
+                id: row.get(1)?,
+                original_file_name: row.get(2)?,
+                saved_file_name: row.get(3)?,
+                created_at: row.get(4)?,
+                display_started_at: row.get(5).ok(),
+            })
+        })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+
+        Ok(result)
+    }
+
     // 特定の画像メタデータの取得
     #[allow(dead_code)]
     pub fn get_image_by_id(&self, id: &str) -> Result<Option<ImageMetadata>> {
@@ -285,21 +329,6 @@ impl Database {
     // 画像の削除
     pub fn delete_image(&self, id: &str) -> Result<()> {
         self.conn.execute("DELETE FROM images WHERE id = ?1", params![id])?;
-        Ok(())
-    }
-
-    pub fn set_hidden(&self, id: &str, hidden: bool) -> Result<()> {
-        let v = if hidden { 1 } else { 0 };
-        self.conn.execute("UPDATE images SET is_hidden = ?1 WHERE id = ?2", params![v, id])?;
-        Ok(())
-    }
-
-    pub fn restart_display_now(&self, id: &str) -> Result<()> {
-        let now = current_timestamp();
-        self.conn.execute(
-            "UPDATE images SET is_hidden = 0, display_started_at = ?1 WHERE id = ?2",
-            params![now, id],
-        )?;
         Ok(())
     }
 

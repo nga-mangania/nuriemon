@@ -191,8 +191,7 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
       // Ensure we have saved_file_name/type for fallback path building
       let dataUrl = '';
       try {
-        const all = await DatabaseService.getAllImages();
-        const rec = all.find((m: any) => m.id === imageId);
+        const rec = await DatabaseService.getImageMetadata(imageId);
         if (rec) {
           dataUrl = await loadImage({
             id: imageId,

@@ -2,7 +2,14 @@
 
 import { create } from 'zustand';
 import { load } from '@tauri-apps/plugin-store';
-import { ImageMetadata } from '../services/imageStorage';
+
+export interface WorkspaceImage {
+  id: string;
+  originalFileName: string;
+  savedFileName: string;
+  createdAt: string;
+  displayStartedAt: string | null;
+}
 
 // ストアのインスタンスは一度だけ生成
 let storeInstance: any = null;
@@ -21,7 +28,8 @@ interface WorkspaceState {
   backgroundType: 'image' | 'video';
   settings: any | null;
   isLoading: boolean;
-  images: ImageMetadata[];
+  processedImages: WorkspaceImage[];
+  processedCursor: number | null;
   imageDisplaySize: number;
 
   // アクション
@@ -33,7 +41,10 @@ interface WorkspaceState {
   updateSettings: (partialSettings: Partial<any>) => void;
   setLoading: (loading: boolean) => void;
   resetStore: () => void;
-  setImages: (images: ImageMetadata[]) => void;
+  setProcessedImages: (images: WorkspaceImage[]) => void;
+  upsertProcessedImage: (image: WorkspaceImage) => void;
+  removeProcessedImage: (id: string) => void;
+  setProcessedCursor: (cursor: number | null) => void;
   setImageDisplaySize: (size: number) => void;
 }
 
@@ -66,10 +77,11 @@ async function doSave() {
   const state = useWorkspaceStore.getState();
   await store.set('workspace', {
     currentWorkspace: state.currentWorkspace,
-    images: state.images,
+    images: state.processedImages,
     groundPosition: state.groundPosition,
     deletionTime: state.deletionTime,
     imageDisplaySize: state.imageDisplaySize,
+    processedCursor: state.processedCursor,
   });
   await store.save();
   lastSaveTs = Date.now();
@@ -83,7 +95,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   backgroundType: 'image',
   settings: null,
   isLoading: false,
-  images: [],
+  processedImages: [],
+  processedCursor: null,
   imageDisplaySize: 18,
 
   // --- アクション ---
@@ -161,14 +174,40 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       backgroundType: 'image',
       settings: null,
       isLoading: false,
-      images: [],
+      processedImages: [],
+      processedCursor: null,
       imageDisplaySize: 18
     });
   },
 
-  setImages: (images) => {
-    set({ images });
-    // 画像リストの更新は重要なので保存
+  setProcessedImages: (images) => {
+    set({ processedImages: images });
+    saveStateToFile();
+  },
+
+  upsertProcessedImage: (image) => {
+    set((state) => {
+      const existingIndex = state.processedImages.findIndex(item => item.id === image.id);
+      let next: WorkspaceImage[];
+      if (existingIndex >= 0) {
+        next = state.processedImages.slice();
+        next[existingIndex] = image;
+      } else {
+        next = [...state.processedImages, image];
+      }
+      next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return { processedImages: next };
+    });
+    saveStateToFile();
+  },
+
+  removeProcessedImage: (id) => {
+    set((state) => ({ processedImages: state.processedImages.filter(img => img.id !== id) }));
+    saveStateToFile();
+  },
+
+  setProcessedCursor: (cursor) => {
+    set({ processedCursor: cursor });
     saveStateToFile();
   },
 
@@ -184,16 +223,25 @@ export async function loadStateFromFile() {
     const store = await getStore();
     const stateFromFile = (await store.get('workspace')) as {
       currentWorkspace: string | null;
-      images: ImageMetadata[];
+      images: WorkspaceImage[];
       groundPosition: number;
       deletionTime: string;
       imageDisplaySize?: number;
+      processedCursor?: number | null;
     } | null;
     
     if (stateFromFile) {
       useWorkspaceStore.setState({
-        ...stateFromFile,
-        imageDisplaySize: typeof stateFromFile.imageDisplaySize === 'number' ? stateFromFile.imageDisplaySize : 18
+        currentWorkspace: stateFromFile.currentWorkspace,
+        processedImages: stateFromFile.images || [],
+        groundPosition: stateFromFile.groundPosition,
+        deletionTime: stateFromFile.deletionTime,
+        imageDisplaySize: typeof stateFromFile.imageDisplaySize === 'number' ? stateFromFile.imageDisplaySize : 18,
+        processedCursor: typeof stateFromFile.processedCursor === 'number' ? stateFromFile.processedCursor : null,
+        backgroundUrl: null,
+        backgroundType: 'image',
+        settings: null,
+        isLoading: false,
       });
       console.log('[loadStateFromFile] State loaded from store:', stateFromFile);
     }

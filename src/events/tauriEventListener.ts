@@ -1,10 +1,10 @@
 import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
-import { useWorkspaceStore } from '../stores/workspaceStore';
+import { useWorkspaceStore, WorkspaceImage } from '../stores/workspaceStore';
 import { WorkspaceManager, WorkspaceSettings } from '../services/workspaceManager';
-import { DatabaseService } from '../services/database';
+import { DatabaseService, ProcessedImagePreview } from '../services/database';
 
 export interface DataChangeEvent {
-  type: 'ImageAdded' | 'ImageDeleted' | 'AudioUpdated' | 'BackgroundChanged' | 
+  type: 'ImageUpserted' | 'ImageDeleted' | 'AudioUpdated' | 'BackgroundChanged' | 
         'AnimationSettingsChanged' | 'GroundPositionChanged' | 'DeletionTimeChanged' | 
         'AppSettingChanged';
   data: any;
@@ -25,6 +25,30 @@ export class TauriEventListener {
       TauriEventListener.instance = new TauriEventListener();
     }
     return TauriEventListener.instance;
+  }
+
+  private convertPreview(preview: ProcessedImagePreview): WorkspaceImage {
+    return {
+      id: preview.id,
+      originalFileName: preview.originalFileName,
+      savedFileName: preview.savedFileName,
+      createdAt: preview.createdAt,
+      displayStartedAt: preview.displayStartedAt ?? null,
+    };
+  }
+
+  private convertMetadata(raw: any): WorkspaceImage | null {
+    const payload = raw?.image ?? raw;
+    if (!payload || payload.image_type !== 'processed') {
+      return null;
+    }
+    return {
+      id: payload.id,
+      originalFileName: payload.original_file_name,
+      savedFileName: payload.saved_file_name,
+      createdAt: payload.created_at,
+      displayStartedAt: payload.display_started_at ?? null,
+    };
   }
   
   /**
@@ -58,12 +82,22 @@ export class TauriEventListener {
             store.setDeletionTime(data.value);
           }
           break;
-        case 'ImageAdded':
+        case 'ImageUpserted': {
+          const workspaceImage = this.convertMetadata(data);
+          if (workspaceImage) {
+            store.upsertProcessedImage(workspaceImage);
+            emit('image-list-updated');
+          }
+          break;
+        }
         case 'ImageDeleted':
+          if (data?.id) {
+            store.removeProcessedImage(data.id);
+            emit('image-list-updated');
+          }
+          break;
         case 'AnimationSettingsChanged':
-          // データベースから最新の画像リストを取得してストアを更新
-          console.log(`[TauriEventListener] ${type} event received, updating image list`);
-          this.updateImageList();
+          emit('image-list-updated');
           break;
         // 他のイベントタイプは必要に応じて実装
       }
@@ -81,6 +115,8 @@ export class TauriEventListener {
       if (settings) {
         store.setSettings(settings);
       }
+
+      await this.updateImageList();
     });
     
     this.unlisteners.push(workspaceChangedUnlisten);
@@ -102,34 +138,32 @@ export class TauriEventListener {
    */
   private async updateImageList(): Promise<void> {
     try {
-      // データベースから全画像メタデータを取得
-      const dbImages = await DatabaseService.getAllImages();
-      
-      // データベースの形式からストアの形式に変換
-      const images = dbImages.map(dbImage => ({
-        id: dbImage.id,
-        originalFileName: dbImage.original_file_name,
-        savedFileName: dbImage.saved_file_name,
-        type: dbImage.image_type as 'original' | 'processed',
-        createdAt: dbImage.created_at,
-        size: dbImage.size,
-        width: dbImage.width,
-        height: dbImage.height,
-        file_path: dbImage.file_path,
-        is_hidden: (dbImage as any).is_hidden,
-        display_started_at: (dbImage as any).display_started_at,
-      }));
-      
-      // processedタイプの画像のみをフィルタ
-      const processedImages = images.filter(img => img.type === 'processed');
-      
-      // ストアを更新
       const store = useWorkspaceStore.getState();
-      store.setImages(processedImages);
-      
-      console.log(`[TauriEventListener] Updated image list with ${processedImages.length} processed images`);
-      
-      // 他のウィンドウにも通知
+      const aggregated: WorkspaceImage[] = [];
+      const batchSize = 100;
+      let cursor: number | null = 0;
+      let lastCursor: number | null = null;
+
+      while (true) {
+        const batch = await DatabaseService.getProcessedImagesPreview(cursor ?? undefined, batchSize);
+        if (batch.length === 0) {
+          break;
+        }
+        batch.forEach(item => aggregated.push(this.convertPreview(item)));
+        lastCursor = batch[batch.length - 1].cursor;
+        cursor = lastCursor;
+        if (batch.length < batchSize) {
+          break;
+        }
+      }
+
+      aggregated.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      store.setProcessedImages(aggregated);
+      store.setProcessedCursor(lastCursor);
+
+      console.log(`[TauriEventListener] Updated processed image list (count=${aggregated.length})`);
+
       emit('image-list-updated');
     } catch (error) {
       console.error('[TauriEventListener] Failed to update image list:', error);

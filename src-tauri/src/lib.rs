@@ -17,7 +17,7 @@ mod websocket;
 mod qr_manager;
 mod server_state;
 use keyring::Entry;
-use db::{ImageMetadata, UserSettings, MovementSettings, generate_id, current_timestamp};
+use db::{ImageMetadata, UserSettings, MovementSettings, ProcessedImagePreview, generate_id, current_timestamp};
 use events::{DataChangeEvent, emit_data_change};
 use workspace::{WorkspaceState, WorkspaceConnection};
 use qr_manager::QrManager;
@@ -361,16 +361,17 @@ async fn save_image_metadata(
     
     db.save_image_metadata(&metadata)
         .map_err(|e| format!("Failed to save image metadata: {}", e))?;
-    
-    // image_typeに応じて適切なイベントを発行
-    let event = match image_type.as_str() {
-        "bgm" => DataChangeEvent::AudioUpdated { audio_type: "bgm".to_string() },
-        "sound_effect" => DataChangeEvent::AudioUpdated { audio_type: "sound_effect".to_string() },
-        "background" => DataChangeEvent::BackgroundChanged,
-        _ => DataChangeEvent::ImageAdded { id: image_id },
-    };
-    
-    emit_data_change(&state.app_handle, event)?;
+
+    if let Some(saved) = db.get_image(&image_id)
+        .map_err(|e| format!("Failed to re-fetch image metadata: {}", e))? {
+        emit_data_change(&state.app_handle, DataChangeEvent::ImageUpserted { image: saved.clone() })?;
+        match image_type.as_str() {
+            "bgm" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated { audio_type: "bgm".to_string() })?,
+            "sound_effect" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated { audio_type: "sound_effect".to_string() })?,
+            "background" => emit_data_change(&state.app_handle, DataChangeEvent::BackgroundChanged)?,
+            _ => {}
+        }
+    }
     
     Ok(())
 }
@@ -380,35 +381,36 @@ async fn get_all_images(workspace: State<'_, WorkspaceState>) -> Result<Vec<Imag
     let conn = workspace.lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     db.get_all_images()
         .map_err(|e| format!("Failed to get images: {}", e))
 }
 
 #[tauri::command]
-async fn hide_image(
-    state: State<'_, AppState>,
+async fn get_processed_images_preview(
     workspace: State<'_, WorkspaceState>,
-    id: String,
-) -> Result<(), String> {
-    let conn = workspace.lock().map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    cursor: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<ProcessedImagePreview>, String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    db.set_hidden(&id, true).map_err(|e| format!("Failed to hide image: {}", e))?;
-    emit_data_change(&state.app_handle, DataChangeEvent::ImageDeleted { id: id.clone() })?; // reuse list update
-    Ok(())
+
+    db.get_processed_images_preview(cursor, limit.unwrap_or(100))
+        .map_err(|e| format!("Failed to get processed images: {}", e))
 }
 
 #[tauri::command]
-async fn restart_display(
-    state: State<'_, AppState>,
+async fn get_image_metadata(
     workspace: State<'_, WorkspaceState>,
     id: String,
-) -> Result<(), String> {
-    let conn = workspace.lock().map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+) -> Result<Option<ImageMetadata>, String> {
+    let conn = workspace.lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    db.restart_display_now(&id).map_err(|e| format!("Failed to restart display: {}", e))?;
-    emit_data_change(&state.app_handle, DataChangeEvent::ImageAdded { id: id.clone() })?; // reuse list update
-    Ok(())
+
+    db.get_image(&id)
+        .map_err(|e| format!("Failed to get image metadata: {}", e))
 }
 
 #[tauri::command]
@@ -444,15 +446,14 @@ async fn delete_image(
     db.delete_image(&id)
         .map_err(|e| format!("Failed to delete image: {}", e))?;
     
-    // image_typeに応じて適切なイベントを発行
-    let event = match image_type.as_str() {
-        "bgm" => DataChangeEvent::AudioUpdated { audio_type: "bgm".to_string() },
-        "sound_effect" => DataChangeEvent::AudioUpdated { audio_type: "sound_effect".to_string() },
-        "background" => DataChangeEvent::BackgroundChanged,
-        _ => DataChangeEvent::ImageDeleted { id: id.clone() },
-    };
-    
-    emit_data_change(&state.app_handle, event)?;
+    emit_data_change(&state.app_handle, DataChangeEvent::ImageDeleted { id: id.clone() })?;
+
+    match image_type.as_str() {
+        "bgm" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated { audio_type: "bgm".to_string() })?,
+        "sound_effect" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated { audio_type: "sound_effect".to_string() })?,
+        "background" => emit_data_change(&state.app_handle, DataChangeEvent::BackgroundChanged)?,
+        _ => {}
+    }
     
     Ok(())
 }
@@ -946,8 +947,8 @@ pub fn run() {
             delete_file_absolute,
             save_image_metadata,
             get_all_images,
-            hide_image,
-            restart_display,
+            get_processed_images_preview,
+            get_image_metadata,
             mark_display_started,
             delete_image,
             update_image_file_path,

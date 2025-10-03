@@ -12,7 +12,21 @@ export async function cleanupDatabase(): Promise<void> {
     
     const metadata = await getAllMetadata();
     console.log(`[cleanupDatabase] データベース内の画像数: ${metadata.length}`);
-    console.log('[cleanupDatabase] データベース内のファイルID一覧:', metadata.map(m => ({
+
+    const hiddenEntries = metadata.filter(item => (item as any).is_hidden === 1);
+    if (hiddenEntries.length > 0) {
+      console.log(`[cleanupDatabase] レガシー非表示エントリを削除します: ${hiddenEntries.length}件`);
+      for (const hidden of hiddenEntries) {
+        try {
+          await DatabaseService.deleteImage(hidden.id, 'legacy-hidden');
+        } catch (error) {
+          console.warn(`[cleanupDatabase] 非表示エントリ削除に失敗: ${hidden.id}`, error);
+        }
+      }
+    }
+
+    const activeMetadata = metadata.filter(item => (item as any).is_hidden !== 1);
+    console.log('[cleanupDatabase] データベース内のファイルID一覧:', activeMetadata.map(m => ({
       id: m.id,
       fileName: m.savedFileName || (m as any).saved_file_name,
       type: (m as any).image_type || m.type,
@@ -26,7 +40,7 @@ export async function cleanupDatabase(): Promise<void> {
     let updatedCount = 0;
     let checkedCount = 0;
     
-    for (const item of metadata) {
+    for (const item of activeMetadata) {
       checkedCount++;
       
       try {
