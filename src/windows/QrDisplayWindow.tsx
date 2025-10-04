@@ -380,7 +380,6 @@ export const QrDisplayWindow: React.FC = () => {
     };
 
     register('workspace-data-loaded', () => {
-      loadStateFromFile();
       setRegenTick(t => t + 1);
     });
 
