@@ -49,6 +49,7 @@ export interface MovementSettings {
 }
 
 export class DatabaseService {
+  private static inFlightDeleteIds = new Set<string>();
   // ユニークIDの生成
   static async generateId(): Promise<string> {
     return await invoke<string>('generate_unique_id');
@@ -100,7 +101,15 @@ export class DatabaseService {
 
   // 画像の削除
   static async deleteImage(id: string, reason?: string): Promise<void> {
-    await invoke('delete_image', { id, reason });
+    if (DatabaseService.inFlightDeleteIds.has(id)) {
+      return;
+    }
+    DatabaseService.inFlightDeleteIds.add(id);
+    try {
+      await invoke('delete_image', { id, reason });
+    } finally {
+      DatabaseService.inFlightDeleteIds.delete(id);
+    }
   }
 
   // 画像の存在確認

@@ -151,7 +151,23 @@ export const useAnimationData = () => {
   }, [buildAnimationInput]);
 
   useEffect(() => {
-    syncProcessedImages();
+    let frameId: number | undefined;
+    const schedule = () => {
+      if (frameId !== undefined) return;
+      frameId = requestAnimationFrame(() => {
+        frameId = undefined;
+        syncProcessedImages();
+      });
+    };
+
+    schedule();
+
+    return () => {
+      if (frameId !== undefined) {
+        cancelAnimationFrame(frameId);
+        frameId = undefined;
+      }
+    };
   }, [processedImages, syncProcessedImages]);
 
   const refresh = useCallback(async (options?: { initial?: boolean }) => {
