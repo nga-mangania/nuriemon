@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { useWorkspaceStore, loadStateFromFile } from '../stores/workspaceStore';
+import { useWorkspaceStore } from '../stores/workspaceStore';
 import { AppSettingsService } from '../services/database';
 import { GlobalSettingsService } from '../services/globalSettings';
 import { checkRelayHealth } from '../services/connectivityProbe';
@@ -319,18 +319,6 @@ export const QrDisplayWindow: React.FC = () => {
     for (let i = 0; i < 6; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
     return `pc-${s}`;
   }
-
-  // ウィンドウ起動時に一度だけファイルから状態を読み込む
-  useEffect(() => {
-    console.log('[QrDisplayWindow] Loading state from file...');
-    loadStateFromFile();
-    // 設定読み込み（effectiveを優先）
-    (async () => {
-      await GlobalSettingsService.loadEffective();
-      await reloadAppSettings();
-    })();
-  }, []);
-
   // 差分イベントリスナーを起動（各ウィンドウで個別にセット）
   useEffect(() => {
     const listener = TauriEventListener.getInstance();
