@@ -78,7 +78,7 @@ export class DatabaseService {
     return await invoke<ImageMetadata | null>('get_image_metadata', { id });
   }
 
-  static async getProcessedImagesPreview(cursor?: number, limit?: number): Promise<ProcessedImagePreview[]> {
+  static async getProcessedImagesPreview(cursor?: number, limit: number = 60): Promise<ProcessedImagePreview[]> {
     const raw = await invoke<Array<{
       cursor: number;
       id: string;

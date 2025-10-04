@@ -171,6 +171,7 @@ export interface AnimatedImage {
   noiseNextY?: number;
   noisePrevT?: number;
   noiseNextT?: number;
+  pendingDeletion?: boolean;
 }
 
 export interface SpecialMovement {

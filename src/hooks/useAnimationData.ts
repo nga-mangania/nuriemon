@@ -1,178 +1,172 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadImage } from '../services/imageStorage';
-import { DatabaseService } from '../services/database';
 import { downscaleDataUrl } from '../utils/image';
 import { getAllMovementSettings } from '../services/movementStorage';
-import { listen } from '@tauri-apps/api/event';
-import { useWorkspaceStore } from '../stores/workspaceStore';
+import { useWorkspaceStore, WorkspaceImage } from '../stores/workspaceStore';
+
+type AnimationInput = {
+  id: string;
+  originalFileName: string;
+  imageUrl: string;
+  type: 'walk' | 'fly';
+  movement: string;
+  size: string;
+  speed: number;
+  createdAt: number;
+  displayStartedAt: string | null;
+};
+
+const ensureTimestamp = (value: string | undefined): number => {
+  if (!value) return Date.now();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : Date.now();
+};
 
 export const useAnimationData = () => {
-  // ストアから状態とアクションを取得
-  const { processedImages } = useWorkspaceStore();
-  const [animatedImages, setAnimatedImages] = useState<any[]>([]);
+  const processedImages = useWorkspaceStore(state => state.processedImages);
+
+  const processedImagesRef = useRef<WorkspaceImage[]>(processedImages);
+  useEffect(() => {
+    processedImagesRef.current = processedImages;
+  }, [processedImages]);
+
+  const cacheRef = (useAnimationData as any)._displayUrlCache as Map<string, string> | undefined;
+  const displayUrlCache = cacheRef ?? new Map<string, string>();
+  if (!cacheRef) {
+    (useAnimationData as any)._displayUrlCache = displayUrlCache;
+  }
+
+  const animationMapRef = useRef<Map<string, AnimationInput>>(new Map());
+  const [version, setVersion] = useState(0);
   const [newImageAdded, setNewImageAdded] = useState(false);
-  const [isFirstLoad, setIsFirstLoad] = useState(true);
+  const syncingRef = useRef(false);
+  const initialSyncRef = useRef(true);
+  const pendingSyncRef = useRef(false);
 
-  // 表示用キャッシュ（起動中のみ）
-  const displayUrlCache = (useAnimationData as any)._displayUrlCache || new Map<string, string>();
-  (useAnimationData as any)._displayUrlCache = displayUrlCache;
-
-  const transformImageData = async (metadata: any, movementSettingsMap: Map<string, any>) => {
+  const buildAnimationInput = useCallback(async (
+    meta: WorkspaceImage,
+    movementMap: Map<string, { type: string; movement: string; speed: number; size: string }>
+  ): Promise<AnimationInput | null> => {
     try {
-      // フルサイズを読み込み
-      const fullUrl = await loadImage(metadata);
-      // 表示用に縮小（キャッシュ）
-      let imageUrl = displayUrlCache.get(metadata.id);
+      let imageUrl = displayUrlCache.get(meta.id);
       if (!imageUrl) {
-        imageUrl = await downscaleDataUrl(fullUrl, 512, 0.8);
-        displayUrlCache.set(metadata.id, imageUrl);
+        const raw = await loadImage({ id: meta.id, savedFileName: meta.savedFileName, type: 'processed' } as any);
+        imageUrl = await downscaleDataUrl(raw, 512, 0.8);
+        displayUrlCache.set(meta.id, imageUrl);
       }
-      const savedSettings = movementSettingsMap.get(metadata.id);
-      const settings = savedSettings || {
-        type: 'fly',
-        movement: 'normal',
-        size: 'medium',
-        speed: 0.5
-      };
-      
-      // 表示開始時刻（DBのdisplay_started_atがあれば優先）
-      const startedAt = (metadata as any).display_started_at ? Date.parse((metadata as any).display_started_at) : Date.now();
-      // AnimatedImage型に適合する完全なオブジェクトを作成
-      const animatedImage: any = {
-        id: metadata.id,
+
+      const movement = movementMap.get(meta.id);
+      const type: 'walk' | 'fly' = movement?.type === 'walk' ? 'walk' : 'fly';
+
+      return {
+        id: meta.id,
+        originalFileName: meta.originalFileName,
         imageUrl,
-        originalFileName: metadata.originalFileName,
-        x: 0,
-        y: 0,
-        velocityX: 0,
-        velocityY: 0,
-        scale: 1,
-        rotation: 0,
-        flipped: false,
-        type: settings.type || 'fly',
-        movement: settings.movement || 'normal',
-        size: settings.size || 'medium',
-        speed: settings.speed || 0.5,
-        directionChangeTimer: 0,
-        offset: Math.random() * 1000,
-        phaseOffset: Math.random() * Math.PI * 2,
-        lastMovementUpdate: Date.now(),
-        nextMovementUpdate: Date.now() + 3000 + Math.random() * 2000,
-        globalScale: 1,
-        scaleDirection: 1,
-        scaleSpeed: 0.002,
-        animationStartTime: Date.now(),
-        isNewImage: false,
-        createdAt: startedAt,
+        type,
+        movement: movement?.movement ?? 'normal',
+        size: movement?.size ?? 'medium',
+        speed: typeof movement?.speed === 'number' ? movement.speed : 0.5,
+        createdAt: ensureTimestamp(meta.createdAt),
+        displayStartedAt: meta.displayStartedAt ?? null,
       };
-      return animatedImage;
     } catch (error) {
-      console.error(`Error loading image ${metadata.id}:`, error);
+      console.error(`Error loading image ${meta.id}:`, error);
       return null;
     }
-  };
+  }, [displayUrlCache]);
 
-  const getProcessedImages = async () => {
-    if (processedImages.length === 0) {
-      const preview = await DatabaseService.getProcessedImagesPreview();
-      return preview.map(item => ({
-        id: item.id,
-        originalFileName: item.originalFileName,
-        savedFileName: item.savedFileName,
-        type: 'processed',
-        createdAt: item.createdAt,
-        size: 0,
-        display_started_at: item.displayStartedAt,
-      }));
+  const syncProcessedImages = useCallback(async (initialOverride?: boolean) => {
+    if (syncingRef.current) {
+      pendingSyncRef.current = true;
+      return;
     }
+    syncingRef.current = true;
+    try {
+      const metas = processedImagesRef.current;
+      const map = animationMapRef.current;
+      const incomingIds = new Set(metas.map(meta => meta.id));
+      let changed = false;
 
-    return processedImages.map(item => ({
-      id: item.id,
-      originalFileName: item.originalFileName,
-      savedFileName: item.savedFileName,
-      type: 'processed',
-      createdAt: item.createdAt,
-      size: 0,
-      display_started_at: item.displayStartedAt,
-    }));
-  };
-
-  const updateImages = useCallback(async (isInitialLoad = false) => {
-    const processedList = await getProcessedImages();
-    const movementSettingsMap = await getAllMovementSettings();
-
-    const animatedImagesData = await Promise.all(
-      processedList.map(img => transformImageData(img, movementSettingsMap))
-    );
-    
-    const validImages = animatedImagesData.filter(img => img !== null);
-    
-    // 現在の画像IDのセットを作成
-    const currentImageIds = new Set(animatedImages.map(img => img.id));
-    
-    // 新しい画像があるかチェック
-    const hasNewImages = validImages.some(img => !currentImageIds.has(img.id));
-    
-    // 初期ロードでない場合のみ、新規画像の追加を検出
-    if (hasNewImages && !isInitialLoad && !isFirstLoad) {
-      setNewImageAdded(true);
-    }
-    
-    // 初回ロードフラグをリセット
-    if (isFirstLoad) {
-      setIsFirstLoad(false);
-    }
-    
-    // AnimatedImage型のデータをローカルステートに保存
-    const shouldReplaceAnimated = (() => {
-      if (animatedImages.length !== validImages.length) return true;
-      for (let i = 0; i < validImages.length; i++) {
-        const prev = animatedImages[i];
-        const next = validImages[i];
-        if (!prev || !next) return true;
-        if (prev.id !== next.id) return true;
-        if (
-          prev.type !== next.type ||
-          prev.movement !== next.movement ||
-          prev.size !== next.size ||
-          prev.speed !== next.speed
-        ) {
-          return true;
+      for (const id of Array.from(map.keys())) {
+        if (!incomingIds.has(id)) {
+          map.delete(id);
+          changed = true;
         }
       }
-      return false;
-    })();
 
-    if (shouldReplaceAnimated) {
-      setAnimatedImages(validImages);
+      if (metas.length === 0) {
+        if (changed) setVersion(v => v + 1);
+        initialSyncRef.current = false;
+        return;
+      }
+
+      const movementMap = await getAllMovementSettings();
+
+      for (const meta of metas) {
+        const existing = map.get(meta.id);
+        if (existing) {
+          const movement = movementMap.get(meta.id);
+          existing.type = movement?.type === 'walk' ? 'walk' : 'fly';
+          existing.movement = movement?.movement ?? 'normal';
+          existing.size = movement?.size ?? 'medium';
+          existing.speed = typeof movement?.speed === 'number' ? movement.speed : 0.5;
+          existing.originalFileName = meta.originalFileName;
+          existing.createdAt = ensureTimestamp(meta.createdAt);
+          existing.displayStartedAt = meta.displayStartedAt ?? null;
+        }
+      }
+
+      const newMetas = metas.filter(meta => !map.has(meta.id));
+      let hasNew = false;
+      if (newMetas.length > 0) {
+        const built = await Promise.all(newMetas.map(meta => buildAnimationInput(meta, movementMap)));
+        built.forEach((entry, idx) => {
+          if (entry) {
+            map.set(newMetas[idx].id, entry);
+            changed = true;
+            hasNew = true;
+          }
+        });
+      }
+
+      if (changed) {
+        setVersion(v => v + 1);
+      }
+
+      const initial = initialOverride ?? initialSyncRef.current;
+      if (initial) {
+        initialSyncRef.current = false;
+      } else if (hasNew) {
+        setNewImageAdded(true);
+      }
+    } finally {
+      syncingRef.current = false;
+      if (pendingSyncRef.current) {
+        pendingSyncRef.current = false;
+        setTimeout(() => {
+          syncProcessedImages();
+        }, 0);
+      }
     }
+  }, [buildAnimationInput]);
 
-  }, [animatedImages, isFirstLoad, processedImages]);
-
-  // バックエンドからの更新通知をリッスン
   useEffect(() => {
-    const unlistenPromise = listen('image-list-updated', () => {
-      console.log('[useAnimationData] Image list update event received.');
-      updateImages();
-    });
+    syncProcessedImages();
+  }, [processedImages, syncProcessedImages]);
 
-    return () => {
-      unlistenPromise
-        .then(unlisten => { try { unlisten(); } catch (_) {} })
-        .catch(() => {});
-    };
-  }, [updateImages]);
+  const refresh = useCallback(async (options?: { initial?: boolean }) => {
+    await syncProcessedImages(options?.initial);
+  }, [syncProcessedImages]);
 
-  // 初回ロード時にストアのメタデータから画像を復元
-  useEffect(() => {
-    if (processedImages.length > 0 && animatedImages.length === 0) {
-      updateImages(true);
-    }
-  }, [processedImages, animatedImages.length, updateImages]);
+  const animatedImages = useMemo(() => {
+    const arr = Array.from(animationMapRef.current.values());
+    arr.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    return arr;
+  }, [version]);
 
   return {
-    animatedImages, // ローカルステートから返す
-    updateImages,
+    animatedImages,
+    refresh,
     newImageAdded,
     setNewImageAdded,
   };

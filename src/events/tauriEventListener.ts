@@ -1,4 +1,4 @@
-import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { useWorkspaceStore, WorkspaceImage } from '../stores/workspaceStore';
 import { WorkspaceManager, WorkspaceSettings } from '../services/workspaceManager';
 import { DatabaseService, ProcessedImagePreview } from '../services/database';
@@ -29,6 +29,8 @@ type DataChangeEvent =
 export class TauriEventListener {
   private static instance: TauriEventListener;
   private unlisteners: UnlistenFn[] = [];
+  private isHydrating = false;
+  private pendingEvents: DataChangeEvent[] = [];
   
   private constructor() {}
   
@@ -61,65 +63,79 @@ export class TauriEventListener {
       displayStartedAt: payload.display_started_at ?? null,
     };
   }
-  
+
+  private applyDataChange(eventData: DataChangeEvent): void {
+    const store = useWorkspaceStore.getState();
+
+    switch (eventData.type) {
+      case 'ground-position-changed':
+        store.setGroundPosition(eventData.payload.position);
+        break;
+      case 'deletion-time-changed':
+        store.setDeletionTime(eventData.payload.time);
+        break;
+      case 'background-changed':
+        break;
+      case 'app-setting-changed':
+        if (eventData.payload.key === 'groundPosition') {
+          store.setGroundPosition(parseInt(eventData.payload.value));
+        } else if (eventData.payload.key === 'deletionTime') {
+          store.setDeletionTime(eventData.payload.value);
+        }
+        break;
+      case 'image-upserted': {
+        const workspaceImage = this.convertUpsertedPayload(eventData.payload);
+        if (workspaceImage) {
+          store.upsertProcessedImage(workspaceImage);
+        }
+        break;
+      }
+      case 'image-deleted':
+        if (eventData.payload?.id) {
+          store.removeProcessedImage(eventData.payload.id);
+        }
+        break;
+      case 'animation-settings-changed':
+        break;
+      case 'audio-updated':
+        break;
+    }
+  }
+
+  private flushPendingEvents(): void {
+    if (this.pendingEvents.length === 0) return;
+    const queue = [...this.pendingEvents];
+    this.pendingEvents = [];
+    queue.forEach(event => this.applyDataChange(event));
+  }
+
   /**
    * すべてのイベントリスナーをセットアップ
    */
   async setupListeners(): Promise<void> {
-    // 初期画像リストを読み込む
+    // 重複登録を避けるため既存リスナーを解除
+    if (this.unlisteners.length > 0) {
+      this.cleanup();
+    }
+
+    this.isHydrating = true;
     await this.updateImageList();
-    
+    this.isHydrating = false;
+    this.flushPendingEvents();
+
     // data-changedイベントのリスナー
     const dataChangeUnlisten = await listen<DataChangeEvent>('data-changed', (event) => {
       const eventData = event.payload;
       if (!eventData) return;
-      const store = useWorkspaceStore.getState();
-      
-      switch (eventData.type) {
-        case 'ground-position-changed':
-          store.setGroundPosition(eventData.payload.position);
-          break;
-        case 'deletion-time-changed':
-          store.setDeletionTime(eventData.payload.time);
-          break;
-        case 'background-changed':
-          // 背景が変更された場合は、背景を再読み込みする必要がある
-          // これは別途処理する必要があるため、現時点では実装しない
-          break;
-        case 'app-setting-changed':
-          // アプリ設定の変更を処理
-          if (eventData.payload.key === 'groundPosition') {
-            store.setGroundPosition(parseInt(eventData.payload.value));
-          } else if (eventData.payload.key === 'deletionTime') {
-            store.setDeletionTime(eventData.payload.value);
-          }
-          break;
-        case 'image-upserted': {
-          const workspaceImage = this.convertUpsertedPayload(eventData.payload);
-          if (workspaceImage) {
-            store.upsertProcessedImage(workspaceImage);
-            emit('image-list-updated');
-          }
-          break;
-        }
-        case 'image-deleted':
-          if (eventData.payload?.id) {
-            store.removeProcessedImage(eventData.payload.id);
-            emit('image-list-updated');
-          }
-          break;
-        case 'animation-settings-changed':
-          emit('image-list-updated');
-          break;
-        case 'audio-updated':
-          // これらは現状フロントでは特に差分処理なし
-          break;
-        // 他のイベントタイプは必要に応じて実装
+      if (this.isHydrating) {
+        this.pendingEvents.push(eventData);
+        return;
       }
+      this.applyDataChange(eventData);
     });
-    
+
     this.unlisteners.push(dataChangeUnlisten);
-    
+
     // ワークスペース関連のイベント
     const workspaceChangedUnlisten = await listen('workspace-changed', async () => {
       const store = useWorkspaceStore.getState();
@@ -131,7 +147,10 @@ export class TauriEventListener {
         store.setSettings(settings);
       }
 
+      this.isHydrating = true;
       await this.updateImageList();
+      this.isHydrating = false;
+      this.flushPendingEvents();
     });
     
     this.unlisteners.push(workspaceChangedUnlisten);
@@ -155,7 +174,7 @@ export class TauriEventListener {
     try {
       const store = useWorkspaceStore.getState();
       const aggregated: WorkspaceImage[] = [];
-      const batchSize = 100;
+      const batchSize = 60;
       let cursor: number | null = 0;
       let lastCursor: number | null = null;
 
@@ -178,8 +197,6 @@ export class TauriEventListener {
       store.setProcessedCursor(lastCursor);
 
       console.log(`[TauriEventListener] Updated processed image list (count=${aggregated.length})`);
-
-      emit('image-list-updated');
     } catch (error) {
       console.error('[TauriEventListener] Failed to update image list:', error);
     }

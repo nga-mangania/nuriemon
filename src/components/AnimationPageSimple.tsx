@@ -19,7 +19,7 @@ const AnimationPageSimple: React.FC = () => {
     audioPermissionNeeded, loadAudioFiles, playEffect, retryAudioPlayback 
   } = useAudio();
 
-  const { animatedImages, updateImages, newImageAdded, setNewImageAdded } = useAnimationData();
+  const { animatedImages, refresh, newImageAdded, setNewImageAdded } = useAnimationData();
 
   // --- 新規画像追加を監視して効果音を再生 ---
   useEffect(() => {
@@ -61,11 +61,11 @@ const AnimationPageSimple: React.FC = () => {
       // Zustandストアが既に設定を管理しているため、背景とオーディオの読み込みのみ行う
       await loadBackground();
       await loadAudioFiles();
-      await updateImages(true); // 初期ロードフラグをtrueで渡す
+      await refresh({ initial: true });
       setIsInitialized(true);
     };
     initialize();
-  }, [loadBackground, loadAudioFiles, updateImages]);
+  }, [loadBackground, loadAudioFiles, refresh]);
 
   // --- イベントハンドラ ---
   // data-changedイベントリスナーは削除（Zustandストアへの統一のため）
@@ -83,7 +83,7 @@ const AnimationPageSimple: React.FC = () => {
         // Zustandストアが自動的に更新されるため、背景とオーディオ、画像のみ再読み込み
         await loadBackground();
         await loadAudioFiles();
-        await updateImages();
+        await refresh();
       });
       unlisteners.push(unlisten1);
     };
@@ -93,7 +93,7 @@ const AnimationPageSimple: React.FC = () => {
     return () => {
       unlisteners.forEach(unlisten => unlisten());
     };
-  }, [loadBackground, loadAudioFiles, updateImages]);
+  }, [loadBackground, loadAudioFiles, refresh]);
 
   return (
     <div className={styles.animationPage}>

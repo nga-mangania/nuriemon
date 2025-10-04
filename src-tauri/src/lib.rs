@@ -930,7 +930,6 @@ pub fn run() {
                         let _ = main_win.set_size(Size::Logical(LogicalSize::new(target_w, target_h)));
                         // 画面内に収まるように位置を計算（中央寄せしつつクランプ）
                         // 配置座標（論理）
-                        let (mut x, mut y) = (0.0_f64, 0.0_f64);
                         // モニタの左上座標（論理）
                         let mon_pos = monitor.position();
                         let mon_x = (mon_pos.x as f64) / scale;
@@ -943,8 +942,8 @@ pub fn run() {
                         let max_x = mon_x + (mon_w - target_w).max(0.0);
                         let min_y = mon_y;
                         let max_y = mon_y + (mon_h - target_h).max(0.0);
-                        x = ideal_x.clamp(min_x, max_x);
-                        y = ideal_y.clamp(min_y, max_y);
+                        let x = ideal_x.clamp(min_x, max_x);
+                        let y = ideal_y.clamp(min_y, max_y);
                         let _ = main_win.set_position(Position::Logical(LogicalPosition::new(x, y)));
                     }
                     _ => {

@@ -10,8 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useWorkspace } from "./hooks/useWorkspace";
 import { WorkspaceSelector } from "./components/WorkspaceSelector";
 import { TauriEventListener } from "./events/tauriEventListener";
-import { rehydrateStore, useWorkspaceStore } from "./stores/workspaceStore";
-import { emit } from '@tauri-apps/api/event';
+import { rehydrateStore } from "./stores/workspaceStore";
 import styles from "./App.module.scss";
 import { InitialSetup } from "./components/InitialSetup";
 import { createPcWsClient } from "./services/pcWsClient";
@@ -238,18 +237,5 @@ function App() {
   // フォールバック（通常は到達しない）
   return null;
 }
-
-// Zustandストアの変更を監視して他のウィンドウに通知
-useWorkspaceStore.subscribe((state, prev) => {
-  if (state.processedImages !== prev.processedImages) {
-    console.log('[App] Images changed in store, emitting store-updated event');
-    try {
-      const p = emit('store-updated');
-      if (p && typeof (p as any).catch === 'function') {
-        (p as any).catch(() => {});
-      }
-    } catch (_) {}
-  }
-});
 
 export default App;

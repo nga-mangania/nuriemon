@@ -80,19 +80,16 @@ pub enum DataChangeEvent {
     AppSettingChanged(AppSettingChangedPayload),
 }
 
-// イベント発行関数
+// イベント発行関数（全ウィンドウへブロードキャスト）
 pub fn emit_data_change(app_handle: &AppHandle, event: DataChangeEvent) -> Result<(), String> {
     println!("[Rust] Emitting event to all windows: {:?}", event);
-    
-    // すべてのウィンドウにイベントを送信
-    let windows = app_handle.webview_windows();
-    for (label, _window) in windows {
-        println!("[Rust] Emitting to window: {}", label);
+
+    for (label, window) in app_handle.webview_windows() {
+        if let Err(err) = window.emit("data-changed", &event) {
+            eprintln!("[Rust] Failed to emit event to window {}: {}", label, err);
+        }
     }
-    
-    app_handle.emit("data-changed", &event)
-        .map_err(|e| format!("Failed to emit event: {}", e))?;
-    println!("[Rust] Event emitted successfully to all windows");
+
     Ok(())
 }
 

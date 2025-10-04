@@ -7,6 +7,7 @@ import { GlobalSettingsService } from '../services/globalSettings';
 import { checkRelayHealth } from '../services/connectivityProbe';
 import { pendingSid, registerPc, retryWithBackoff, resolveBaseUrl, getSidStatus } from '../services/relayClient';
 import { loadDeviceToken } from '../services/licenseClient';
+import { TauriEventListener } from '../events/tauriEventListener';
 import styles from './QrDisplayWindow.module.scss';
 // Relayブリッジはグローバル（App側）で起動するためQR画面では起動しない
 
@@ -75,6 +76,7 @@ export const QrDisplayWindow: React.FC = () => {
   const fallbackTimeoutsRef = useRef<Map<string, number>>(new Map());
   const pollControllersRef = useRef<Map<string, PollController>>(new Map());
   const relayEventIdRef = useRef<string>(relayEventId);
+  const localPollsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -119,6 +121,15 @@ export const QrDisplayWindow: React.FC = () => {
     });
   };
 
+  const cancelLocalTimer = (sessionId?: string) => {
+    if (!sessionId) return;
+    const handle = localPollsRef.current.get(sessionId);
+    if (handle !== undefined) {
+      try { window.clearInterval(handle); } catch {}
+      localPollsRef.current.delete(sessionId);
+    }
+  };
+
   const cancelFallbackForSession = (sessionId: string) => {
     const timeout = fallbackTimeoutsRef.current.get(sessionId);
     if (timeout !== undefined) {
@@ -131,6 +142,7 @@ export const QrDisplayWindow: React.FC = () => {
       window.clearTimeout(controller.timer);
       pollControllersRef.current.delete(sessionId);
     }
+    cancelLocalTimer(sessionId);
   };
 
   const startFallbackPolling = (sessionId: string, imageId: string) => {
@@ -229,6 +241,7 @@ export const QrDisplayWindow: React.FC = () => {
   ) => {
     if (previous && previous.sessionId && previous.sessionId !== session.sessionId) {
       sessionByIdRef.current.delete(previous.sessionId);
+      cancelLocalTimer(previous.sessionId);
     }
     sessionByIdRef.current.set(session.sessionId, imageId);
     updateSessions(prev => {
@@ -318,39 +331,66 @@ export const QrDisplayWindow: React.FC = () => {
     })();
   }, []);
 
+  // 差分イベントリスナーを起動（各ウィンドウで個別にセット）
+  useEffect(() => {
+    const listener = TauriEventListener.getInstance();
+    listener.setupListeners().catch(error => {
+      console.error('[QrDisplayWindow] Failed to setup Tauri event listeners:', error);
+    });
+    return () => {
+      listener.cleanup();
+    };
+  }, []);
+
+  // processedImages から外れたセッションを整理
+  useEffect(() => {
+    const validIds = new Set(processedImages.map(img => img.id));
+    const staleSessions: string[] = [];
+    sessionsRef.current.forEach((session, imageId) => {
+      if (!validIds.has(imageId)) {
+        staleSessions.push(imageId);
+        cancelFallbackForSession(session.sessionId);
+        cancelLocalTimer(session.sessionId);
+      }
+    });
+    if (staleSessions.length > 0) {
+      updateSessions(prev => {
+        const next = new Map(prev);
+        staleSessions.forEach(id => next.delete(id));
+        return next;
+      });
+    }
+  }, [processedImages]);
+
   // （除去）
 
-  // 他ウィンドウからの更新通知をリッスンする
+  // 他ウィンドウからの通知をリッスンする（必要な処理だけ実行）
   useEffect(() => {
-    const unlisteners: Array<Promise<() => void>> = [];
-    const add = (event: string) => {
-      const p = listen(event, () => {
-        console.log(`[QrDisplayWindow] Received ${event}. Reloading state.`);
-        loadStateFromFile();
-        reloadAppSettings();
-        setRegenTick(t => t + 1);
-      });
-      unlisteners.push(p);
+    const unsubs: Array<() => void> = [];
+
+    const register = async (event: string, handler: () => void) => {
+      try {
+        const off = await listen(event, handler);
+        unsubs.push(() => {
+          try { off(); } catch (_) {}
+        });
+      } catch (error) {
+        console.error(`[QrDisplayWindow] Failed to register listener for ${event}:`, error);
+      }
     };
-    add('image-list-updated');
-    add('store-updated'); // 互換のため残す
-    add('data-changed');  // 念のためDBイベントも拾う
-    add('workspace-data-loaded'); // ワークスペース切替時
-    add('app-settings-changed'); // 設定変更時
+
+    register('workspace-data-loaded', () => {
+      loadStateFromFile();
+      setRegenTick(t => t + 1);
+    });
+
+    register('app-settings-changed', () => {
+      void reloadAppSettings();
+      setRegenTick(t => t + 1);
+    });
 
     return () => {
-      // 二重解除や未登録時の例外/非同期拒否を握りつぶし、安全にクリーンアップ
-      unlisteners.forEach(p => p
-        .then(fn => {
-          try {
-            const r = (fn as any)();
-            if (r && typeof (r as any).catch === 'function') {
-              (r as any).catch(() => {});
-            }
-          } catch (_) {}
-        })
-        .catch(() => {})
-      );
+      unsubs.forEach(unsub => unsub());
     };
   }, []);
 
@@ -762,7 +802,8 @@ export const QrDisplayWindow: React.FC = () => {
 
   // タイマー処理
   const startTimer = (imageId: string, sessionId: string) => {
-    const interval = setInterval(async () => {
+    cancelLocalTimer(sessionId);
+    const interval = window.setInterval(async () => {
       try {
         const status = await invoke<{ connected: boolean }>('get_qr_session_status', { sessionId });
         updateSessions(prev => {
@@ -770,18 +811,25 @@ export const QrDisplayWindow: React.FC = () => {
           if (!existing) return prev;
           const nextConnected = !!status.connected;
           if (existing.connected === nextConnected) {
-            if (nextConnected) clearInterval(interval);
+            if (nextConnected) {
+              window.clearInterval(interval);
+              localPollsRef.current.delete(sessionId);
+            }
             return prev;
           }
           const next = new Map(prev);
           next.set(imageId, { ...existing, connected: nextConnected });
-          if (nextConnected) clearInterval(interval);
+          if (nextConnected) {
+            window.clearInterval(interval);
+            localPollsRef.current.delete(sessionId);
+          }
           return next;
         });
       } catch (error) {
         // 一時的なエラーは無視（サーバーはローカル）
       }
     }, 3000); // 負荷軽減のため3秒間隔
+    localPollsRef.current.set(sessionId, interval);
   };
 
   // Crockford系 base32（I/O/L除外）の10桁を生成（暫定）

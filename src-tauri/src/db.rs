@@ -263,7 +263,7 @@ impl Database {
 
     pub fn get_processed_images_preview(&self, last_cursor: Option<i64>, limit: i64) -> Result<Vec<ProcessedImagePreview>> {
         let cursor = last_cursor.unwrap_or(0);
-        let limit = if limit <= 0 { 100 } else { limit.min(500) };
+        let limit = if limit <= 0 { 60 } else { limit.min(500) };
 
         let mut stmt = self.conn.prepare(
             "SELECT rowid, id, original_file_name, saved_file_name, created_at, display_started_at

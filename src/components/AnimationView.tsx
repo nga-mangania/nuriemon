@@ -493,6 +493,7 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       scaleSpeed: Math.random() * 0.001 + 0.0005,
       animationStartTime: now,
       isNewImage: markAsNew,
+      pendingDeletion: false,
       specialMovementCooldown: 0,
       specialScale: 1,
       manualAxisX: 0,
@@ -684,9 +685,13 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       const toHide: string[] = [];
 
       for (const image of Object.values(animatedImagesRef.current)) {
+        if (image.pendingDeletion) {
+          continue;
+        }
         // 削除チェック
         if (deletionTimeMs > 0 && image.createdAt && currentTime - image.createdAt >= deletionTimeMs) {
           console.log(`[AnimationView] 画像 ${image.id} を非表示（時間経過）`);
+          image.pendingDeletion = true;
           toHide.push(image.id);
           continue; // この画像は更新リストに追加しない（アニメ画面から消す）
         }
@@ -845,15 +850,15 @@ const AnimationView: React.FC<AnimationViewProps> = ({
     const newImages = inputImages.map(img => {
       const existing = animatedImagesRef.current[img.id];
       if (existing) {
-        // 既存の画像の設定を更新
-        return {
-          ...existing,
-          type: img.type,
-          movement: img.movement,
-          size: img.size,
-          speed: img.speed,
-          isNewImage: false,
-        };
+        existing.imageUrl = img.imageUrl;
+        existing.originalFileName = img.originalFileName;
+        existing.type = img.type;
+        existing.movement = img.movement;
+        existing.size = img.size;
+        existing.speed = img.speed;
+        existing.isNewImage = false;
+        existing.pendingDeletion = false;
+        return existing;
       }
       // 新しい画像を初期化
       return initializeImage(img, true);
