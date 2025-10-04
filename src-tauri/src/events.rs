@@ -3,18 +3,81 @@ use tauri::{AppHandle, Manager, Emitter};
 
 use crate::db::ImageMetadata;
 
-// データ変更イベントの種類
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data")]
+pub struct ImageUpsertedPayload {
+    pub id: String,
+    pub original_file_name: String,
+    pub saved_file_name: String,
+    pub image_type: String,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_started_at: Option<String>,
+}
+
+impl From<&ImageMetadata> for ImageUpsertedPayload {
+    fn from(meta: &ImageMetadata) -> Self {
+        Self {
+            id: meta.id.clone(),
+            original_file_name: meta.original_file_name.clone(),
+            saved_file_name: meta.saved_file_name.clone(),
+            image_type: meta.image_type.clone(),
+            created_at: meta.created_at.clone(),
+            display_started_at: meta.display_started_at.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImageDeletedPayload {
+    pub id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AudioUpdatedPayload {
+    pub audio_type: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AnimationSettingsChangedPayload {
+    pub image_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GroundPositionChangedPayload {
+    pub position: i32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DeletionTimeChangedPayload {
+    pub time: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AppSettingChangedPayload {
+    pub key: String,
+    pub value: String,
+}
+
+// データ変更イベントの種類（serdeで type/payload 形式に）
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", content = "payload")]
 pub enum DataChangeEvent {
-    ImageUpserted { image: ImageMetadata },
-    ImageDeleted { id: String },
-    AudioUpdated { audio_type: String }, // "bgm" or "sound_effect"
+    #[serde(rename = "image-upserted")]
+    ImageUpserted(ImageUpsertedPayload),
+    #[serde(rename = "image-deleted")]
+    ImageDeleted(ImageDeletedPayload),
+    #[serde(rename = "audio-updated")]
+    AudioUpdated(AudioUpdatedPayload),
+    #[serde(rename = "background-changed")]
     BackgroundChanged,
-    AnimationSettingsChanged { image_id: String },
-    GroundPositionChanged { position: i32 },
-    DeletionTimeChanged { time: String },
-    AppSettingChanged { key: String, value: String },
+    #[serde(rename = "animation-settings-changed")]
+    AnimationSettingsChanged(AnimationSettingsChangedPayload),
+    #[serde(rename = "ground-position-changed")]
+    GroundPositionChanged(GroundPositionChangedPayload),
+    #[serde(rename = "deletion-time-changed")]
+    DeletionTimeChanged(DeletionTimeChangedPayload),
+    #[serde(rename = "app-setting-changed")]
+    AppSettingChanged(AppSettingChangedPayload),
 }
 
 // イベント発行関数

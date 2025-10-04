@@ -18,7 +18,17 @@ mod qr_manager;
 mod server_state;
 use keyring::Entry;
 use db::{ImageMetadata, UserSettings, MovementSettings, ProcessedImagePreview, generate_id, current_timestamp};
-use events::{DataChangeEvent, emit_data_change};
+use events::{
+    DataChangeEvent,
+    ImageUpsertedPayload,
+    ImageDeletedPayload,
+    AudioUpdatedPayload,
+    AnimationSettingsChangedPayload,
+    GroundPositionChangedPayload,
+    DeletionTimeChangedPayload,
+    AppSettingChangedPayload,
+    emit_data_change,
+};
 use workspace::{WorkspaceState, WorkspaceConnection};
 use qr_manager::QrManager;
 use server_state::ServerState;
@@ -364,10 +374,13 @@ async fn save_image_metadata(
 
     if let Some(saved) = db.get_image(&image_id)
         .map_err(|e| format!("Failed to re-fetch image metadata: {}", e))? {
-        emit_data_change(&state.app_handle, DataChangeEvent::ImageUpserted { image: saved.clone() })?;
+        emit_data_change(
+            &state.app_handle,
+            DataChangeEvent::ImageUpserted(ImageUpsertedPayload::from(&saved)),
+        )?;
         match image_type.as_str() {
-            "bgm" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated { audio_type: "bgm".to_string() })?,
-            "sound_effect" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated { audio_type: "sound_effect".to_string() })?,
+            "bgm" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated(AudioUpdatedPayload { audio_type: "bgm".to_string() }))?,
+            "sound_effect" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated(AudioUpdatedPayload { audio_type: "sound_effect".to_string() }))?,
             "background" => emit_data_change(&state.app_handle, DataChangeEvent::BackgroundChanged)?,
             _ => {}
         }
@@ -446,11 +459,14 @@ async fn delete_image(
     db.delete_image(&id)
         .map_err(|e| format!("Failed to delete image: {}", e))?;
     
-    emit_data_change(&state.app_handle, DataChangeEvent::ImageDeleted { id: id.clone() })?;
+    emit_data_change(
+        &state.app_handle,
+        DataChangeEvent::ImageDeleted(ImageDeletedPayload { id: id.clone() }),
+    )?;
 
     match image_type.as_str() {
-        "bgm" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated { audio_type: "bgm".to_string() })?,
-        "sound_effect" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated { audio_type: "sound_effect".to_string() })?,
+        "bgm" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated(AudioUpdatedPayload { audio_type: "bgm".to_string() }))?,
+        "sound_effect" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated(AudioUpdatedPayload { audio_type: "sound_effect".to_string() }))?,
         "background" => emit_data_change(&state.app_handle, DataChangeEvent::BackgroundChanged)?,
         _ => {}
     }
@@ -532,7 +548,10 @@ fn save_movement_settings(
         .map_err(|e| format!("Failed to save movement settings: {}", e))?;
     
     // イベントを発行
-    emit_data_change(&state.app_handle, DataChangeEvent::AnimationSettingsChanged { image_id })?;
+    emit_data_change(
+        &state.app_handle,
+        DataChangeEvent::AnimationSettingsChanged(AnimationSettingsChangedPayload { image_id }),
+    )?;
     
     Ok(())
 }
@@ -577,13 +596,13 @@ fn save_app_setting(
     let event = match key.as_str() {
         "ground_position" => {
             if let Ok(position) = value.parse::<i32>() {
-                DataChangeEvent::GroundPositionChanged { position }
+                DataChangeEvent::GroundPositionChanged(GroundPositionChangedPayload { position })
             } else {
-                DataChangeEvent::AppSettingChanged { key, value }
+                DataChangeEvent::AppSettingChanged(AppSettingChangedPayload { key, value })
             }
         },
-        "deletion_time" => DataChangeEvent::DeletionTimeChanged { time: value.clone() },
-        _ => DataChangeEvent::AppSettingChanged { key, value },
+        "deletion_time" => DataChangeEvent::DeletionTimeChanged(DeletionTimeChangedPayload { time: value.clone() }),
+        _ => DataChangeEvent::AppSettingChanged(AppSettingChangedPayload { key, value }),
     };
     
     emit_data_change(&state.app_handle, event)?;

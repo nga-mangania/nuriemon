@@ -303,7 +303,10 @@ fn process_image_async(
         .map_err(|e| format!("Failed to save image metadata: {}", e))?;
 
     // イベント発火（ギャラリー等へ反映）
-    emit_data_change(&app_handle, DataChangeEvent::ImageUpserted { image: metadata.clone() })
+    emit_data_change(
+        &app_handle,
+        DataChangeEvent::ImageUpserted(crate::events::ImageUpsertedPayload::from(&metadata)),
+    )
         .map_err(|e| format!("Failed to emit data change: {}", e))?;
 
     Ok(save_path.to_string_lossy().to_string())

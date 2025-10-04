@@ -3,12 +3,24 @@ import { useWorkspaceStore, WorkspaceImage } from '../stores/workspaceStore';
 import { WorkspaceManager, WorkspaceSettings } from '../services/workspaceManager';
 import { DatabaseService, ProcessedImagePreview } from '../services/database';
 
-export interface DataChangeEvent {
-  type: 'ImageUpserted' | 'ImageDeleted' | 'AudioUpdated' | 'BackgroundChanged' | 
-        'AnimationSettingsChanged' | 'GroundPositionChanged' | 'DeletionTimeChanged' | 
-        'AppSettingChanged';
-  data: any;
-}
+type ImageUpsertedPayload = {
+  id: string;
+  original_file_name: string;
+  saved_file_name: string;
+  image_type: string;
+  created_at: string;
+  display_started_at?: string | null;
+};
+
+type DataChangeEvent =
+  | { type: 'image-upserted'; payload: ImageUpsertedPayload }
+  | { type: 'image-deleted'; payload: { id: string } }
+  | { type: 'audio-updated'; payload: { audio_type: string } }
+  | { type: 'background-changed' }
+  | { type: 'animation-settings-changed'; payload: { image_id: string } }
+  | { type: 'ground-position-changed'; payload: { position: number } }
+  | { type: 'deletion-time-changed'; payload: { time: string } }
+  | { type: 'app-setting-changed'; payload: { key: string; value: string } };
 
 /**
  * Tauriイベントを受信してZustandストアを更新する中央リスナー
@@ -37,8 +49,7 @@ export class TauriEventListener {
     };
   }
 
-  private convertMetadata(raw: any): WorkspaceImage | null {
-    const payload = raw?.image ?? raw;
+  private convertUpsertedPayload(payload: ImageUpsertedPayload): WorkspaceImage | null {
     if (!payload || payload.image_type !== 'processed') {
       return null;
     }
@@ -60,44 +71,48 @@ export class TauriEventListener {
     
     // data-changedイベントのリスナー
     const dataChangeUnlisten = await listen<DataChangeEvent>('data-changed', (event) => {
-      const { type, data } = event.payload;
+      const eventData = event.payload;
+      if (!eventData) return;
       const store = useWorkspaceStore.getState();
       
-      switch (type) {
-        case 'GroundPositionChanged':
-          store.setGroundPosition(data.position);
+      switch (eventData.type) {
+        case 'ground-position-changed':
+          store.setGroundPosition(eventData.payload.position);
           break;
-        case 'DeletionTimeChanged':
-          store.setDeletionTime(data.time);
+        case 'deletion-time-changed':
+          store.setDeletionTime(eventData.payload.time);
           break;
-        case 'BackgroundChanged':
+        case 'background-changed':
           // 背景が変更された場合は、背景を再読み込みする必要がある
           // これは別途処理する必要があるため、現時点では実装しない
           break;
-        case 'AppSettingChanged':
+        case 'app-setting-changed':
           // アプリ設定の変更を処理
-          if (data.key === 'groundPosition') {
-            store.setGroundPosition(parseInt(data.value));
-          } else if (data.key === 'deletionTime') {
-            store.setDeletionTime(data.value);
+          if (eventData.payload.key === 'groundPosition') {
+            store.setGroundPosition(parseInt(eventData.payload.value));
+          } else if (eventData.payload.key === 'deletionTime') {
+            store.setDeletionTime(eventData.payload.value);
           }
           break;
-        case 'ImageUpserted': {
-          const workspaceImage = this.convertMetadata(data);
+        case 'image-upserted': {
+          const workspaceImage = this.convertUpsertedPayload(eventData.payload);
           if (workspaceImage) {
             store.upsertProcessedImage(workspaceImage);
             emit('image-list-updated');
           }
           break;
         }
-        case 'ImageDeleted':
-          if (data?.id) {
-            store.removeProcessedImage(data.id);
+        case 'image-deleted':
+          if (eventData.payload?.id) {
+            store.removeProcessedImage(eventData.payload.id);
             emit('image-list-updated');
           }
           break;
-        case 'AnimationSettingsChanged':
+        case 'animation-settings-changed':
           emit('image-list-updated');
+          break;
+        case 'audio-updated':
+          // これらは現状フロントでは特に差分処理なし
           break;
         // 他のイベントタイプは必要に応じて実装
       }
