@@ -4,6 +4,8 @@ import { PROTOCOL_VERSION } from '../protocol/version';
 
 export type RelayResponse<T> = { ok: true; data: T } | { ok: false; status?: number; error?: string; retryAfterMs?: number; code?: string };
 
+const registerCache = new Map<string, number>();
+const REGISTER_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export async function resolveBaseUrl(): Promise<string> {
   // 0) ユーザー保存のベースURLがあれば最優先（開発時の一時切替用途）
   const userSaved = await GlobalSettingsService.get('relay_base_url');
@@ -45,23 +47,52 @@ function parseRetryAfter(header: string | null): number | undefined {
   return undefined;
 }
 
-export async function registerPc(params: { eventId: string; pcid: string }): Promise<RelayResponse<{ ok: true }>> {
+export async function registerPc(params: { eventId: string; pcid: string; force?: boolean }): Promise<RelayResponse<{ ok: true }>> {
+  const cacheKey = `${params.eventId}:${params.pcid}`;
+  const now = Date.now();
+  if (!params.force) {
+    const cached = registerCache.get(cacheKey);
+    if (cached && now - cached < REGISTER_CACHE_TTL_MS) {
+      return { ok: true, data: { ok: true } as any };
+    }
+  }
+
   const base = await baseUrl();
   const path = `/e/${encodeURIComponent(params.eventId)}/register-pc`;
   const body = { pcid: params.pcid };
   const bearer = await loadDeviceToken();
-  if (bearer) {
-    try {
-      const url = base + path;
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json; charset=utf-8', 'Authorization': `Bearer ${bearer}` }, body: JSON.stringify(body), credentials: 'omit' });
-      if (res.status === 429 || res.status === 503) return { ok: false, status: res.status, retryAfterMs: parseRetryAfter(res.headers.get('Retry-After')) };
-      if (!res.ok) { let code: string | undefined; try { const err = await res.json(); code = err?.code; } catch {}; return { ok: false, status: res.status, code }; }
-      const data = await res.json();
-      return { ok: true, data } as RelayResponse<{ ok: true }>;
-    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  if (!bearer) {
+    return { ok: false, error: 'E_MISSING_TOKEN' };
   }
-  return { ok: false, error: 'E_MISSING_TOKEN' };
+
+  try {
+    const url = base + path;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Authorization': `Bearer ${bearer}` },
+      body: JSON.stringify(body),
+      credentials: 'omit'
+    });
+    if (res.status === 429 || res.status === 503) {
+      return { ok: false, status: res.status, retryAfterMs: parseRetryAfter(res.headers.get('Retry-After')) };
+    }
+    if (!res.ok) {
+      let code: string | undefined;
+      try { const err = await res.json(); code = err?.code; } catch {}
+      if (res.status === 409 && code === 'E_ALREADY_REGISTERED') {
+        registerCache.set(cacheKey, now);
+        return { ok: true, data: { ok: true } as any };
+      }
+      return { ok: false, status: res.status, code };
+    }
+    await res.json();
+    registerCache.set(cacheKey, now);
+    return { ok: true, data: { ok: true } as any };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
 }
+
 
 export async function pendingSid(params: { eventId: string; pcid: string; sid: string; ttl: number; ts?: number }): Promise<RelayResponse<{ ok: true }>> {
   const base = await baseUrl();

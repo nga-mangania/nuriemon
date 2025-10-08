@@ -32,6 +32,8 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
       const res = await retryWithBackoff(() => registerPc({ eventId: params.eventId, pcid: params.pcid }));
       if (!res.ok) {
         emit('pc-bridge-status', { state: 'error', detail: 'register-pc failed', res });
+      } else {
+        console.log('[pcWsClient] registerPc ok (cached)', res);
       }
     } catch (e) {
       emit('pc-bridge-status', { state: 'error', detail: 'register-pc exception', e: String(e) });
