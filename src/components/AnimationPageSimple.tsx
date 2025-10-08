@@ -74,24 +74,36 @@ const AnimationPageSimple: React.FC = () => {
 
   // --- ワークスペース変更を監視 ---
   useEffect(() => {
+    let disposed = false;
     const unlisteners: Array<() => void> = [];
+    const pending: Array<Promise<void>> = [];
 
-    const setupListeners = async () => {
-      // ワークスペースデータ読み込み完了時
-      const unlisten1 = await listen('workspace-data-loaded', async () => {
+    const register = () => {
+      const promise = listen('workspace-data-loaded', async () => {
         console.log('[AnimationPageSimple] ワークスペースデータ読み込み完了を検知');
-        // Zustandストアが自動的に更新されるため、背景とオーディオ、画像のみ再読み込み
         await loadBackground();
         await loadAudioFiles();
         await refresh();
-      });
-      unlisteners.push(unlisten1);
+      })
+        .then((off) => {
+          if (disposed) {
+            try { off(); } catch {}
+            return;
+          }
+          unlisteners.push(() => { try { off(); } catch {} });
+        })
+        .catch((error) => {
+          console.error('[AnimationPageSimple] Failed to register workspace listener:', error);
+        });
+      pending.push(promise);
     };
 
-    setupListeners();
+    register();
 
     return () => {
-      unlisteners.forEach(unlisten => unlisten());
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+      pending.forEach((p) => p.catch(() => {}));
     };
   }, [loadBackground, loadAudioFiles, refresh]);
 

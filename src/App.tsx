@@ -186,9 +186,17 @@ function App() {
     run();
     // 設定変更／ワークスペース変更時にも再評価
     const subs: Array<Promise<() => void>> = [];
-    subs.push(listen('app-settings-changed', () => run()));
-    subs.push(listen('workspace-data-loaded', () => run()));
-    return () => { subs.forEach(p => p.then(un => un())); };
+    const register = (event: string) => {
+      const promise = listen(event, () => { void run(); })
+        .catch((error) => {
+          console.error(`[App] Failed to register listener for ${event}:`, error);
+          return () => {};
+        });
+      subs.push(promise);
+    };
+    register('app-settings-changed');
+    register('workspace-data-loaded');
+    return () => { subs.forEach((p) => p.then((un) => { try { un(); } catch {} }).catch(() => {})); };
   }, [isReady]);
 
   const handleAnimationClick = async () => {

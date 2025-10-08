@@ -339,20 +339,33 @@ export const QrDisplayWindow: React.FC = () => {
 
   // 他ウィンドウからの通知をリッスン
   useEffect(() => {
+    let disposed = false;
     const unsubs: Array<() => void> = [];
-    const register = async (event: string, handler: () => void) => {
-      try {
-        const off = await listen(event, handler);
-        unsubs.push(() => { try { off(); } catch {} });
-      } catch (error) {
-        console.error(`[QrDisplayWindow] Failed to register listener for ${event}:`, error);
-      }
+    const pending: Array<Promise<void>> = [];
+
+    const register = (event: string, handler: () => void) => {
+      const promise = listen(event, handler)
+        .then((off) => {
+          if (disposed) {
+            try { off(); } catch {}
+            return;
+          }
+          unsubs.push(() => { try { off(); } catch {} });
+        })
+        .catch((error) => {
+          console.error(`[QrDisplayWindow] Failed to register listener for ${event}:`, error);
+        });
+      pending.push(promise);
     };
 
     register('workspace-data-loaded', () => setRegenTick((t) => t + 1));
     register('app-settings-changed', () => { void reloadAppSettings(); setRegenTick((t) => t + 1); });
 
-    return () => unsubs.forEach((un) => un());
+    return () => {
+      disposed = true;
+      unsubs.forEach((un) => un());
+      pending.forEach((p) => p.catch(() => {}));
+    };
   }, []);
 
   // 設定が変わっても既存QRは保持、必要な分のみ再生成

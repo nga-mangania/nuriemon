@@ -44,24 +44,36 @@ export function AudioSettings() {
 
   // 既存の音声ファイルを読み込み
   useEffect(() => {
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    const pending: Array<Promise<void>> = [];
+
     loadExistingAudioFiles();
-    
-    // ワークスペース変更イベントをリッスン
-    const setupListeners = async () => {
-      const unlisten = await listen('workspace-data-loaded', async () => {
+
+    const register = () => {
+      const promise = listen('workspace-data-loaded', async () => {
         console.log('[AudioSettings] ワークスペースデータ読み込み完了を検知');
-        // 音声ファイルを再読み込み
         await loadExistingAudioFiles();
-      });
-      
-      return unlisten;
+      })
+        .then((off) => {
+          if (disposed) {
+            try { off(); } catch {}
+            return;
+          }
+          unlisteners.push(() => { try { off(); } catch {} });
+        })
+        .catch((error) => {
+          console.error('[AudioSettings] Failed to register workspace listener:', error);
+        });
+      pending.push(promise);
     };
-    
-    let unlisten: (() => void) | undefined;
-    setupListeners().then(fn => { unlisten = fn; });
-    
+
+    register();
+
     return () => {
-      if (unlisten) unlisten();
+      disposed = true;
+      unlisteners.forEach((off) => off());
+      pending.forEach((p) => p.catch(() => {}));
     };
   }, []);
 

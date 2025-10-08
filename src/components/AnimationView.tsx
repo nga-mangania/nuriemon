@@ -261,10 +261,12 @@ const AnimationView: React.FC<AnimationViewProps> = ({
 
   // モバイル操作の受信（move/action/emote）
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
 
     const setup = async () => {
-      unlisten = await listen<any>('mobile-control', (event) => {
+      try {
+        const off = await listen<any>('mobile-control', (event) => {
         const payload: any = event.payload || {};
         const type = payload.type as string;
         const imageId = payload.imageId as string | undefined;
@@ -357,12 +359,24 @@ const AnimationView: React.FC<AnimationViewProps> = ({
             break;
           }
         }
-      });
+        });
+        if (disposed) {
+          try { off(); } catch {}
+          return;
+        }
+        unlisten = off;
+      } catch (error) {
+        console.error('[AnimationView] Failed to register mobile-control listener:', error);
+      }
     };
 
     setup();
     return () => {
-      if (unlisten) unlisten();
+      disposed = true;
+      if (unlisten) {
+        try { unlisten(); } catch {}
+        unlisten = null;
+      }
     };
   }, []);
 

@@ -169,19 +169,32 @@ export function SettingsPage() {
 
   // PCブリッジ状態の購読（トップレベルで）
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
+    let disposed = false;
+    let cleanup: (() => void) | null = null;
     (async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event');
-        const un = await listen('pc-bridge-status', (e) => {
+        const off = await listen('pc-bridge-status', (e) => {
           const p: any = e.payload || {};
           const s = typeof p === 'string' ? p : (p.state || JSON.stringify(p));
           setPcBridgeStatus(s);
         });
-        cleanup = un;
-      } catch {}
+        if (disposed) {
+          try { off(); } catch {}
+          return;
+        }
+        cleanup = off;
+      } catch (error) {
+        console.error('[SettingsPage] Failed to register pc-bridge-status listener:', error);
+      }
     })();
-    return () => { if (cleanup) cleanup(); };
+    return () => {
+      disposed = true;
+      if (cleanup) {
+        try { cleanup(); } catch {}
+        cleanup = null;
+      }
+    };
   }, []);
 
   // ワークスペース変更を監視
