@@ -1,7 +1,8 @@
+// src/windows/QrDisplayWindow.tsx
 import React, { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { useWorkspaceStore } from '../stores/workspaceStore';
+import { useWorkspaceStore, loadStateFromFile } from '../stores/workspaceStore';
 import { AppSettingsService } from '../services/database';
 import { GlobalSettingsService } from '../services/globalSettings';
 import { checkRelayHealth } from '../services/connectivityProbe';
@@ -9,6 +10,7 @@ import { pendingSid, registerPc, retryWithBackoff, resolveBaseUrl, getSidStatus 
 import { loadDeviceToken } from '../services/licenseClient';
 import { TauriEventListener } from '../events/tauriEventListener';
 import styles from './QrDisplayWindow.module.scss';
+
 // Relayブリッジはグローバル（App側）で起動するためQR画面では起動しない
 
 interface QrSession {
@@ -33,44 +35,34 @@ const FALLBACK_MAX_INTERVAL_MS = 15000;
 const FALLBACK_MAX_ATTEMPTS = 6;
 
 export const QrDisplayWindow: React.FC = () => {
-  console.log('[QrDisplayWindow] Component rendering...'); // ログ1: コンポーネントがレンダリングされているか
-  
-  const processedImagesState = useWorkspaceStore(state => state.processedImages);
-  console.log('[QrDisplayWindow] Images from Zustand:', processedImagesState); // ログ2: ストアから取得した直後のデータ
-  
+  const processedImagesState = useWorkspaceStore((state) => state.processedImages);
+
   const [sessions, setSessions] = useState<Map<string, QrSession>>(new Map());
   const [isServerStarted, setIsServerStarted] = useState(false);
   const [serverPort, setServerPort] = useState<number | null>(null);
-  const [operationMode, setOperationMode] = useState<'auto'|'relay'|'local'>('auto');
+  const [operationMode, setOperationMode] = useState<'auto' | 'relay' | 'local'>('auto');
   const [relayBaseUrl, setRelayBaseUrl] = useState<string>('https://ctrl.nuriemon.jp');
   const [relayEventId, setRelayEventId] = useState<string>('');
   const [pcId, setPcId] = useState<string>('');
-  // 秘密鍵はOSキーチェーンから取得（UIからは参照しない）
   const [useRelay, setUseRelay] = useState<boolean>(false);
   const [banner, setBanner] = useState<string | null>(null);
   const [regenTick, setRegenTick] = useState<number>(0);
   const [showDebug, setShowDebug] = useState<boolean>(false);
+
   const showDebugRef = useRef<boolean>(false);
   useEffect(() => { showDebugRef.current = showDebug; }, [showDebug]);
-  // Relay時のサムネイルをデータURLで保有（convertFileSrcは保存先により不安定なため）
+
   const [thumbs, setThumbs] = useState<Map<string, string>>(new Map());
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
-  // mark as used to satisfy TS compile (used only for dev overlay toggles)
-  if (false) { console.log(debugLogs.length, visibleIds.size); }
   const visibleIdsRef = useRef<Set<string>>(new Set());
-  const onVisibleChange = (id: string, visible: boolean) => {
-    const next = new Set(visibleIdsRef.current);
-    if (visible) next.add(id); else next.delete(id);
-    visibleIdsRef.current = next;
-    setVisibleIds(next);
-  };
   const inflightRef = useRef<Set<string>>(new Set());
   const licenseAlertShownRef = useRef<boolean>(false);
   const [licenseBlocked, setLicenseBlocked] = useState<boolean>(false);
   const [licenseBlockedReason, setLicenseBlockedReason] = useState<'missing' | 'invalid' | null>(null);
   const generalAlertShownRef = useRef<boolean>(false);
   const [pcBridgeHealthy, setPcBridgeHealthy] = useState<boolean>(false);
+
   const sessionsRef = useRef<Map<string, QrSession>>(sessions);
   const sessionByIdRef = useRef<Map<string, string>>(new Map());
   const fallbackTimeoutsRef = useRef<Map<string, number>>(new Map());
@@ -78,33 +70,17 @@ export const QrDisplayWindow: React.FC = () => {
   const relayEventIdRef = useRef<string>(relayEventId);
   const localPollsRef = useRef<Map<string, number>>(new Map());
 
-  useEffect(() => {
-    sessionsRef.current = sessions;
-  }, [sessions]);
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+  useEffect(() => { relayEventIdRef.current = relayEventId; }, [relayEventId]);
 
-  useEffect(() => {
-    relayEventIdRef.current = relayEventId;
-  }, [relayEventId]);
-
-  useEffect(() => {
-    return () => {
-      fallbackTimeoutsRef.current.forEach(timeout => window.clearTimeout(timeout));
-      fallbackTimeoutsRef.current.clear();
-      pollControllersRef.current.forEach(controller => {
-        controller.stopped = true;
-        window.clearTimeout(controller.timer);
-      });
-      pollControllersRef.current.clear();
-    };
-  }, []);
   const debug = (msg: string) => {
     try {
-      const ts = new Date().toISOString().split('T')[1]?.replace('Z','');
+      const ts = new Date().toISOString().split('T')[1]?.replace('Z', '');
       const line = `[${ts}] ${msg}`;
-      // コンソールにも出す
+      // コンソール
       console.log('[QRDEBUG]', line);
       if (showDebugRef.current) {
-        setDebugLogs(prev => {
+        setDebugLogs((prev) => {
           const next = prev.length > 400 ? prev.slice(prev.length - 400) : prev.slice();
           next.push(line);
           return next;
@@ -113,8 +89,16 @@ export const QrDisplayWindow: React.FC = () => {
     } catch {}
   };
 
+  const onVisibleChange = (id: string, visible: boolean) => {
+    const next = new Set(visibleIdsRef.current);
+    if (visible) next.add(id);
+    else next.delete(id);
+    visibleIdsRef.current = next;
+    setVisibleIds(next);
+  };
+
   const updateSessions = (updater: (prev: Map<string, QrSession>) => Map<string, QrSession>) => {
-    setSessions(prev => {
+    setSessions((prev) => {
       const result = updater(prev);
       sessionsRef.current = result;
       return result;
@@ -148,8 +132,10 @@ export const QrDisplayWindow: React.FC = () => {
   const startFallbackPolling = (sessionId: string, imageId: string) => {
     if (pollControllersRef.current.has(sessionId) || !sessionId) return;
     const controller: PollController = { timer: 0, stopped: false, attempts: 0 };
+
     const run = async () => {
       if (controller.stopped) return;
+
       const mappedImageId = sessionByIdRef.current.get(sessionId);
       if (!mappedImageId || mappedImageId !== imageId) {
         cancelFallbackForSession(sessionId);
@@ -165,6 +151,7 @@ export const QrDisplayWindow: React.FC = () => {
         cancelFallbackForSession(sessionId);
         return;
       }
+
       try {
         const res = await getSidStatus(eventId, sessionId);
         debug(`fallback poll sid=${sessionId} attempt=${controller.attempts} ok=${res.ok} status=${(res as any).status ?? '-'} connected=${(res as any).data?.connected ?? false}`);
@@ -176,17 +163,16 @@ export const QrDisplayWindow: React.FC = () => {
       } catch (error) {
         debug(`fallback poll error sid=${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
       }
+
       controller.attempts += 1;
       if (controller.attempts >= FALLBACK_MAX_ATTEMPTS) {
         cancelFallbackForSession(sessionId);
         return;
       }
-      const nextDelay = Math.min(
-        FALLBACK_MAX_INTERVAL_MS,
-        FALLBACK_BASE_INTERVAL_MS * Math.pow(2, controller.attempts - 1)
-      );
+      const nextDelay = Math.min(FALLBACK_MAX_INTERVAL_MS, FALLBACK_BASE_INTERVAL_MS * Math.pow(2, controller.attempts - 1));
       controller.timer = window.setTimeout(run, nextDelay);
     };
+
     controller.timer = window.setTimeout(run, 0);
     pollControllersRef.current.set(sessionId, controller);
   };
@@ -202,30 +188,25 @@ export const QrDisplayWindow: React.FC = () => {
 
   const ensureFallbackForSession = (sessionId: string, imageId: string, immediate = false) => {
     if (!sessionId) return;
-    if (immediate) {
-      startFallbackPolling(sessionId, imageId);
-    } else {
-      scheduleFallback(sessionId, imageId, FALLBACK_DELAY_MS);
-    }
+    if (immediate) startFallbackPolling(sessionId, imageId);
+    else scheduleFallback(sessionId, imageId, FALLBACK_DELAY_MS);
   };
 
   const markSessionConnected = (sessionId: string, explicitImageId?: string) => {
     const resolvedImageId = explicitImageId || sessionByIdRef.current.get(sessionId);
     if (!resolvedImageId) return;
     cancelFallbackForSession(sessionId);
-    updateSessions(prev => {
+    updateSessions((prev) => {
       const next = new Map(prev);
       const target = next.get(resolvedImageId);
-      if (!target || target.sessionId !== sessionId || target.connected) {
-        return prev;
-      }
+      if (!target || target.sessionId !== sessionId || target.connected) return prev;
       next.set(resolvedImageId, { ...target, connected: true });
       return next;
     });
   };
 
   const triggerFallbackForAllSessions = (immediate = false) => {
-    sessionsRef.current.forEach(session => {
+    sessionsRef.current.forEach((session) => {
       if (!session.connected && session.sessionId) {
         ensureFallbackForSession(session.sessionId, session.imageId, immediate);
       }
@@ -244,34 +225,31 @@ export const QrDisplayWindow: React.FC = () => {
       cancelLocalTimer(previous.sessionId);
     }
     sessionByIdRef.current.set(session.sessionId, imageId);
-    updateSessions(prev => {
+
+    updateSessions((prev) => {
       const next = new Map(prev);
       (session as any).sessionKey = sessionKey;
       next.set(imageId, session);
       return next;
     });
-    if (!session.sessionId) {
-      return;
-    }
+
+    if (!session.sessionId) return;
+
     if (!usesRelayForSession) {
+      // Local: ローカル状態ポーリング
       startTimer(imageId, session.sessionId);
     } else {
-      if (pcBridgeHealthy) {
-        ensureFallbackForSession(session.sessionId, imageId, false);
-      } else {
-        ensureFallbackForSession(session.sessionId, imageId, true);
-      }
+      // Relay: WSが健全なら遅延フォールバック、切断/不安定なら即フォールバック
+      if (pcBridgeHealthy) ensureFallbackForSession(session.sessionId, imageId, false);
+      else ensureFallbackForSession(session.sessionId, imageId, true);
     }
   };
-  
+
   // メタデータから表示用データを生成
-  const processedImages = processedImagesState.map(img => ({
-    ...img,
-    type: 'processed',
-  }));
+  const processedImages = processedImagesState.map((img) => ({ ...img, type: 'processed' as const }));
 
   // Relay の有効/不足判定（表示の出し分け用）
-  const relayActive = (operationMode === 'relay') || (operationMode === 'auto' && useRelay);
+  const relayActive = operationMode === 'relay' || (operationMode === 'auto' && useRelay);
   // UI の表示準備完了判定（レンダリング条件と生成スケジューラで共有）
   const uiReady = isServerStarted || relayActive;
   const missingRelay = relayActive && (!relayEventId || !pcId);
@@ -281,36 +259,37 @@ export const QrDisplayWindow: React.FC = () => {
     if (!missingRelay && (useRelay || isServerStarted)) {
       if (banner) setBanner(null);
     }
-  }, [missingRelay, useRelay, isServerStarted]);
+  }, [missingRelay, useRelay, isServerStarted, banner]);
 
-  // (DBリフレッシュは補助方針に戻す)
-
-  // セッションキーを生成（eventId:pcid:baseURL:imageId）
+  // セッションキー（eventId:pcid:baseURL:imageId）
   const buildSessionKey = (imageId: string) => {
     return `${relayEventId || ''}:${pcId || ''}:${(relayBaseUrl || '').replace(/\/$/, '')}:${imageId}`;
   };
 
-  // 設定値の再読込ヘルパ
+  // 設定値の再読込
   const reloadAppSettings = async () => {
     try {
       const mode = await AppSettingsService.getAppSetting('operation_mode');
       if (mode === 'relay' || mode === 'local' || mode === 'auto') setOperationMode(mode);
-      // effective を優先（プロビジョニング/ENVを尊重）
+
       await GlobalSettingsService.loadEffective();
       const eff = GlobalSettingsService.getEffective();
+
       const base = await resolveBaseUrl();
       if (base) setRelayBaseUrl(base);
-      const eid = (eff?.relay?.eventId || await GlobalSettingsService.get('relay_event_id')) || '';
+
+      const eid = (eff?.relay?.eventId || (await GlobalSettingsService.get('relay_event_id'))) || '';
       if (eid) setRelayEventId(eid);
-      let pid = (eff?.relay?.pcId || await GlobalSettingsService.get('pcid')) || '';
+
+      let pid = (eff?.relay?.pcId || (await GlobalSettingsService.get('pcid'))) || '';
       if (!pid) {
-        // 新しいワークスペースなどで未設定なら自動生成して保存
         pid = generateDefaultPcid();
         try { await GlobalSettingsService.save('pcid', pid); } catch {}
       }
       if (pid) setPcId(pid);
+
       debug(`settings: mode=${mode} base=${base} eid=${eid} pcid=${pid}`);
-    } catch (_) {}
+    } catch {}
   };
 
   function generateDefaultPcid(): string {
@@ -319,71 +298,64 @@ export const QrDisplayWindow: React.FC = () => {
     for (let i = 0; i < 6; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
     return `pc-${s}`;
   }
-  // 差分イベントリスナーを起動（各ウィンドウで個別にセット）
+
+  // 初期ロード
+  useEffect(() => {
+    loadStateFromFile();
+    (async () => {
+      await GlobalSettingsService.loadEffective();
+      await reloadAppSettings();
+    })();
+  }, []);
+
+  // 差分イベント（全ウィンドウ）を起動
   useEffect(() => {
     const listener = TauriEventListener.getInstance();
-    listener.setupListeners().catch(error => {
-      console.error('[QrDisplayWindow] Failed to setup Tauri event listeners:', error);
-    });
-    return () => {
-      listener.cleanup();
-    };
+    listener.setupListeners().catch((e) => console.error('[QrDisplayWindow] Failed to setup Tauri event listeners:', e));
+    return () => listener.cleanup();
   }, []);
 
   // processedImages から外れたセッションを整理
   useEffect(() => {
-    const validIds = new Set(processedImages.map(img => img.id));
-    const staleSessions: string[] = [];
+    const validIds = new Set(processedImages.map((img) => img.id));
+    const stale: string[] = [];
     sessionsRef.current.forEach((session, imageId) => {
       if (!validIds.has(imageId)) {
-        staleSessions.push(imageId);
+        stale.push(imageId);
         cancelFallbackForSession(session.sessionId);
         cancelLocalTimer(session.sessionId);
       }
     });
-    if (staleSessions.length > 0) {
-      updateSessions(prev => {
+    if (stale.length > 0) {
+      updateSessions((prev) => {
         const next = new Map(prev);
-        staleSessions.forEach(id => next.delete(id));
+        stale.forEach((id) => next.delete(id));
         return next;
       });
     }
   }, [processedImages]);
 
-  // （除去）
-
-  // 他ウィンドウからの通知をリッスンする（必要な処理だけ実行）
+  // 他ウィンドウからの通知をリッスン
   useEffect(() => {
     const unsubs: Array<() => void> = [];
-
     const register = async (event: string, handler: () => void) => {
       try {
         const off = await listen(event, handler);
-        unsubs.push(() => {
-          try { off(); } catch (_) {}
-        });
+        unsubs.push(() => { try { off(); } catch {} });
       } catch (error) {
         console.error(`[QrDisplayWindow] Failed to register listener for ${event}:`, error);
       }
     };
 
-    register('workspace-data-loaded', () => {
-      setRegenTick(t => t + 1);
-    });
+    register('workspace-data-loaded', () => setRegenTick((t) => t + 1));
+    register('app-settings-changed', () => { void reloadAppSettings(); setRegenTick((t) => t + 1); });
 
-    register('app-settings-changed', () => {
-      void reloadAppSettings();
-      setRegenTick(t => t + 1);
-    });
-
-    return () => {
-      unsubs.forEach(unsub => unsub());
-    };
+    return () => unsubs.forEach((un) => un());
   }, []);
 
-  // 設定が変わっても既存QRは保持し、必要な分のみ再生成（負担軽減）
+  // 設定が変わっても既存QRは保持、必要な分のみ再生成
   useEffect(() => {
-    setRegenTick(t => t + 1);
+    setRegenTick((t) => t + 1);
   }, [operationMode, relayEventId, pcId, relayBaseUrl, useRelay]);
 
   // Webサーバーの起動
@@ -392,59 +364,60 @@ export const QrDisplayWindow: React.FC = () => {
       try {
         // 先に設定をロードしてから分岐判定（初期Auto→Local誤判定を避ける）
         await reloadAppSettings();
-        // 状態更新の反映を待たずに、直近の値を直接取得して判定する
-        const mode = (await AppSettingsService.getAppSetting('operation_mode')) as 'auto'|'relay'|'local' | null;
+
+        // 直近の値で判定
+        const mode = (await AppSettingsService.getAppSetting('operation_mode')) as 'auto' | 'relay' | 'local' | null;
         await GlobalSettingsService.loadEffective();
         const eff = GlobalSettingsService.getEffective();
-        const eid = eff?.relay?.eventId || await GlobalSettingsService.get('relay_event_id');
+        const eid = eff?.relay?.eventId || (await GlobalSettingsService.get('relay_event_id'));
         const base = await resolveBaseUrl();
         if (base) setRelayBaseUrl(base);
         if (eid) setRelayEventId(eid);
+
+        // Relay 健全性チェック
         if (mode === 'relay' || mode === 'auto') {
           try {
             const res = await checkRelayHealth(base || relayBaseUrl);
             debug(`healthz: status=${res.status} ok=${res.ok} version=${res.version}`);
             const canRelay = res.ok && !!(eid || relayEventId);
             setUseRelay(canRelay);
+
+            // Relay固定はローカル起動スキップ（UI ready だけ満たす）
             if (mode === 'relay') {
-              // Relay固定時はローカルサーバ起動はスキップ。ただしUIはreadyにする
               setIsServerStarted(true);
               setServerPort(null);
-              // 生成トリガ
-              setRegenTick(t => t + 1);
+              setRegenTick((t) => t + 1);
               return;
             }
-          } catch (_) { setUseRelay(false); }
+          } catch {
+            setUseRelay(false);
+          }
         }
-        // React StrictMode での二重実行対策（開発時）
+
+        // Auto / Local はローカルサーバ起動（※ Auto はオンライン発行だが ready 用に起動）
         const g: any = window as any;
         if (g.__NURIEMON_WEB_SERVER_PORT) {
-          console.log('[QrDisplayWindow] Web server already started on port:', g.__NURIEMON_WEB_SERVER_PORT);
           debug(`local web server already started on port=${g.__NURIEMON_WEB_SERVER_PORT}`);
           setServerPort(g.__NURIEMON_WEB_SERVER_PORT);
           setIsServerStarted(true);
           return;
         }
-
-        // Webサーバーの起動（すでに起動済みならポート番号）
         debug('start_web_server invoke...');
         const port = await invoke<number>('start_web_server');
-        console.log('[QrDisplayWindow] Web server started on port:', port);
         debug(`start_web_server started on port=${port}`);
         g.__NURIEMON_WEB_SERVER_PORT = port;
         setServerPort(port);
         setIsServerStarted(true);
       } catch (error) {
-        console.error('[QrDisplayWindow] Webサーバーの起動に失敗しました:', error);
+        console.error('[QrDisplayWindow] Webサーバーの起動に失敗:', error);
         debug(`start_web_server failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     };
-    
+
     initialize();
   }, []);
 
-
-  // モバイル接続イベントのリスナー
+  // モバイル接続イベント
   useEffect(() => {
     const unlisten = listen('mobile-connected', (event) => {
       const payload = event.payload as { sessionId?: string; sid?: string; imageId?: string };
@@ -455,10 +428,11 @@ export const QrDisplayWindow: React.FC = () => {
     });
 
     return () => {
-      unlisten.then(fn => { try { fn(); } catch (_) {} }).catch(() => {});
+      unlisten.then((fn) => { try { fn(); } catch {} }).catch(() => {});
     };
   }, []);
 
+  // Bridge 状態
   useEffect(() => {
     let cleanup: (() => void) | undefined;
     (async () => {
@@ -468,18 +442,19 @@ export const QrDisplayWindow: React.FC = () => {
           const state = typeof payload === 'string' ? payload : payload.state;
           if (state === 'token-missing') {
             setLicenseBlocked(true);
-            setLicenseBlockedReason(prev => prev || 'missing');
+            setLicenseBlockedReason((prev) => prev || 'missing');
           }
           const healthy = state === 'ack' || state === 'open';
           const semiHealthy = state === 'auth-sent' || state === 'starting';
           const degraded = state === 'closed' || state === 'error' || state === 'auth-timeout' || state === 'token-missing';
+
           if (healthy || semiHealthy) {
             licenseAlertShownRef.current = false;
             setLicenseBlocked(false);
             setLicenseBlockedReason(null);
             setBanner(null);
             setPcBridgeHealthy(true);
-            updateSessions(prev => {
+            updateSessions((prev) => {
               let changed = false;
               const next = new Map(prev);
               prev.forEach((value, key) => {
@@ -490,7 +465,7 @@ export const QrDisplayWindow: React.FC = () => {
               });
               return changed ? next : prev;
             });
-            setRegenTick(t => t + 1);
+            setRegenTick((t) => t + 1);
           }
           if (degraded) {
             setPcBridgeHealthy(false);
@@ -502,7 +477,7 @@ export const QrDisplayWindow: React.FC = () => {
     return () => { try { cleanup && cleanup(); } catch {} };
   }, []);
 
-  // QRコードの生成
+  // QR 生成
   const generateQr = async (imageId: string) => {
     debug(`generateQr called imageId=${imageId}`);
     if (inflightRef.current.has(imageId)) {
@@ -510,23 +485,24 @@ export const QrDisplayWindow: React.FC = () => {
       return;
     }
     generalAlertShownRef.current = false;
+
     const previousSession = sessionsRef.current.get(imageId);
-    if (previousSession) {
-      cancelFallbackForSession(previousSession.sessionId);
-    }
-    updateSessions(prev => {
+    if (previousSession) cancelFallbackForSession(previousSession.sessionId);
+
+    updateSessions((prev) => {
       const next = new Map(prev);
       const session = next.get(imageId);
-      if (session && (session as any).blockedReason) {
-        next.delete(imageId);
-      }
+      if (session && (session as any).blockedReason) next.delete(imageId);
       return next;
     });
+
     inflightRef.current.add(imageId);
-    const relayActive = operationMode === 'relay' || (operationMode === 'auto' && useRelay);
-    let usesRelay = relayActive;
-    if (!relayActive && !isServerStarted) {
-      // 初期化未完了。少し待ってから再試行（regenTickで自動再試行）
+
+    const relayOn = operationMode === 'relay' || (operationMode === 'auto' && useRelay);
+    let usesRelay = relayOn;
+
+    if (!relayOn && !isServerStarted) {
+      // 初期化未完了
       setBanner('初期化中です。数秒後に自動再試行します…');
       debug(`skip generateQr(imageId=${imageId}) because not ready`);
       inflightRef.current.delete(imageId);
@@ -537,7 +513,8 @@ export const QrDisplayWindow: React.FC = () => {
       const sessionKey = buildSessionKey(imageId);
       let session: QrSession;
       const envKey = `${relayBaseUrl}|${relayEventId}|${pcId}|${operationMode}`;
-      if (relayActive) {
+
+      if (relayOn) {
         if (licenseBlocked) {
           handleLicenseBlocking(licenseBlockedReason || 'missing', imageId, sessionKey, envKey);
           inflightRef.current.delete(imageId);
@@ -549,9 +526,9 @@ export const QrDisplayWindow: React.FC = () => {
           inflightRef.current.delete(imageId);
           return;
         }
-        // Relay: sid を発行し、pending-sid に登録
+
         if (!relayEventId || !pcId) {
-          // Autoモード時はローカルへフォールバック、Relay固定時はエラー表示
+          // Relay 不足：Auto は Local にフォールバック / Relay 固定はエラー
           if (operationMode === 'relay') {
             setBanner('Relay設定が不足しています（イベントID/PCID）。設定画面で確認してください。');
             debug('missing relayEventId or pcid in relay mode');
@@ -560,13 +537,7 @@ export const QrDisplayWindow: React.FC = () => {
           } else {
             debug('missing relayEventId/pcid in auto; fallback to local');
             const result = await invoke<{ sessionId: string; qrCode: string; imageId: string }>('generate_qr_code', { imageId });
-            session = {
-              imageId: result.imageId,
-              sessionId: result.sessionId,
-              qrCode: result.qrCode,
-              connected: false,
-              envKey,
-            };
+            session = { imageId: result.imageId, sessionId: result.sessionId, qrCode: result.qrCode, connected: false, envKey };
             usesRelay = false;
             setBanner('Relay設定が未完了のため、ローカル接続に切替えました');
             inflightRef.current.delete(imageId);
@@ -575,7 +546,7 @@ export const QrDisplayWindow: React.FC = () => {
           }
         }
 
-        // 必要ならPC登録（ベストエフォート + リトライ）
+        // 必要ならPC登録
         try {
           debug(`registerPc start eid=${relayEventId} pcid=${pcId}`);
           const r = await retryWithBackoff(() => registerPc({ eventId: relayEventId, pcid: pcId }));
@@ -597,13 +568,7 @@ export const QrDisplayWindow: React.FC = () => {
               setBanner('Relay接続に失敗したためローカル接続に切替えました');
               debug('registerPc failed; fallback to local');
               const result = await invoke<{ sessionId: string; qrCode: string; imageId: string }>('generate_qr_code', { imageId });
-              session = {
-                imageId: result.imageId,
-                sessionId: result.sessionId,
-                qrCode: result.qrCode,
-                connected: false,
-                envKey,
-              };
+              session = { imageId: result.imageId, sessionId: result.sessionId, qrCode: result.qrCode, connected: false, envKey };
               usesRelay = false;
               inflightRef.current.delete(imageId);
               applyNewSession(imageId, session, sessionKey, usesRelay, previousSession);
@@ -613,18 +578,20 @@ export const QrDisplayWindow: React.FC = () => {
             inflightRef.current.delete(imageId);
             return;
           }
-        } catch (e:any) {
+        } catch (e: any) {
           debug(`registerPc error ${e?.message || e}`);
           handleGeneralFailure('Relay 接続に失敗しました。ネットワーク環境を確認してから再試行してください。', imageId, sessionKey, envKey);
           inflightRef.current.delete(imageId);
           return;
         }
 
+        // pending-sid 登録
         const sid = generateSid();
         const ttl = 90;
         debug(`pendingSid start eid=${relayEventId} pcid=${pcId} sid=${sid} ttl=${ttl}`);
         const res = await retryWithBackoff(() => pendingSid({ eventId: relayEventId, pcid: pcId, sid, ttl }));
         debug(`pendingSid done ok=${res.ok} status=${(res as any).status} code=${(res as any).code} err=${(res as any).error}`);
+
         if (!res.ok) {
           console.error('[QrDisplayWindow] pending-sid 登録に失敗:', res);
           setBanner(`pending-sid失敗: status=${(res as any).status || '-'} code=${(res as any).code || (res as any).error || '-'}`);
@@ -638,17 +605,11 @@ export const QrDisplayWindow: React.FC = () => {
             return;
           }
           if (operationMode === 'auto') {
-            // Auto時はLocalへフォールバック
+            // Auto → Local
             setBanner('ネットワーク不安定のためローカル接続に切替えました');
             debug('fallback to local');
             const result = await invoke<{ sessionId: string; qrCode: string; imageId: string }>('generate_qr_code', { imageId });
-            session = {
-              imageId: result.imageId,
-              sessionId: result.sessionId,
-              qrCode: result.qrCode,
-              connected: false,
-              envKey,
-            };
+            session = { imageId: result.imageId, sessionId: result.sessionId, qrCode: result.qrCode, connected: false, envKey };
             usesRelay = false;
           } else {
             handleGeneralFailure('QRの事前登録に失敗しました。時間をおいて再試行してください。', imageId, sessionKey, envKey);
@@ -656,44 +617,30 @@ export const QrDisplayWindow: React.FC = () => {
             return;
           }
         } else {
-          // Relay での事前登録成功 → 一時バナーをクリア
+          // Relay 正常
           setBanner(null);
           const base = (relayBaseUrl || 'https://ctrl.nuriemon.jp').replace(/\/$/, '');
-          // 画像ごとのコントローラー割当: img(=imageId)を明示
           const qrUrl = `${base}/app/#e=${encodeURIComponent(relayEventId)}&sid=${encodeURIComponent(sid)}&img=${encodeURIComponent(imageId)}`;
-          // Relay用URLからQR画像(Data URI)を生成
+          // 可能なら DataURL 化（tauri invoke）
           let qrDataUrl = qrUrl;
           try {
             qrDataUrl = await invoke<string>('generate_qr_from_text', { text: qrUrl });
             debug('QR data URL generated');
-          } catch (e) {
-            console.warn('[QrDisplayWindow] generate_qr_from_text failed, falling back to raw URL as img src');
+          } catch {
             debug('QR data URL generation failed; fallback to URL');
           }
-          session = {
-            imageId,
-            sessionId: sid,
-            qrCode: qrDataUrl,
-            connected: false,
-            envKey,
-          };
+          session = { imageId, sessionId: sid, qrCode: qrDataUrl, connected: false, envKey };
         }
       } else {
+        // Local
         const result = await invoke<{ sessionId: string; qrCode: string; imageId: string }>('generate_qr_code', { imageId });
-        session = {
-          imageId: result.imageId,
-          sessionId: result.sessionId,
-          qrCode: result.qrCode,
-          connected: false,
-          envKey,
-        };
+        session = { imageId: result.imageId, sessionId: result.sessionId, qrCode: result.qrCode, connected: false, envKey };
         usesRelay = false;
         debug(`local QR generated sessionId=${result.sessionId}`);
       }
 
       applyNewSession(imageId, session, sessionKey, usesRelay, previousSession);
       debug(`session stored for imageId=${imageId}`);
-
     } catch (error) {
       console.error('QRコードの生成に失敗しました:', error);
       debug(`generateQr error: ${error instanceof Error ? error.message : String(error)}`);
@@ -702,23 +649,20 @@ export const QrDisplayWindow: React.FC = () => {
     }
   };
 
-  // 設定が変わったら既存セッションをクリアして再生成させる
-  // ↑ 個別クリアは上の設定変更effectで実施
-
-  // 再生成トリガや画像リスト変更時に、未生成のQRを補完生成（同一画像の重複生成を抑止）
+  // 再生成（必要なものだけ）
   useEffect(() => {
     const ready = uiReady;
-    const envKey = `${relayBaseUrl}|${relayEventId}|${pcId}|${operationMode}`;
     if (!ready) return;
-    const relayActive = operationMode === 'relay' || (operationMode === 'auto' && useRelay);
-    if (licenseBlocked && relayActive) {
-      return;
-    }
+    const envKey = `${relayBaseUrl}|${relayEventId}|${pcId}|${operationMode}`;
+    const relayOn = operationMode === 'relay' || (operationMode === 'auto' && useRelay);
+    if (licenseBlocked && relayOn) return;
+
     let delay = 0;
     const stepMs = 60;
     const noVisible = visibleIdsRef.current.size === 0;
     const targetList = noVisible ? processedImages.slice(0, 3) : processedImages;
-    targetList.forEach(image => {
+
+    targetList.forEach((image) => {
       const s = sessions.get(image.id);
       const desiredKey = buildSessionKey(image.id);
       const valid = !!s && (s as any).envKey === envKey && (s as any).sessionKey === desiredKey;
@@ -730,16 +674,13 @@ export const QrDisplayWindow: React.FC = () => {
     });
   }, [regenTick, processedImages, sessions, operationMode, useRelay, relayBaseUrl, relayEventId, pcId, isServerStarted, uiReady, visibleIds, licenseBlocked]);
 
-  // グローバル再生成ボタン
+  // すべて再生成（環境キーが変わったものだけ個別再生成になる）
   const regenerateAll = () => {
-    debug('manual regenerate all clicked');
-    // 既存セッションは温存（環境キーが変わったものだけ個別再生成）
     inflightRef.current.clear();
-    setRegenTick(t => t + 1);
+    setRegenTick((t) => t + 1);
   };
 
-
-  // Relay時（ローカルサーバ未使用）のサムネイル読み込み
+  // Relay時（ローカル未使用）のサムネイル読み込み（DataURL化）
   useEffect(() => {
     const loadThumbs = async () => {
       if (serverPort) return;
@@ -747,7 +688,7 @@ export const QrDisplayWindow: React.FC = () => {
       const { downscaleDataUrl } = await import('../utils/image');
       const map = new Map(thumbs);
       let delay = 0;
-      const step = 30; // 30ms間隔でゆっくり読み込む
+      const step = 30;
       for (const image of processedImages) {
         if (!map.get(image.id)) {
           setTimeout(async () => {
@@ -755,7 +696,6 @@ export const QrDisplayWindow: React.FC = () => {
               const full = await loadImage(image as any);
               const small = await downscaleDataUrl(full, 200, 0.8);
               map.set(image.id, small);
-              // setStateはまとめず小出し（UIブロック回避）
               setThumbs(new Map(map));
             } catch (e) {
               console.warn('[QrDisplayWindow] thumbnail load failed:', e);
@@ -766,20 +706,14 @@ export const QrDisplayWindow: React.FC = () => {
       }
     };
     loadThumbs();
-    // 依存にthumbsは入れない（逐次更新）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processedImages, serverPort]);
 
-
-  // デバッグトグル（Dキー）
+  // デバッグトグル
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Cmd/Ctrl + D : デバッグログの表示切替
-      if ((e.key === 'd' || e.key === 'D') && (e.metaKey || e.ctrlKey)) {
-        setShowDebug(s => !s);
-      }
-      // Cmd + Opt + I : DevTools を開く
-      if ((e.key === 'I') && e.metaKey && e.altKey) {
+      if ((e.key === 'd' || e.key === 'D') && (e.metaKey || e.ctrlKey)) setShowDebug((s) => !s);
+      if (e.key === 'I' && e.metaKey && e.altKey) {
         try { invoke('open_devtools', { window_label: 'qr-display' } as any); } catch {}
       }
     };
@@ -787,13 +721,13 @@ export const QrDisplayWindow: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // タイマー処理
+  // Local 用ポーリング
   const startTimer = (imageId: string, sessionId: string) => {
     cancelLocalTimer(sessionId);
     const interval = window.setInterval(async () => {
       try {
         const status = await invoke<{ connected: boolean }>('get_qr_session_status', { sessionId });
-        updateSessions(prev => {
+        updateSessions((prev) => {
           const existing = prev.get(imageId);
           if (!existing) return prev;
           const nextConnected = !!status.connected;
@@ -812,49 +746,44 @@ export const QrDisplayWindow: React.FC = () => {
           }
           return next;
         });
-      } catch (error) {
-        // 一時的なエラーは無視（サーバーはローカル）
-      }
-    }, 3000); // 負荷軽減のため3秒間隔
+      } catch {}
+    }, 3000);
     localPollsRef.current.set(sessionId, interval);
   };
 
-  // Crockford系 base32（I/O/L除外）の10桁を生成（暫定）
+  // Sid 生成
   function generateSid(): string {
     const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
     let out = '';
-    for (let i = 0; i < 10; i++) {
-      out += alphabet[Math.floor(Math.random() * alphabet.length)];
-    }
+    for (let i = 0; i < 10; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
     return out;
   }
 
+  // ライセンス遮断
   function handleLicenseBlocking(kind: 'missing' | 'invalid', imageId?: string, sessionKey?: string, envKey?: string) {
     setLicenseBlocked(true);
     setLicenseBlockedReason(kind);
-    const message = kind === 'missing'
-      ? 'ライセンスが未有効化のため Relay へ接続できません。設定画面でライセンスコードを有効化してから再試行してください。'
-      : '保存済みのライセンス情報が無効になっています。設定画面でライセンスを再有効化してください。';
-    const bannerMessage = kind === 'missing'
-      ? 'ライセンスを有効化してから再試行してください'
-      : 'ライセンス情報を再有効化してください';
+    const message =
+      kind === 'missing'
+        ? 'ライセンスが未有効化のため Relay へ接続できません。設定画面でライセンスコードを有効化してから再試行してください。'
+        : '保存済みのライセンス情報が無効になっています。設定画面でライセンスを再有効化してください。';
+    const bannerMessage = kind === 'missing' ? 'ライセンスを有効化してから再試行してください' : 'ライセンス情報を再有効化してください';
     if (!licenseAlertShownRef.current) {
       try { alert(message); } catch {}
       licenseAlertShownRef.current = true;
     }
     setBanner(bannerMessage);
     debug(kind === 'missing' ? 'missing device token' : 'invalid device token');
+
     if (imageId && sessionKey && envKey) {
       const existing = sessionsRef.current.get(imageId);
       if (existing && existing.sessionId) {
         cancelFallbackForSession(existing.sessionId);
         sessionByIdRef.current.delete(existing.sessionId);
       }
-      updateSessions(prev => {
+      updateSessions((prev) => {
         const current = prev.get(imageId);
-        if (current && (current as any).blockedReason === kind) {
-          return prev;
-        }
+        if (current && (current as any).blockedReason === kind) return prev;
         const next = new Map(prev);
         const placeholder: QrSession = {
           imageId,
@@ -882,7 +811,7 @@ export const QrDisplayWindow: React.FC = () => {
       cancelFallbackForSession(existing.sessionId);
       sessionByIdRef.current.delete(existing.sessionId);
     }
-    updateSessions(prev => {
+    updateSessions((prev) => {
       const next = new Map(prev);
       const placeholder: QrSession = {
         imageId,
@@ -899,34 +828,26 @@ export const QrDisplayWindow: React.FC = () => {
     });
   }
 
+  // UI
   return (
     <ErrorBoundary>
-    <div className={styles.container}>
-      <h1 className={styles.title}>QRコード - ぬりえもん</h1>
-      {(() => {
-        const displayBanner = missingRelay
-          ? 'Relay設定が不足しています（イベントID/PCID）。設定画面で確認してください。'
-          : banner;
-        return displayBanner ? (
-        <div className={styles.banner}>
-          {displayBanner}
-        </div>
-        ) : null;
-      })()}
+      <div className={styles.container}>
+        <h1 className={styles.title}>QRコード - ぬりえもん</h1>
 
-      <>
-        {/* Debug overlay and server port display removed for cleaner QR scanning */}
+        {(() => {
+          const displayBanner = missingRelay ? 'Relay設定が不足しています（イベントID/PCID）。設定画面で確認してください。' : banner;
+          return displayBanner ? <div className={styles.banner}>{displayBanner}</div> : null;
+        })()}
 
         <div className={styles.controls}>
           <button onClick={regenerateAll} style={{ fontSize: 12 }}>すべて再生成</button>
         </div>
+
         <div className={styles.imageGrid}>
           {processedImages.length === 0 ? (
-            <div className={styles.noImages}>
-              画像がありません
-            </div>
+            <div className={styles.noImages}>画像がありません</div>
           ) : (
-            processedImages.map(image => (
+            processedImages.map((image) => (
               <ImageQrItem
                 key={image.id}
                 image={image}
@@ -940,26 +861,21 @@ export const QrDisplayWindow: React.FC = () => {
             ))
           )}
         </div>
-      </>
-    </div>
+      </div>
     </ErrorBoundary>
-);
+  );
 };
 
-// 簡易エラーバウンダリ：QR画面全体を保護し、例外時に情報を表示
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message?: string }>{
-  constructor(props: any){
+// --- ErrorBoundary ---
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; message?: string }> {
+  constructor(props: any) {
     super(props);
     this.state = { hasError: false };
   }
-  static getDerivedStateFromError(err: any){
-    return { hasError: true, message: err?.message || String(err) };
-  }
-  componentDidCatch(error: any, info: any){
-    console.error('[QrDisplayWindow/ErrorBoundary]', error, info);
-  }
-  render(){
-    if (this.state.hasError){
+  static getDerivedStateFromError(err: any) { return { hasError: true, message: err?.message || String(err) }; }
+  componentDidCatch(error: any, info: any) { console.error('[QrDisplayWindow/ErrorBoundary]', error, info); }
+  render() {
+    if (this.state.hasError) {
       return (
         <div style={{ padding: 16, color: '#fff', background: '#300', minHeight: '100vh' }}>
           <h2>QR画面でエラーが発生しました</h2>
@@ -972,7 +888,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
-// 画像とQRコードを表示するアイテムコンポーネント
+// --- Image + QR item ---
 interface ImageQrItemProps {
   image: any;
   session?: QrSession;
@@ -984,15 +900,12 @@ interface ImageQrItemProps {
 }
 
 const ImageQrItem: React.FC<ImageQrItemProps> = ({ image, session, onGenerateQr, serverPort, ready, thumbUrl, onVisible }) => {
-  // 自動生成は親コンポーネント側で制御（重複生成防止）
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const io = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        onVisible(image.id, entry.isIntersecting);
-      });
+      entries.forEach((entry) => onVisible(image.id, entry.isIntersecting));
     }, { root: null, threshold: 0.1 });
     io.observe(el);
     return () => { try { io.disconnect(); } catch {} };
@@ -1007,7 +920,7 @@ const ImageQrItem: React.FC<ImageQrItemProps> = ({ image, session, onGenerateQr,
         />
         <div className={styles.imageName}>{image.originalFileName}</div>
       </div>
-      
+
       <div className={styles.qrSection}>
         {session ? (
           session.blockedReason ? (
@@ -1015,8 +928,8 @@ const ImageQrItem: React.FC<ImageQrItemProps> = ({ image, session, onGenerateQr,
               {session.blockedReason === 'missing'
                 ? 'ライセンスが未有効化です'
                 : session.blockedReason === 'invalid'
-                  ? 'ライセンス情報が無効です'
-                  : (session.errorMessage || 'QRの生成に失敗しました')}
+                ? 'ライセンス情報が無効です'
+                : (session.errorMessage || 'QRの生成に失敗しました')}
               <div style={{ marginTop: 6 }}>
                 <button onClick={onGenerateQr} disabled={!ready} style={{ fontSize: 12 }}>再試行</button>
               </div>
@@ -1025,11 +938,7 @@ const ImageQrItem: React.FC<ImageQrItemProps> = ({ image, session, onGenerateQr,
             <>
               <QrCodeDisplay qrCode={session.qrCode} />
               <div className={styles.qrStatus}>
-                {session.connected ? (
-                  <span className={styles.connected}>接続済み</span>
-                ) : (
-                  <span className={styles.timer}>接続待ち</span>
-                )}
+                {session.connected ? <span className={styles.connected}>接続済み</span> : <span className={styles.timer}>接続待ち</span>}
               </div>
               <div style={{ marginTop: 6 }}>
                 <button onClick={onGenerateQr} disabled={!ready} style={{ fontSize: 12 }}>QR再生成</button>
@@ -1049,10 +958,9 @@ const ImageQrItem: React.FC<ImageQrItemProps> = ({ image, session, onGenerateQr,
   );
 };
 
-// QRコード表示コンポーネント
+// --- QR ---
 const QrCodeDisplay: React.FC<{ qrCode: string }> = ({ qrCode }) => {
   const ref = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     if (ref.current) {
       ref.current.innerHTML = '';
@@ -1063,6 +971,5 @@ const QrCodeDisplay: React.FC<{ qrCode: string }> = ({ qrCode }) => {
       ref.current.appendChild(img);
     }
   }, [qrCode]);
-
   return <div ref={ref} className={styles.qrCode} />;
 };
