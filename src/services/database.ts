@@ -99,6 +99,35 @@ export class DatabaseService {
     }));
   }
 
+  static async fetchProcessedImagesInBatches(options: {
+    cursor?: number | null;
+    limit?: number;
+    onBatch: (
+      batch: ProcessedImagePreview[],
+      meta: { cursor: number | null; hasMore: boolean }
+    ) => void | boolean | Promise<void | boolean>;
+  }): Promise<void> {
+    const limit = options.limit && options.limit > 0 ? options.limit : 60;
+    let cursor = options.cursor ?? null;
+
+    while (true) {
+      const batch = await DatabaseService.getProcessedImagesPreview(cursor ?? undefined, limit);
+      if (batch.length === 0) {
+        return;
+      }
+
+      cursor = batch[batch.length - 1]?.cursor ?? cursor;
+      const shouldContinue = await options.onBatch(batch, {
+        cursor,
+        hasMore: batch.length >= limit,
+      });
+
+      if (shouldContinue === false || batch.length < limit) {
+        return;
+      }
+    }
+  }
+
   // 画像の削除
   static async deleteImage(id: string, reason?: string): Promise<void> {
     if (DatabaseService.inFlightDeleteIds.has(id)) {

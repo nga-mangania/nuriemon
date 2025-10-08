@@ -174,27 +174,27 @@ export class TauriEventListener {
     try {
       const store = useWorkspaceStore.getState();
       const aggregated: WorkspaceImage[] = [];
-      const batchSize = 60;
-      let cursor: number | null = 0;
-      let lastCursor: number | null = null;
+      const sortByCreatedDesc = (a: WorkspaceImage, b: WorkspaceImage) => {
+        const aTime = new Date(a.createdAt).getTime();
+        const bTime = new Date(b.createdAt).getTime();
+        return bTime - aTime;
+      };
 
-      while (true) {
-        const batch = await DatabaseService.getProcessedImagesPreview(cursor ?? undefined, batchSize);
-        if (batch.length === 0) {
-          break;
-        }
-        batch.forEach(item => aggregated.push(this.convertPreview(item)));
-        lastCursor = batch[batch.length - 1].cursor;
-        cursor = lastCursor;
-        if (batch.length < batchSize) {
-          break;
-        }
-      }
+      store.setProcessedImages([]);
+      store.setProcessedCursor(null);
 
-      aggregated.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      await DatabaseService.fetchProcessedImagesInBatches({
+        limit: 60,
+        onBatch: (batch, meta) => {
+          const additions = batch.map((item) => this.convertPreview(item));
+          aggregated.push(...additions);
+          aggregated.sort(sortByCreatedDesc);
 
-      store.setProcessedImages(aggregated);
-      store.setProcessedCursor(lastCursor);
+          const currentStore = useWorkspaceStore.getState();
+          currentStore.setProcessedImages([...aggregated]);
+          currentStore.setProcessedCursor(meta.cursor ?? null);
+        },
+      });
 
       console.log(`[TauriEventListener] Updated processed image list (count=${aggregated.length})`);
     } catch (error) {

@@ -73,6 +73,8 @@ export const QrDisplayWindow: React.FC = () => {
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   useEffect(() => { relayEventIdRef.current = relayEventId; }, [relayEventId]);
 
+  // debugLogs は開発時のオーバーレイ表示用に保持し、未使用警告を抑制
+  void debugLogs;
   const debug = (msg: string) => {
     try {
       const ts = new Date().toISOString().split('T')[1]?.replace('Z', '');
