@@ -758,9 +758,9 @@ export function SettingsPage() {
         </div>
       </section>
 
-      {/* ステップ5: 非表示までの時間設定 */}
+      {/* ステップ5: 自動削除までの時間設定 */}
       <section className={styles.section}>
-        <h2>ステップ5: 非表示までの時間設定</h2>
+        <h2>ステップ5: 自動削除までの時間設定</h2>
         <select value={deletionTime} onChange={handleDeletionTimeChange}>
           <option value="unlimited">無制限</option>
           <option value="1">1分</option>
@@ -778,10 +778,10 @@ export function SettingsPage() {
           <option value="30">30分</option>
         </select>
         <div className={styles.note}>
-          <p>アップロードされたお絵描きが表示されてから消えるまでの時間を設定できます。</p>
-          <p>例：「1分」に設定すると、画像はアップロードから1分後にスクリーンから消えます。</p>
-          <p>※「無制限」に設定すると、お絵描き一覧から削除するまでスクリーンに残り続けます。</p>
-          <p>※設定を途中で変更する場合は、 <a href="/gallery">お絵描き一覧</a> からすべての画像を削除した後に変更してください。</p>
+          <p>アップロードされたお絵描きが表示されてから自動削除されるまでの時間を設定できます。</p>
+          <p>例：「1分」に設定すると、画像はアップロードから1分後にスクリーンから消え、その時点でギャラリーからも削除されます。</p>
+          <p>※「無制限」に設定すると、手動で削除するまでスクリーンにも一覧にも残り続けます。</p>
+          <p>※設定を途中で変更する場合は、<a href="/gallery">お絵描き一覧</a> で不要な画像を削除してから変更してください。</p>
         </div>
       </section>
 

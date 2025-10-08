@@ -68,8 +68,6 @@ function renderRemaining(image: any, deletionTime: string) {
 export function GalleryPage() {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'processed' | 'original' | 'delete'>('processed');
-  const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [editingImage, setEditingImage] = useState<GalleryImage | null>(null);
   const [tempSettings, setTempSettings] = useState({
     type: 'walk',
@@ -88,19 +86,8 @@ export function GalleryPage() {
     return () => clearInterval(t);
   }, []);
 
-  // タブに応じて画像をフィルタリング
-  const getFilteredImages = () => {
-    switch (activeTab) {
-      case 'processed':
-        return images.filter(img => img.type === 'processed');
-      case 'original':
-        return images.filter(img => img.type === 'original');
-      case 'delete':
-        return images;
-      default:
-        return images;
-    }
-  };
+  // ギャラリーは処理済み画像のみ表示
+  const getFilteredImages = () => images.filter(img => img.type === 'processed');
 
   // 画像一覧を読み込み
   const loadGalleryImages = async () => {
@@ -112,7 +99,7 @@ export function GalleryPage() {
       const imageMetadata = metadata.filter(m => {
         // image_typeプロパティがある場合はそれを使用
         const imageType = (m as any).image_type || m.type;
-        return imageType === 'original' || imageType === 'processed';
+        return imageType === 'processed';
       });
       
       // 新しい順にソート
@@ -199,36 +186,6 @@ export function GalleryPage() {
     loadGalleryImages();
   }, []);
 
-  // 画像を選択/選択解除
-  const toggleImageSelection = (imageId: string) => {
-    setSelectedImages(prev => {
-      const newSelection = new Set(prev);
-      if (newSelection.has(imageId)) {
-        newSelection.delete(imageId);
-      } else {
-        newSelection.add(imageId);
-      }
-      return newSelection;
-    });
-  };
-
-  // すべて選択/選択解除
-  const toggleSelectAll = () => {
-    const filteredImages = getFilteredImages();
-    const filteredIds = new Set(filteredImages.map(img => img.id));
-    const allSelected = filteredImages.every(img => selectedImages.has(img.id));
-    
-    if (allSelected) {
-      // 現在のフィルター内の画像を選択解除
-      const newSelection = new Set(selectedImages);
-      filteredImages.forEach(img => newSelection.delete(img.id));
-      setSelectedImages(newSelection);
-    } else {
-      // 現在のフィルター内の画像を選択
-      setSelectedImages(new Set([...selectedImages, ...filteredIds]));
-    }
-  };
-
   // 画像を削除
   const handleDeleteImage = async (image: GalleryImage) => {
     const confirmed = await tauriConfirm(`"${image.originalFileName}" を削除しますか？`, {
@@ -248,30 +205,33 @@ export function GalleryPage() {
     }
   };
 
-  // 複数画像を一括削除
+  // ギャラリー全削除
   const handleBulkDelete = async () => {
-    if (selectedImages.size === 0) return;
-    
-    const confirmed = await tauriConfirm(`選択した${selectedImages.size}個の画像を削除しますか？`, {
-      title: '削除の確認'
+    const imagesToDelete = images.filter(img => img.type === 'processed');
+    if (imagesToDelete.length === 0) {
+      console.log('[GalleryPage] 全削除対象なし');
+      return;
+    }
+
+    const confirmed = await tauriConfirm('ギャラリー内のすべての画像を削除しますか？', {
+      title: '全削除の確認'
     });
-    
+
+    console.log('[GalleryPage] 全削除確認', { confirmed, count: imagesToDelete.length });
     if (!confirmed) {
       return;
     }
 
     setIsDeleting(true);
     try {
-      const imagesToDelete = images.filter(img => selectedImages.has(img.id));
-      
+      console.log('[GalleryPage] 全削除開始', imagesToDelete.map(img => img.id));
       for (const image of imagesToDelete) {
         await deleteImage(image);
       }
-      
-      setSelectedImages(new Set());
+      console.log('[GalleryPage] 全削除完了');
       await loadGalleryImages();
     } catch (error) {
-      console.error('一括削除エラー:', error);
+      console.error('全削除エラー:', error);
       alert('画像の削除に失敗しました');
     } finally {
       setIsDeleting(false);
@@ -319,123 +279,45 @@ export function GalleryPage() {
     <div className={styles.galleryPage}>
       <div className={styles.galleryHeader}>
         <h2>お絵描き一覧</h2>
-        {selectedImages.size > 0 && (
-          <button
-            className={styles.bulkDeleteButton}
-            onClick={handleBulkDelete}
-            disabled={isDeleting}
-          >
-            {isDeleting ? '削除中...' : `選択した${selectedImages.size}個を削除`}
-          </button>
-        )}
-      </div>
-
-      {/* タブ */}
-      <div className={styles.tabContainer}>
         <button
-          className={`${styles.tabButton} ${activeTab === 'processed' ? styles.active : ''}`}
-          onClick={() => setActiveTab('processed')}
+          className={styles.bulkDeleteButton}
+          onClick={handleBulkDelete}
+          disabled={isDeleting || getFilteredImages().length === 0}
         >
-          切り抜き後
-        </button>
-        <button
-          className={`${styles.tabButton} ${activeTab === 'original' ? styles.active : ''}`}
-          onClick={() => setActiveTab('original')}
-        >
-          切り抜き前
-        </button>
-        {/* 全て表示タブは削除 */}
-        <button
-          className={`${styles.tabButton} ${activeTab === 'delete' ? styles.active : ''}`}
-          onClick={() => setActiveTab('delete')}
-        >
-          削除
+          {isDeleting ? '削除中...' : '全削除'}
         </button>
       </div>
 
-      {/* タブコンテンツ */}
-      <div className={styles.tabContent}>
-        {activeTab === 'delete' ? (
-          // 削除モード
-          <div>
-            <div className={styles.editModeHeader}>
-              <button
-                className={styles.selectAllButton}
-                onClick={toggleSelectAll}
-              >
-                {selectedImages.size === getFilteredImages().length ? '選択解除' : 'すべて選択'}
-              </button>
-              <p className={styles.selectionInfo}>
-                {selectedImages.size}個選択中
-              </p>
-            </div>
-            
-            <div className={styles.galleryList}>
-              {getFilteredImages().map(image => (
-                <div 
-                  key={image.id} 
-                  className={`${styles.imageTile} ${selectedImages.has(image.id) ? styles.selected : ''}`}
-                  onClick={() => toggleImageSelection(image.id)}
-                >
-                  {selectedImages.has(image.id) && (
-                    <div className={styles.checkmark}>✓</div>
-                  )}
-                  {image.loading ? (
-                    <div className={styles.thumbnailLoading}>
-                      <span>読込中...</span>
-                    </div>
-                  ) : (
-                    <img
-                      src={image.thumbnailUrl || ''}
-                      alt={image.originalFileName}
-                    />
-                  )}
-                  <div className={styles.imageInfo}>
-                    <p><strong>{image.originalFileName}</strong></p>
-                    <p className={styles.imageType}>{image.type === 'original' ? '切り抜き前' : '切り抜き後'}</p>
-                  </div>
+      <div className={styles.galleryContent}>
+        <div className={styles.galleryList}>
+          {getFilteredImages().map(image => (
+            <div key={image.id} className={styles.imageTile}>
+              {image.loading ? (
+                <div className={styles.thumbnailLoading}>
+                  <span>読込中...</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          // 通常表示
-          <div className={styles.galleryList}>
-            {getFilteredImages().map(image => (
-              <div key={image.id} className={styles.imageTile}>
-                {image.loading ? (
-                  <div className={styles.thumbnailLoading}>
-                    <span>読込中...</span>
-                  </div>
-                ) : (
-                  <img
-                    src={image.thumbnailUrl || ''}
-                    alt={image.originalFileName}
-                  />
-                )}
-                <div className={styles.imageInfo}>
-                  <p><strong>{image.originalFileName}</strong></p>
-                  {image.type === 'processed' && (
-                    <>
-                      <p>タイプ: {getTypeName(image.movementType)}</p>
-                      <p>動き: {getMovementName(image.movementPattern)}</p>
-                      <p>速度: {formatSpeed(image.speed)}</p>
-                      <p>サイズ: {getSizeName(image.movementSize)}</p>
-                      <p className={styles.remainingTime}>残り: {renderRemaining(image, deletionTime)}</p>
-                    </>
-                  )}
-                  <p>アップロード: {new Date(image.createdAt).toLocaleString('ja-JP')}</p>
-                </div>
-                <div className={styles.imageActions}>
-                  {image.type === 'processed' && (
-                    <button className={styles.editButton} onClick={() => openEditModal(image)}>編集</button>
-                  )}
-                  <button onClick={() => handleDeleteImage(image)}>削除</button>
-                </div>
+              ) : (
+                <img
+                  src={image.thumbnailUrl || ''}
+                  alt={image.originalFileName}
+                />
+              )}
+              <div className={styles.imageInfo}>
+                <p><strong>{image.originalFileName}</strong></p>
+                <p>タイプ: {getTypeName(image.movementType)}</p>
+                <p>動き: {getMovementName(image.movementPattern)}</p>
+                <p>速度: {formatSpeed(image.speed)}</p>
+                <p>サイズ: {getSizeName(image.movementSize)}</p>
+                <p className={styles.remainingTime}>残り: {renderRemaining(image, deletionTime)}</p>
+                <p>アップロード: {new Date(image.createdAt).toLocaleString('ja-JP')}</p>
               </div>
-            ))}
-          </div>
-        )}
+              <div className={styles.imageActions}>
+                <button className={styles.editButton} onClick={() => openEditModal(image)}>編集</button>
+                <button onClick={() => handleDeleteImage(image)}>削除</button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* 編集モーダル */}

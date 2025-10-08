@@ -695,8 +695,8 @@ const AnimationView: React.FC<AnimationViewProps> = ({
         ? parseInt(deletionTime) * 60 * 1000
         : -1;
 
-      // 非表示の永続化: 一度だけhide APIを叩くためのセット
-      const toHide: string[] = [];
+      // 自動削除対象を積んで背後で物理削除
+      const toDelete: string[] = [];
 
       for (const image of Object.values(animatedImagesRef.current)) {
         if (image.pendingDeletion) {
@@ -704,9 +704,9 @@ const AnimationView: React.FC<AnimationViewProps> = ({
         }
         // 削除チェック
         if (deletionTimeMs > 0 && image.createdAt && currentTime - image.createdAt >= deletionTimeMs) {
-          console.log(`[AnimationView] 画像 ${image.id} を非表示（時間経過）`);
+          console.log(`[AnimationView] 画像 ${image.id} を自動削除（時間経過）`);
           image.pendingDeletion = true;
-          toHide.push(image.id);
+          toDelete.push(image.id);
           continue; // この画像は更新リストに追加しない（アニメ画面から消す）
         }
 
@@ -801,12 +801,12 @@ const AnimationView: React.FC<AnimationViewProps> = ({
       animatedImagesRef.current = newImageMap;
       // 毎フレームの再レンダリングは行わない
 
-      // 非表示の永続化をバックグラウンドで実行し、画面からは即時非表示
-      if (toHide.length > 0) {
+      // 背景で物理削除し、画面からは即時退場
+      if (toDelete.length > 0) {
         (async () => {
           const { DatabaseService } = await import('../services/database');
           try {
-            for (const id of toHide) {
+            for (const id of toDelete) {
               await DatabaseService.deleteImage(id, 'auto');
               const div = containerRefs.current.get(id);
               if (div) div.style.display = 'none';

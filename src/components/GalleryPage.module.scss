@@ -1,6 +1,5 @@
 @use 'sass:color';
 
-// 既存のoekaki-screenの変数に合わせる
 $primary-color: #272343;
 $secondary-color: #8EB8CD;
 $base-color: #fffffe;
@@ -48,75 +47,8 @@ $bg-color: #eaf0f2;
   }
 }
 
-.tabContainer {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
-  border-bottom: 2px solid #e0e0e0;
-}
-
-.tabButton {
-  padding: 10px 20px;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 1rem;
-  color: $text-color;
-  position: relative;
-  transition: color 0.3s ease;
-
-  &:hover {
-    color: $button-color;
-  }
-
-  &.active {
-    color: $button-color;
-    font-weight: bold;
-
-    &::after {
-      content: '';
-      position: absolute;
-      bottom: -2px;
-      left: 0;
-      right: 0;
-      height: 2px;
-      background-color: $button-color;
-    }
-  }
-}
-
-.tabContent {
+.galleryContent {
   min-height: 400px;
-}
-
-.editModeHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  padding: 10px;
-  background-color: $bg-color;
-  border-radius: $border-radius;
-}
-
-.selectAllButton {
-  padding: 8px 15px;
-  border: none;
-  border-radius: $border-radius;
-  cursor: pointer;
-  background-color: $secondary-color;
-  color: white;
-  transition: background-color 0.3s ease;
-
-  &:hover {
-    background-color: color.adjust($secondary-color, $lightness: -10%);
-  }
-}
-
-.selectionInfo {
-  margin: 0;
-  color: $text-color;
-  font-weight: 500;
 }
 
 .galleryList {
@@ -132,15 +64,10 @@ $bg-color: #eaf0f2;
   overflow: hidden;
   transition: transform 0.3s ease;
   position: relative;
-  cursor: pointer;
 
   &:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  }
-
-  &.selected {
-    border: 2px solid $button-color;
   }
 
   img {
@@ -167,7 +94,7 @@ $bg-color: #eaf0f2;
     display: flex;
     justify-content: center;
     padding: 0 15px 15px;
-    gap: 30px;
+    gap: 20px;
 
     button {
       padding: 8px 15px;
@@ -178,11 +105,11 @@ $bg-color: #eaf0f2;
       font-weight: bold;
 
       &:first-child {
-        background-color: $button-color;
+        background-color: $secondary-color;
         color: white;
 
         &:hover {
-          background-color: color.adjust($button-color, $lightness: -10%);
+          background-color: color.adjust($secondary-color, $lightness: -10%);
         }
       }
 
@@ -198,7 +125,6 @@ $bg-color: #eaf0f2;
   }
 }
 
-// 明示的なボタンスタイル
 .editButton {
   background-color: $secondary-color !important;
   color: #fff !important;
@@ -208,38 +134,9 @@ $bg-color: #eaf0f2;
   }
 }
 
-.restartButton {
-  background-color: #22c55e;
-  color: #fff;
-  &:hover { background-color: color.adjust(#22c55e, $lightness: -10%); }
-}
-
-.hideButton {
-  background-color: #64748b;
-  color: #fff;
-  &:hover { background-color: color.adjust(#64748b, $lightness: -10%); }
-}
-
 .remainingTime {
   font-weight: 600;
   color: $primary-color;
-}
-
-.checkmark {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 30px;
-  height: 30px;
-  background-color: $button-color;
-  color: white;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  font-size: 18px;
-  z-index: 1;
 }
 
 .thumbnailLoading {
@@ -299,7 +196,6 @@ $bg-color: #eaf0f2;
       padding: 8px 15px;
       border: none;
       border-radius: $border-radius;
-      cursor: pointer;
       transition: background-color 0.3s ease;
       font-weight: bold;
     }
