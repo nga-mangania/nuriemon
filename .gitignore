@@ -22,6 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.dmg
 
 # Tauri
 src-tauri/target/
@@ -44,3 +45,4 @@ REQUIREMENTS.md
 # Tooling
 .serena/
 
+notarylog.json
