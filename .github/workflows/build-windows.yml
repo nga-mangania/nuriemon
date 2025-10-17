@@ -65,7 +65,7 @@ jobs:
             target = os.path.join(model_dir, 'u2net.onnx')
             if os.path.abspath(model_path) != os.path.abspath(target):
                 shutil.copy2(model_path, target)
-PY
+          PY
           python -m PyInstaller --clean --onefile -n python-sidecar python-sidecar\main.py
           copy python-sidecar\dist\python-sidecar.exe python-sidecar\python-sidecar.exe
 
