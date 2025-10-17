@@ -1075,4 +1075,7 @@ async function sendMailViaMailchannels(from: string, to: string, subject: string
 1
 export APPLE_DEVELOPER_ID="Developer ID Application: NGA, Inc. (87KUWA497A)"
 2
+appleシリコン
 ./scripts/build-macos-dmg.sh
+Intelシリコン
+./scripts/build-macos-dmg-intel.sh
