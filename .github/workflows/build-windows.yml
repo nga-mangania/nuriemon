@@ -43,31 +43,36 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Python dependencies and build sidecar
-        shell: bash
+        shell: python
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pyinstaller rembg pillow opencv-python-headless numpy
-          python - <<'PY'
-            import os
-            import shutil
-            import sys
+          import subprocess
+          import sys
+          import os
+          import shutil
 
-            model_dir = os.path.join('python-sidecar', 'models')
-            os.makedirs(model_dir, exist_ok=True)
+          def run(cmd):
+              print('[pystep]', ' '.join(cmd))
+              subprocess.check_call(cmd)
 
-            from rembg.session_factory import new_session
+          run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'])
+          run([sys.executable, '-m', 'pip', 'install', 'pyinstaller', 'rembg', 'pillow', 'opencv-python-headless', 'numpy'])
 
-            session = new_session('u2net')
-            model_path = getattr(session, 'model_path', None)
-            if not model_path or not os.path.exists(model_path):
-                raise SystemExit('u2net model not found after download')
+          from rembg.session_factory import new_session
 
-            target = os.path.join(model_dir, 'u2net.onnx')
-            if os.path.abspath(model_path) != os.path.abspath(target):
-                shutil.copy2(model_path, target)
-          PY
-          python -m PyInstaller --clean --onefile -n python-sidecar python-sidecar/main.py
-          cp python-sidecar/dist/python-sidecar.exe python-sidecar/python-sidecar.exe
+          model_dir = os.path.join('python-sidecar', 'models')
+          os.makedirs(model_dir, exist_ok=True)
+
+          session = new_session('u2net')
+          model_path = getattr(session, 'model_path', None)
+          if not model_path or not os.path.exists(model_path):
+              raise SystemExit('u2net model not found after download')
+
+          target = os.path.join(model_dir, 'u2net.onnx')
+          if os.path.abspath(model_path) != os.path.abspath(target):
+              shutil.copy2(model_path, target)
+
+          run([sys.executable, '-m', 'PyInstaller', '--clean', '--onefile', '-n', 'python-sidecar', 'python-sidecar/main.py'])
+          shutil.copy2('python-sidecar/dist/python-sidecar.exe', 'python-sidecar/python-sidecar.exe')
 
       - name: Install npm dependencies
         run: npm ci
