@@ -43,7 +43,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Python dependencies and build sidecar
-        shell: powershell
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           python -m pip install pyinstaller rembg pillow opencv-python-headless numpy
@@ -66,8 +66,8 @@ jobs:
             if os.path.abspath(model_path) != os.path.abspath(target):
                 shutil.copy2(model_path, target)
           PY
-          python -m PyInstaller --clean --onefile -n python-sidecar python-sidecar\main.py
-          copy python-sidecar\dist\python-sidecar.exe python-sidecar\python-sidecar.exe
+          python -m PyInstaller --clean --onefile -n python-sidecar python-sidecar/main.py
+          cp python-sidecar/dist/python-sidecar.exe python-sidecar/python-sidecar.exe
 
       - name: Install npm dependencies
         run: npm ci
