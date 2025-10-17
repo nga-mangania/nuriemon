@@ -48,23 +48,23 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyinstaller rembg pillow opencv-python-headless numpy
           python - <<'PY'
-import os
-import shutil
-import sys
+            import os
+            import shutil
+            import sys
 
-model_dir = os.path.join('python-sidecar', 'models')
-os.makedirs(model_dir, exist_ok=True)
+            model_dir = os.path.join('python-sidecar', 'models')
+            os.makedirs(model_dir, exist_ok=True)
 
-from rembg.session_factory import new_session
+            from rembg.session_factory import new_session
 
-session = new_session('u2net')
-model_path = getattr(session, 'model_path', None)
-if not model_path or not os.path.exists(model_path):
-    raise SystemExit('u2net model not found after download')
+            session = new_session('u2net')
+            model_path = getattr(session, 'model_path', None)
+            if not model_path or not os.path.exists(model_path):
+                raise SystemExit('u2net model not found after download')
 
-target = os.path.join(model_dir, 'u2net.onnx')
-if os.path.abspath(model_path) != os.path.abspath(target):
-    shutil.copy2(model_path, target)
+            target = os.path.join(model_dir, 'u2net.onnx')
+            if os.path.abspath(model_path) != os.path.abspath(target):
+                shutil.copy2(model_path, target)
 PY
           python -m PyInstaller --clean --onefile -n python-sidecar python-sidecar\main.py
           copy python-sidecar\dist\python-sidecar.exe python-sidecar\python-sidecar.exe
