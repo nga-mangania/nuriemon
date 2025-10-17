@@ -43,8 +43,14 @@
       "resources/ja.lproj": "ja.lproj",
       "resources/global_settings.json.example": "global_settings.json.example",
       "resources/global_settings.json": "global_settings.json",
-      "../python-sidecar": "python-sidecar"
+      "../python-sidecar/main.py": "python-sidecar-fallback/main.py",
+      "../python-sidecar/requirements.txt": "python-sidecar-fallback/requirements.txt",
+      "resources/python-sidecar-fallback/README.txt": "python-sidecar-fallback/README.txt",
+      "../python-sidecar/models/u2net.onnx": "python-sidecar-models/u2net.onnx"
     },
+    "externalBin": [
+      "../python-sidecar/python-sidecar"
+    ],
 
     "icon": [
       "icons/32x32.png",

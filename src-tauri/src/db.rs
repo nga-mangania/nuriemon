@@ -1,8 +1,8 @@
-use rusqlite::{Connection, Result, params};
-use serde::{Serialize, Deserialize};
+use chrono::Utc;
+use rusqlite::{params, Connection, Result};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
-use chrono::Utc;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ImageMetadata {
@@ -46,10 +46,10 @@ pub struct UserSettings {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MovementSettings {
     pub image_id: String,
-    pub movement_type: String, // "walk", "fly", "swim"
+    pub movement_type: String,    // "walk", "fly", "swim"
     pub movement_pattern: String, // "normal", "zigzag", "bounce", etc.
-    pub speed: f32, // 0.0 to 1.0
-    pub size: String, // "small", "medium", "large"
+    pub speed: f32,               // 0.0 to 1.0
+    pub size: String,             // "small", "medium", "large"
     pub created_at: String,
     pub updated_at: String,
 }
@@ -120,11 +120,11 @@ impl Database {
         )?;
 
         // filePathカラムを追加（既存のテーブルに）
-        match self.conn.execute(
-            "ALTER TABLE images ADD COLUMN file_path TEXT",
-            [],
-        ) {
-            Ok(_) => {},
+        match self
+            .conn
+            .execute("ALTER TABLE images ADD COLUMN file_path TEXT", [])
+        {
+            Ok(_) => {}
             Err(e) => {
                 // カラムが既に存在する場合はエラーを無視
                 if !e.to_string().contains("duplicate column name") {
@@ -138,7 +138,7 @@ impl Database {
             "ALTER TABLE images ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0",
             [],
         ) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => {
                 if !e.to_string().contains("duplicate column name") {
                     return Err(e);
@@ -146,11 +146,11 @@ impl Database {
             }
         }
         // display_started_at カラムの追加
-        match self.conn.execute(
-            "ALTER TABLE images ADD COLUMN display_started_at TEXT",
-            [],
-        ) {
-            Ok(_) => {},
+        match self
+            .conn
+            .execute("ALTER TABLE images ADD COLUMN display_started_at TEXT", [])
+        {
+            Ok(_) => {}
             Err(e) => {
                 if !e.to_string().contains("duplicate column name") {
                     return Err(e);
@@ -261,7 +261,11 @@ impl Database {
         Ok(result)
     }
 
-    pub fn get_processed_images_preview(&self, last_cursor: Option<i64>, limit: i64) -> Result<Vec<ProcessedImagePreview>> {
+    pub fn get_processed_images_preview(
+        &self,
+        last_cursor: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<ProcessedImagePreview>> {
         let cursor = last_cursor.unwrap_or(0);
         let limit = if limit <= 0 { 60 } else { limit.min(500) };
 
@@ -272,7 +276,7 @@ impl Database {
                AND (is_hidden IS NULL OR is_hidden = 0)
                AND rowid > ?1
              ORDER BY rowid
-             LIMIT ?2"
+             LIMIT ?2",
         )?;
 
         let rows = stmt.query_map(params![cursor, limit], |row| {
@@ -328,7 +332,8 @@ impl Database {
 
     // 画像の削除
     pub fn delete_image(&self, id: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM images WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM images WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -345,7 +350,7 @@ impl Database {
     pub fn update_image_file_path(&self, id: &str, file_path: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE images SET file_path = ?1 WHERE id = ?2",
-            params![file_path, id]
+            params![file_path, id],
         )?;
         Ok(())
     }
@@ -372,7 +377,7 @@ impl Database {
             "SELECT id, storage_location, location_type, created_at, updated_at 
              FROM user_settings 
              ORDER BY updated_at DESC 
-             LIMIT 1"
+             LIMIT 1",
         )?;
 
         let mut settings = stmt.query_map([], |row| {
@@ -432,7 +437,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT image_id, movement_type, movement_pattern, speed, size, created_at, updated_at
              FROM movement_settings 
-             WHERE image_id = ?1"
+             WHERE image_id = ?1",
         )?;
 
         let mut settings = stmt.query_map([image_id], |row| {
@@ -457,7 +462,7 @@ impl Database {
     pub fn get_all_movement_settings(&self) -> Result<Vec<MovementSettings>> {
         let mut stmt = self.conn.prepare(
             "SELECT image_id, movement_type, movement_pattern, speed, size, created_at, updated_at
-             FROM movement_settings"
+             FROM movement_settings",
         )?;
 
         let settings = stmt.query_map([], |row| {
@@ -504,22 +509,28 @@ impl Database {
     }
 
     // 複数のアプリケーション設定を一度に取得
-    pub fn get_app_settings(&self, keys: &[&str]) -> Result<std::collections::HashMap<String, String>> {
+    pub fn get_app_settings(
+        &self,
+        keys: &[&str],
+    ) -> Result<std::collections::HashMap<String, String>> {
         let mut result = std::collections::HashMap::new();
-        
+
         let placeholders = keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let query = format!("SELECT key, value FROM app_settings WHERE key IN ({})", placeholders);
-        
+        let query = format!(
+            "SELECT key, value FROM app_settings WHERE key IN ({})",
+            placeholders
+        );
+
         let mut stmt = self.conn.prepare(&query)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(keys), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
-        
+
         for row in rows {
             let (key, value) = row?;
             result.insert(key, value);
         }
-        
+
         Ok(result)
     }
 }

@@ -112,6 +112,28 @@ export class GlobalSettingsService {
     return effectiveCache;
   }
 
+  static async ensureEventId(): Promise<string> {
+    const eff = GlobalSettingsService.getEffective() || await GlobalSettingsService.loadEffective();
+    const saved = (eff?.relay?.eventId || await GlobalSettingsService.get('relay_event_id') || '').trim();
+    if (saved) return saved;
+
+    let pcid = (eff?.relay?.pcId || await GlobalSettingsService.get('pcid') || '').trim();
+    if (!pcid) {
+      pcid = generateDefaultPcid();
+      try { await GlobalSettingsService.save('pcid', pcid); } catch {}
+    }
+
+    const generated = generateDefaultEventId(pcid);
+    try { await GlobalSettingsService.save('relay_event_id', generated); } catch {}
+    GlobalSettingsService.reset();
+    try {
+      const refreshed = await GlobalSettingsService.loadEffective();
+      const refreshedId = (refreshed?.relay?.eventId || '').trim();
+      if (refreshedId) return refreshedId;
+    } catch {}
+    return generated;
+  }
+
   static async setUserEventId(eventId: string): Promise<void> {
     await invoke('set_user_event_id', { eventId, event_id: eventId } as any);
     // 反映のためキャッシュを破棄
@@ -121,10 +143,32 @@ export class GlobalSettingsService {
 }
 
 function generateDefaultPcid(): string {
-  const alphabet = '0123456789abcdefghjkmnpqrstvwxyz';
-  let s = '';
+  const alphabet = "0123456789abcdefghjkmnpqrstvwxyz";
+  let s = "";
   for (let i = 0; i < 6; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
   return `pc-${s}`;
+}
+
+function generateDefaultEventId(pcid: string): string {
+  const base = sanitizeLowerId(pcid || 'pc');
+  const suffix = randomBase32(6);
+  let value = `evt-${base}-${suffix}`.replace(/-+/g, '-');
+  if (value.length > 32) value = value.slice(0, 32);
+  return value;
+}
+
+function sanitizeLowerId(value: string): string {
+  const sanitized = (value || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+  return sanitized || 'pc';
+}
+
+function randomBase32(length: number): string {
+  const alphabet = 'abcdefghjkmnpqrstvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < length; i++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
 }
 
 function safeJson(s?: string | null): any {

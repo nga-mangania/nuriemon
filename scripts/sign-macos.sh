@@ -15,15 +15,28 @@ fi
 
 SIGN_ARGS=(--force --options runtime --timestamp --sign "$IDENTITY")
 
-SIDECAR_ROOT="$APP_PATH/Contents/Resources/python-sidecar"
-if [[ -x "$SIDECAR_ROOT/python-sidecar" ]]; then
-  echo "[sign-macos] Signing python-sidecar"
-  codesign "${SIGN_ARGS[@]}" "$SIDECAR_ROOT/python-sidecar"
+SIDE_ENT="src-tauri/macos/entitlements-sidecar.plist"
+if [[ ! -f "$SIDE_ENT" ]]; then
+  echo "[sign-macos] Sidecar entitlements not found: $SIDE_ENT" >&2
+  exit 1
 fi
-if [[ -x "$SIDECAR_ROOT/dist/python-sidecar" ]]; then
-  echo "[sign-macos] Signing python-sidecar dist binary"
-  codesign "${SIGN_ARGS[@]}" "$SIDECAR_ROOT/dist/python-sidecar"
+
+for bin in \
+  "$APP_PATH/Contents/MacOS/python-sidecar" \
+  "$APP_PATH/Contents/MacOS/python-sidecar-aarch64-apple-darwin"; do
+  if [[ -x "$bin" ]]; then
+    echo "[sign-macos] Signing bundled python-sidecar: $bin"
+    codesign "${SIGN_ARGS[@]}" --entitlements "$SIDE_ENT" "$bin"
+  fi
+done
+for legacy_root in \
+  "$APP_PATH/Contents/Resources/python-sidecar" \
+  "$APP_PATH/Contents/Resources/python-sidecar-fallback"; do
+  if [[ -x "$legacy_root/python-sidecar" ]]; then
+  echo "[sign-macos] Signing legacy resource python-sidecar: $legacy_root/python-sidecar"
+  codesign "${SIGN_ARGS[@]}" --entitlements "$SIDE_ENT" "$legacy_root/python-sidecar"
 fi
+done
 
 MAIN_EXEC="$APP_PATH/Contents/MacOS/Nuriemon"
 if [[ ! -x "$MAIN_EXEC" ]]; then

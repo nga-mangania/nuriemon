@@ -33,6 +33,8 @@ python-sidecar/*.pyc
 python-sidecar/dist/
 python-sidecar/build/
 python-sidecar/python-sidecar
+python-sidecar/python-sidecar-*
+python-sidecar/models/
 *.egg-info/
 
 # Local data

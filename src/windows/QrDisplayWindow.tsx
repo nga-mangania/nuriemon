@@ -280,7 +280,10 @@ export const QrDisplayWindow: React.FC = () => {
       const base = await resolveBaseUrl();
       if (base) setRelayBaseUrl(base);
 
-      const eid = (eff?.relay?.eventId || (await GlobalSettingsService.get('relay_event_id'))) || '';
+      let eid = (eff?.relay?.eventId || (await GlobalSettingsService.get('relay_event_id'))) || '';
+      if (!eid) {
+        eid = await GlobalSettingsService.ensureEventId();
+      }
       if (eid) setRelayEventId(eid);
 
       let pid = (eff?.relay?.pcId || (await GlobalSettingsService.get('pcid'))) || '';
@@ -384,7 +387,10 @@ export const QrDisplayWindow: React.FC = () => {
         const mode = (await AppSettingsService.getAppSetting('operation_mode')) as 'auto' | 'relay' | 'local' | null;
         await GlobalSettingsService.loadEffective();
         const eff = GlobalSettingsService.getEffective();
-        const eid = eff?.relay?.eventId || (await GlobalSettingsService.get('relay_event_id'));
+        let eid = eff?.relay?.eventId || (await GlobalSettingsService.get('relay_event_id')) || '';
+        if (!eid) {
+          eid = await GlobalSettingsService.ensureEventId();
+        }
         const base = await resolveBaseUrl();
         if (base) setRelayBaseUrl(base);
         if (eid) setRelayEventId(eid);

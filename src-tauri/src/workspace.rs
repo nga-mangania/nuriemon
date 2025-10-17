@@ -1,7 +1,7 @@
-use std::sync::Mutex;
-use std::path::PathBuf;
-use tauri::{State, Manager};
 use crate::db::Database;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use tauri::{Manager, State};
 
 /// ワークスペースのDB接続を管理する構造体
 pub struct WorkspaceConnection {
@@ -23,9 +23,9 @@ impl WorkspaceConnection {
         self.close();
 
         // 新しい接続を作成
-        let db = Database::new(db_path.clone())
-            .map_err(|e| format!("データベース接続エラー: {}", e))?;
-        
+        let db =
+            Database::new(db_path.clone()).map_err(|e| format!("データベース接続エラー: {}", e))?;
+
         // テーブルを初期化
         db.initialize()
             .map_err(|e| format!("データベース初期化エラー: {}", e))?;
@@ -48,18 +48,15 @@ impl WorkspaceConnection {
             .as_ref()
             .ok_or_else(|| "データベースに接続されていません".to_string())
     }
-
 }
 
 pub type WorkspaceState = Mutex<WorkspaceConnection>;
 
 /// 新しいワークスペースDBを初期化
 #[tauri::command]
-pub async fn initialize_workspace_db(
-    db_path: String,
-) -> Result<(), String> {
+pub async fn initialize_workspace_db(db_path: String) -> Result<(), String> {
     let path = PathBuf::from(&db_path);
-    
+
     // 親ディレクトリが存在することを確認
     if let Some(parent) = path.parent() {
         if !parent.exists() {
@@ -69,9 +66,8 @@ pub async fn initialize_workspace_db(
     }
 
     // DBファイルを作成して初期化
-    let db = Database::new(path)
-        .map_err(|e| format!("データベース作成エラー: {}", e))?;
-    
+    let db = Database::new(path).map_err(|e| format!("データベース作成エラー: {}", e))?;
+
     db.initialize()
         .map_err(|e| format!("データベース初期化エラー: {}", e))?;
 
@@ -84,20 +80,20 @@ pub async fn connect_workspace_db(
     workspace: State<'_, WorkspaceState>,
     db_path: String,
 ) -> Result<(), String> {
-    let mut conn = workspace.lock()
+    let mut conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
-    
+
     conn.connect(PathBuf::from(db_path))
 }
 
 /// ワークスペースDBをクローズ
 #[tauri::command]
-pub async fn close_workspace_db(
-    workspace: State<'_, WorkspaceState>,
-) -> Result<(), String> {
-    let mut conn = workspace.lock()
+pub async fn close_workspace_db(workspace: State<'_, WorkspaceState>) -> Result<(), String> {
+    let mut conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
-    
+
     conn.close();
     Ok(())
 }
@@ -109,38 +105,36 @@ pub async fn save_global_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
-    let app_data_dir = app_handle.path()
+    let app_data_dir = app_handle
+        .path()
         .app_data_dir()
         .map_err(|e| format!("アプリデータディレクトリの取得に失敗: {}", e))?;
-    
+
     let settings_path = app_data_dir.join("global_settings.json");
-    
+
     // 既存の設定を読み込む
     let mut settings: serde_json::Value = if settings_path.exists() {
-        let content = std::fs::read_to_string(&settings_path)
-            .unwrap_or_else(|_| "{}".to_string());
-        serde_json::from_str(&content)
-            .unwrap_or_else(|_| serde_json::json!({}))
+        let content = std::fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".to_string());
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
     } else {
         serde_json::json!({})
     };
-    
+
     // 設定を更新
     settings[key] = serde_json::Value::String(value);
-    
+
     // ディレクトリを作成
     if let Some(parent) = settings_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("ディレクトリ作成エラー: {}", e))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("ディレクトリ作成エラー: {}", e))?;
     }
-    
+
     // ファイルに保存
     std::fs::write(
         settings_path,
-        serde_json::to_string_pretty(&settings)
-            .map_err(|e| format!("JSON変換エラー: {}", e))?
-    ).map_err(|e| format!("ファイル書き込みエラー: {}", e))?;
-    
+        serde_json::to_string_pretty(&settings).map_err(|e| format!("JSON変換エラー: {}", e))?,
+    )
+    .map_err(|e| format!("ファイル書き込みエラー: {}", e))?;
+
     Ok(())
 }
 
@@ -150,22 +144,23 @@ pub async fn get_global_setting(
     app_handle: tauri::AppHandle,
     key: String,
 ) -> Result<Option<String>, String> {
-    let app_data_dir = app_handle.path()
+    let app_data_dir = app_handle
+        .path()
         .app_data_dir()
         .map_err(|e| format!("アプリデータディレクトリの取得に失敗: {}", e))?;
-    
+
     let settings_path = app_data_dir.join("global_settings.json");
-    
+
     if !settings_path.exists() {
         return Ok(None);
     }
-    
+
     let content = std::fs::read_to_string(settings_path)
         .map_err(|e| format!("ファイル読み込みエラー: {}", e))?;
-    
-    let settings: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("JSON解析エラー: {}", e))?;
-    
+
+    let settings: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("JSON解析エラー: {}", e))?;
+
     if let Some(value) = settings.get(&key) {
         if let Some(str_value) = value.as_str() {
             Ok(Some(str_value.to_string()))

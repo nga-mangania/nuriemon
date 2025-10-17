@@ -1,39 +1,36 @@
-use std::process::{Command, Stdio, ChildStdin, ChildStdout};
-use std::io::{Write, BufRead, BufReader};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use tauri::{State, Manager, Emitter, LogicalSize, Size, LogicalPosition, Position};
+use std::process::{ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::{Arc, Mutex};
 #[cfg(debug_assertions)]
 use tauri::menu::{Menu, SubmenuBuilder};
+use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, Position, Size, State};
 
 mod db;
 mod events;
-mod workspace;
 mod file_watcher;
-mod web_server;
-mod websocket;
 mod qr_manager;
 mod server_state;
-use keyring::Entry;
-use db::{ImageMetadata, UserSettings, MovementSettings, ProcessedImagePreview, generate_id, current_timestamp};
-use events::{
-    DataChangeEvent,
-    ImageUpsertedPayload,
-    ImageDeletedPayload,
-    AudioUpdatedPayload,
-    AnimationSettingsChangedPayload,
-    GroundPositionChangedPayload,
-    DeletionTimeChangedPayload,
-    AppSettingChangedPayload,
-    emit_data_change,
+mod web_server;
+mod websocket;
+mod workspace;
+use db::{
+    current_timestamp, generate_id, ImageMetadata, MovementSettings, ProcessedImagePreview,
+    UserSettings,
 };
-use workspace::{WorkspaceState, WorkspaceConnection};
+use events::{
+    emit_data_change, AnimationSettingsChangedPayload, AppSettingChangedPayload,
+    AudioUpdatedPayload, DataChangeEvent, DeletionTimeChangedPayload, GroundPositionChangedPayload,
+    ImageDeletedPayload, ImageUpsertedPayload,
+};
+use keyring::Entry;
+use once_cell::sync::Lazy;
 use qr_manager::QrManager;
 use server_state::ServerState;
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use workspace::{WorkspaceConnection, WorkspaceState};
 
 // Python処理の結果
 #[derive(Serialize, Deserialize, Clone)]
@@ -57,7 +54,6 @@ enum PythonOutput {
     Result(ProcessResult),
 }
 
-
 // 常駐Pythonプロセスの状態を管理
 struct PythonProcess {
     child: std::process::Child,
@@ -70,12 +66,33 @@ static PYTHON_PROCESS: Mutex<Option<PythonProcess>> = Mutex::new(None);
 // DevTools 開閉状態の簡易トラッカー（ウィンドウラベル単位）
 static DEVTOOLS_OPEN: Lazy<Mutex<HashMap<String, bool>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
+fn configure_model_env(cmd: &mut Command, candidates: Vec<std::path::PathBuf>) {
+    for dir in &candidates {
+        if dir.exists() {
+            cmd.env("U2NET_HOME", dir);
+            cmd.env("RMBG_SESSION_PATH", dir);
+            return;
+        }
+    }
+    if let Some(dir) = candidates.into_iter().next() {
+        cmd.env("U2NET_HOME", &dir);
+        cmd.env("RMBG_SESSION_PATH", &dir);
+    }
+}
+
 fn spawn_python_process() -> Result<PythonProcess, String> {
     // 1) Bundled native sidecar (preferred if provided)
     if let Ok(sidecar) = std::env::var("NURIEMON_SIDECAR") {
         let p = std::path::PathBuf::from(&sidecar);
         if p.exists() && p.is_file() {
-            match Command::new(&p)
+            let mut command = Command::new(&p);
+            let mut model_candidates: Vec<std::path::PathBuf> = Vec::new();
+            if let Some(parent) = p.parent() {
+                model_candidates.push(parent.join("python-sidecar-models"));
+                model_candidates.push(parent.join("../Resources/python-sidecar-models"));
+            }
+            configure_model_env(&mut command, model_candidates);
+            match command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -83,22 +100,111 @@ fn spawn_python_process() -> Result<PythonProcess, String> {
             {
                 Ok(mut child) => {
                     let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+                    if let Some(mut es) = child.stderr.take() {
+                        std::thread::spawn(move || {
+                            let reader = BufReader::new(&mut es);
+                            for line in reader.lines() {
+                                if let Ok(l) = line {
+                                    eprintln!("[sidecar:stderr] {}", l);
+                                } else {
+                                    break;
+                                }
+                            }
+                        });
+                    }
                     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
                     let reader = BufReader::new(stdout);
                     eprintln!("[sidecar] started native sidecar: {}", p.display());
-                    return Ok(PythonProcess { child, stdin, stdout: reader });
+                    return Ok(PythonProcess {
+                        child,
+                        stdin,
+                        stdout: reader,
+                    });
                 }
                 Err(e) => {
-                    eprintln!("[sidecar] failed to start native sidecar, will try python3: {}", e);
+                    eprintln!(
+                        "[sidecar] failed to start native sidecar, will try python3: {}",
+                        e
+                    );
                 }
             }
         } else {
-            eprintln!("[sidecar] NURIEMON_SIDECAR not a regular file: {}", p.display());
+            eprintln!(
+                "[sidecar] NURIEMON_SIDECAR not a regular file: {}",
+                p.display()
+            );
         }
     }
 
-    // 2) Packaged script under Resources/python-sidecar/main.py (derive from current_exe)
-    if let Ok(exe_path) = std::env::current_exe() {
+    let current_exe = std::env::current_exe().ok();
+
+    // 2) Bundled sidecar placed alongside the app executable (Tauri externalBin)
+    if let Some(ref exe_path) = current_exe {
+        if let Some(exe_dir) = exe_path.parent() {
+            let mut sidecar_candidates: Vec<std::path::PathBuf> = Vec::new();
+            if let Some(triple) = option_env!("TAURI_ENV_TARGET_TRIPLE") {
+                sidecar_candidates.push(exe_dir.join(format!("python-sidecar-{}", triple)));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                sidecar_candidates.push(exe_dir.join("python-sidecar-aarch64-apple-darwin"));
+            }
+            sidecar_candidates.push(exe_dir.join("python-sidecar"));
+
+            for candidate in sidecar_candidates {
+                if candidate.exists() && candidate.is_file() {
+                    let mut command = Command::new(&candidate);
+                    let mut model_candidates: Vec<std::path::PathBuf> = Vec::new();
+                    model_candidates.push(exe_dir.join("python-sidecar-models"));
+                    if let Some(contents_dir) = exe_dir.parent() {
+                        model_candidates
+                            .push(contents_dir.join("Resources").join("python-sidecar-models"));
+                    }
+                    configure_model_env(&mut command, model_candidates);
+                    match command
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                    {
+                        Ok(mut child) => {
+                            if let Some(mut es) = child.stderr.take() {
+                                std::thread::spawn(move || {
+                                    let reader = BufReader::new(&mut es);
+                                    for line in reader.lines() {
+                                        if let Ok(l) = line {
+                                            eprintln!("[sidecar:stderr] {}", l);
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                });
+                            }
+                            let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+                            let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+                            let reader = BufReader::new(stdout);
+                            eprintln!("[sidecar] started bundled sidecar: {}", candidate.display());
+                            return Ok(PythonProcess {
+                                child,
+                                stdin,
+                                stdout: reader,
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[sidecar] failed to start bundled sidecar {}: {}",
+                                candidate.display(),
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3) Packaged script under Resources/python-sidecar/main.py (derive from current_exe)
+    if let Some(exe_path) = current_exe {
         let mut candidates: Vec<std::path::PathBuf> = Vec::new();
         // macOS: <App>.app/Contents/MacOS/nuriemon -> Resources sibling
         if let Some(macos_resources) = exe_path
@@ -114,43 +220,70 @@ fn spawn_python_process() -> Result<PythonProcess, String> {
             candidates.push(parent.join("resources"));
         }
         for base in candidates {
-            let script = base.join("python-sidecar").join("main.py");
-            let reqs = base.join("python-sidecar").join("requirements.txt");
-            if script.exists() && script.is_file() {
+            let script_dirs = [
+                base.join("python-sidecar"),
+                base.join("python-sidecar-fallback"),
+            ];
+            for dir in script_dirs {
+                let script = dir.join("main.py");
+                let reqs = dir.join("requirements.txt");
+                if !script.exists() || !script.is_file() {
+                    continue;
+                }
                 // Try to use per-user virtualenv to ensure deps exist
                 let venv_python = ensure_user_venv(&reqs).ok();
-                let mut cmd = if let Some(ref py) = venv_python { Command::new(py) } else { Command::new("python3") };
+                let mut cmd = if let Some(ref py) = venv_python {
+                    Command::new(py)
+                } else {
+                    Command::new("python3")
+                };
+                configure_model_env(&mut cmd, vec![base.join("python-sidecar-models")]);
                 let mut child = cmd
                     .arg(&script)
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()
-                    .map_err(|e| format!("Failed to start Python process (resource script): {}", e))?;
+                    .map_err(|e| {
+                        format!("Failed to start Python process (resource script): {}", e)
+                    })?;
                 // stderr forwarder
                 if let Some(mut es) = child.stderr.take() {
                     std::thread::spawn(move || {
                         let reader = BufReader::new(&mut es);
                         for line in reader.lines() {
-                            if let Ok(l) = line { eprintln!("[sidecar:stderr] {}", l); } else { break; }
+                            if let Ok(l) = line {
+                                eprintln!("[sidecar:stderr] {}", l);
+                            } else {
+                                break;
+                            }
                         }
                     });
                 }
                 let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
                 let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
                 let reader = BufReader::new(stdout);
-                eprintln!("[sidecar] started {} with resource script: {}", venv_python.as_deref().unwrap_or("python3"), script.display());
-                return Ok(PythonProcess { child, stdin, stdout: reader });
+                eprintln!(
+                    "[sidecar] started {} with resource script: {}",
+                    venv_python.as_deref().unwrap_or("python3"),
+                    script.display()
+                );
+                return Ok(PythonProcess {
+                    child,
+                    stdin,
+                    stdout: reader,
+                });
             }
         }
     }
 
-    // 3) Dev fallback: run python3 with workspace script
-    let python_script = std::env::current_dir()
-        .map_err(|e| e.to_string())?
-        .join("../python-sidecar/main.py");
+    // 4) Dev fallback: run python3 with workspace script
+    let current_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+    let python_script = current_dir.join("../python-sidecar/main.py");
+    let mut cmd = Command::new("python3");
+    configure_model_env(&mut cmd, vec![current_dir.join("../python-sidecar/models")]);
 
-    let mut child = Command::new("python3")
+    let mut child = cmd
         .arg(&python_script)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -162,15 +295,25 @@ fn spawn_python_process() -> Result<PythonProcess, String> {
     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
     let reader = BufReader::new(stdout);
 
-    eprintln!("[sidecar] started python3 with dev script: {}", python_script.display());
-    Ok(PythonProcess { child, stdin, stdout: reader })
+    eprintln!(
+        "[sidecar] started python3 with dev script: {}",
+        python_script.display()
+    );
+    Ok(PythonProcess {
+        child,
+        stdin,
+        stdout: reader,
+    })
 }
 
 fn ensure_user_venv(requirements: &std::path::Path) -> Result<String, String> {
     // Determine user-level data dir for venv
     let home = std::env::var("HOME").map_err(|e| format!("HOME not set: {}", e))?;
     #[cfg(target_os = "macos")]
-    let base = std::path::Path::new(&home).join("Library").join("Application Support").join("nuriemon");
+    let base = std::path::Path::new(&home)
+        .join("Library")
+        .join("Application Support")
+        .join("nuriemon");
     #[cfg(not(target_os = "macos"))]
     let base = std::path::Path::new(&home).join(".config").join("nuriemon");
     let venv_dir = base.join("pyvenv");
@@ -184,21 +327,43 @@ fn ensure_user_venv(requirements: &std::path::Path) -> Result<String, String> {
         return Ok(py_path.to_string_lossy().to_string());
     }
     // Create base dir
-    if let Some(parent) = venv_dir.parent() { let _ = fs::create_dir_all(parent); }
-    // Create venv
-    let status = Command::new("python3").args(["-m", "venv", venv_dir.to_string_lossy().as_ref()]).status()
-        .map_err(|e| format!("venv create failed: {}", e))?;
-    if !status.success() { return Err(format!("venv create exit={}", status.code().unwrap_or(-1))); }
-    // Upgrade pip and install requirements (best effort)
-    let _ = Command::new(&py_path).args(["-m", "pip", "install", "--upgrade", "pip"]).status();
-    if requirements.exists() {
-        let _ = Command::new(&py_path).args(["-m", "pip", "install", "-r", requirements.to_string_lossy().as_ref()]).status();
+    if let Some(parent) = venv_dir.parent() {
+        let _ = fs::create_dir_all(parent);
     }
-    if py_path.exists() { Ok(py_path.to_string_lossy().to_string()) } else { Err("venv python not found".into()) }
+    // Create venv
+    let status = Command::new("python3")
+        .args(["-m", "venv", venv_dir.to_string_lossy().as_ref()])
+        .status()
+        .map_err(|e| format!("venv create failed: {}", e))?;
+    if !status.success() {
+        return Err(format!("venv create exit={}", status.code().unwrap_or(-1)));
+    }
+    // Upgrade pip and install requirements (best effort)
+    let _ = Command::new(&py_path)
+        .args(["-m", "pip", "install", "--upgrade", "pip"])
+        .status();
+    if requirements.exists() {
+        let _ = Command::new(&py_path)
+            .args([
+                "-m",
+                "pip",
+                "install",
+                "-r",
+                requirements.to_string_lossy().as_ref(),
+            ])
+            .status();
+    }
+    if py_path.exists() {
+        Ok(py_path.to_string_lossy().to_string())
+    } else {
+        Err("venv python not found".into())
+    }
 }
 
 fn ensure_python_process() -> Result<(), String> {
-    let mut guard = PYTHON_PROCESS.lock().map_err(|_| "PYTHON_PROCESS lock error".to_string())?;
+    let mut guard = PYTHON_PROCESS
+        .lock()
+        .map_err(|_| "PYTHON_PROCESS lock error".to_string())?;
     let need_spawn = match guard.as_ref() {
         Some(_) => false,
         None => true,
@@ -215,12 +380,18 @@ fn python_send_and_wait(
     msg: serde_json::Value,
 ) -> Result<ProcessResult, String> {
     ensure_python_process()?;
-    let mut guard = PYTHON_PROCESS.lock().map_err(|_| "PYTHON_PROCESS lock error".to_string())?;
-    let proc = guard.as_mut().ok_or("python process not available".to_string())?;
+    let mut guard = PYTHON_PROCESS
+        .lock()
+        .map_err(|_| "PYTHON_PROCESS lock error".to_string())?;
+    let proc = guard
+        .as_mut()
+        .ok_or("python process not available".to_string())?;
 
     // 送信
     let line = format!("{}\n", msg.to_string());
-    proc.stdin.write_all(line.as_bytes()).map_err(|e| format!("Failed to write to stdin: {}", e))?;
+    proc.stdin
+        .write_all(line.as_bytes())
+        .map_err(|e| format!("Failed to write to stdin: {}", e))?;
     proc.stdin.flush().ok();
 
     // 受信（progress/result）
@@ -228,21 +399,36 @@ fn python_send_and_wait(
     let mut final_result: Option<ProcessResult> = None;
     loop {
         let mut buf = String::new();
-        let n = reader.read_line(&mut buf).map_err(|e| format!("Failed to read stdout: {}", e))?;
-        if n == 0 { break; } // EOF
+        let n = reader
+            .read_line(&mut buf)
+            .map_err(|e| format!("Failed to read stdout: {}", e))?;
+        if n == 0 {
+            break;
+        } // EOF
         let line = buf.trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
         // base64 を含む行は短縮ログ
         let log_line = if line.contains("data:image") || line.contains("\"image\":") {
-            if line.len() > 100 { format!("{}...(rest {})", &line[..100], line.len()-100) } else { line.to_string() }
-        } else { line.to_string() };
+            if line.len() > 100 {
+                format!("{}...(rest {})", &line[..100], line.len() - 100)
+            } else {
+                line.to_string()
+            }
+        } else {
+            line.to_string()
+        };
         println!("[Rust] python <= {}", log_line);
 
         if let Ok(output) = serde_json::from_str::<PythonOutput>(line) {
             match output {
                 PythonOutput::Progress { value } => {
                     if let Some(handle) = app_handle {
-                        let _ = handle.emit("image-processing-progress", ImageProcessingProgress { value });
+                        let _ = handle.emit(
+                            "image-processing-progress",
+                            ImageProcessingProgress { value },
+                        );
                     }
                 }
                 PythonOutput::Result(result) => {
@@ -262,10 +448,16 @@ fn python_send_and_wait(
 // 非同期応答を待たずに送信だけ行う（warmup等に使用）
 fn python_send_nowait(msg: serde_json::Value) -> Result<(), String> {
     ensure_python_process()?;
-    let mut guard = PYTHON_PROCESS.lock().map_err(|_| "PYTHON_PROCESS lock error".to_string())?;
-    let proc = guard.as_mut().ok_or("python process not available".to_string())?;
+    let mut guard = PYTHON_PROCESS
+        .lock()
+        .map_err(|_| "PYTHON_PROCESS lock error".to_string())?;
+    let proc = guard
+        .as_mut()
+        .ok_or("python process not available".to_string())?;
     let line = format!("{}\n", msg.to_string());
-    proc.stdin.write_all(line.as_bytes()).map_err(|e| format!("Failed to write to stdin: {}", e))?;
+    proc.stdin
+        .write_all(line.as_bytes())
+        .map_err(|e| format!("Failed to write to stdin: {}", e))?;
     proc.stdin.flush().ok();
     Ok(())
 }
@@ -291,7 +483,10 @@ pub fn process_image_sync(image_data: String) -> Result<ProcessResult, String> {
 }
 
 #[tauri::command]
-async fn process_image(app_handle: tauri::AppHandle, image_data: String) -> Result<ProcessResult, String> {
+async fn process_image(
+    app_handle: tauri::AppHandle,
+    image_data: String,
+) -> Result<ProcessResult, String> {
     let command = serde_json::json!({
         "command": "process",
         "image": image_data,
@@ -303,19 +498,18 @@ async fn process_image(app_handle: tauri::AppHandle, image_data: String) -> Resu
 #[tauri::command]
 async fn ensure_directory(path: String) -> Result<(), String> {
     let dir_path = Path::new(&path);
-    
+
     if !dir_path.exists() {
-        fs::create_dir_all(&dir_path)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
+        fs::create_dir_all(&dir_path).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
-    
+
     Ok(())
 }
 
 #[tauri::command]
 async fn write_file_absolute(path: String, contents: Vec<u8>) -> Result<(), String> {
     let file_path = Path::new(&path);
-    
+
     // 親ディレクトリが存在しない場合は作成
     if let Some(parent) = file_path.parent() {
         if !parent.exists() {
@@ -323,17 +517,15 @@ async fn write_file_absolute(path: String, contents: Vec<u8>) -> Result<(), Stri
                 .map_err(|e| format!("Failed to create parent directory: {}", e))?;
         }
     }
-    
-    fs::write(&file_path, contents)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
-    
+
+    fs::write(&file_path, contents).map_err(|e| format!("Failed to write file: {}", e))?;
+
     Ok(())
 }
 
 #[tauri::command]
 async fn read_file_absolute(path: String) -> Result<Vec<u8>, String> {
-    fs::read(&path)
-        .map_err(|e| format!("Failed to read file: {}", e))
+    fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))
 }
 
 #[tauri::command]
@@ -344,14 +536,13 @@ async fn file_exists_absolute(path: String) -> Result<bool, String> {
 #[tauri::command]
 async fn delete_file_absolute(path: String) -> Result<(), String> {
     let file_path = Path::new(&path);
-    
+
     // ファイルが存在する場合のみ削除
     if file_path.exists() {
-        fs::remove_file(&file_path)
-            .map_err(|e| format!("Failed to delete file: {}", e))?;
+        fs::remove_file(&file_path).map_err(|e| format!("Failed to delete file: {}", e))?;
         println!("[delete_file_absolute] deleted path={}", path);
     }
-    
+
     Ok(())
 }
 
@@ -360,38 +551,56 @@ async fn delete_file_absolute(path: String) -> Result<(), String> {
 async fn save_image_metadata(
     state: State<'_, AppState>,
     workspace: State<'_, WorkspaceState>,
-    metadata: ImageMetadata
+    metadata: ImageMetadata,
 ) -> Result<(), String> {
     let image_id = metadata.id.clone();
     let image_type = metadata.image_type.clone();
-    
-    let conn = workspace.lock()
+
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     db.save_image_metadata(&metadata)
         .map_err(|e| format!("Failed to save image metadata: {}", e))?;
 
-    if let Some(saved) = db.get_image(&image_id)
-        .map_err(|e| format!("Failed to re-fetch image metadata: {}", e))? {
+    if let Some(saved) = db
+        .get_image(&image_id)
+        .map_err(|e| format!("Failed to re-fetch image metadata: {}", e))?
+    {
         emit_data_change(
             &state.app_handle,
             DataChangeEvent::ImageUpserted(ImageUpsertedPayload::from(&saved)),
         )?;
         match image_type.as_str() {
-            "bgm" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated(AudioUpdatedPayload { audio_type: "bgm".to_string() }))?,
-            "sound_effect" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated(AudioUpdatedPayload { audio_type: "sound_effect".to_string() }))?,
-            "background" => emit_data_change(&state.app_handle, DataChangeEvent::BackgroundChanged)?,
+            "bgm" => emit_data_change(
+                &state.app_handle,
+                DataChangeEvent::AudioUpdated(AudioUpdatedPayload {
+                    audio_type: "bgm".to_string(),
+                }),
+            )?,
+            "sound_effect" => emit_data_change(
+                &state.app_handle,
+                DataChangeEvent::AudioUpdated(AudioUpdatedPayload {
+                    audio_type: "sound_effect".to_string(),
+                }),
+            )?,
+            "background" => {
+                emit_data_change(&state.app_handle, DataChangeEvent::BackgroundChanged)?
+            }
             _ => {}
         }
     }
-    
+
     Ok(())
 }
 
 #[tauri::command]
-async fn get_all_images(workspace: State<'_, WorkspaceState>) -> Result<Vec<ImageMetadata>, String> {
-    let conn = workspace.lock()
+async fn get_all_images(
+    workspace: State<'_, WorkspaceState>,
+) -> Result<Vec<ImageMetadata>, String> {
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
 
@@ -405,7 +614,8 @@ async fn get_processed_images_preview(
     cursor: Option<i64>,
     limit: Option<i64>,
 ) -> Result<Vec<ProcessedImagePreview>, String> {
-    let conn = workspace.lock()
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
 
@@ -418,7 +628,8 @@ async fn get_image_metadata(
     workspace: State<'_, WorkspaceState>,
     id: String,
 ) -> Result<Option<ImageMetadata>, String> {
-    let conn = workspace.lock()
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
 
@@ -431,9 +642,12 @@ async fn mark_display_started(
     workspace: State<'_, WorkspaceState>,
     id: String,
 ) -> Result<(), String> {
-    let conn = workspace.lock().map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
+    let conn = workspace
+        .lock()
+        .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    db.mark_display_started_if_null(&id).map_err(|e| format!("Failed to mark display started: {}", e))
+    db.mark_display_started_if_null(&id)
+        .map_err(|e| format!("Failed to mark display started: {}", e))
 }
 
 #[tauri::command]
@@ -445,32 +659,44 @@ async fn delete_image(
 ) -> Result<(), String> {
     let reason_str = reason.unwrap_or_else(|| "unknown".to_string());
     println!("[delete_image] requested id={} reason={}", id, reason_str);
-    let conn = workspace.lock()
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     // 削除前に画像情報を取得してタイプを確認
-    let image_type = db.get_image(&id)
+    let image_type = db
+        .get_image(&id)
         .map_err(|e| format!("Failed to get image: {}", e))?
         .map(|img| img.image_type)
         .unwrap_or_else(|| "unknown".to_string());
-    
+
     // 画像を削除
     db.delete_image(&id)
         .map_err(|e| format!("Failed to delete image: {}", e))?;
-    
+
     emit_data_change(
         &state.app_handle,
         DataChangeEvent::ImageDeleted(ImageDeletedPayload { id: id.clone() }),
     )?;
 
     match image_type.as_str() {
-        "bgm" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated(AudioUpdatedPayload { audio_type: "bgm".to_string() }))?,
-        "sound_effect" => emit_data_change(&state.app_handle, DataChangeEvent::AudioUpdated(AudioUpdatedPayload { audio_type: "sound_effect".to_string() }))?,
+        "bgm" => emit_data_change(
+            &state.app_handle,
+            DataChangeEvent::AudioUpdated(AudioUpdatedPayload {
+                audio_type: "bgm".to_string(),
+            }),
+        )?,
+        "sound_effect" => emit_data_change(
+            &state.app_handle,
+            DataChangeEvent::AudioUpdated(AudioUpdatedPayload {
+                audio_type: "sound_effect".to_string(),
+            }),
+        )?,
         "background" => emit_data_change(&state.app_handle, DataChangeEvent::BackgroundChanged)?,
         _ => {}
     }
-    
+
     Ok(())
 }
 
@@ -478,12 +704,13 @@ async fn delete_image(
 async fn update_image_file_path(
     workspace: State<'_, WorkspaceState>,
     id: String,
-    file_path: String
+    file_path: String,
 ) -> Result<(), String> {
-    let conn = workspace.lock()
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     db.update_image_file_path(&id, &file_path)
         .map_err(|e| format!("Failed to update file path: {}", e))
 }
@@ -491,32 +718,37 @@ async fn update_image_file_path(
 #[tauri::command]
 async fn save_user_settings(
     workspace: State<'_, WorkspaceState>,
-    settings: UserSettings
+    settings: UserSettings,
 ) -> Result<(), String> {
-    let conn = workspace.lock()
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     db.save_user_settings(&settings)
         .map_err(|e| format!("Failed to save user settings: {}", e))
 }
 
 #[tauri::command]
-async fn get_user_settings(workspace: State<'_, WorkspaceState>) -> Result<Option<UserSettings>, String> {
-    let conn = workspace.lock()
+async fn get_user_settings(
+    workspace: State<'_, WorkspaceState>,
+) -> Result<Option<UserSettings>, String> {
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     db.get_user_settings()
         .map_err(|e| format!("Failed to get user settings: {}", e))
 }
 
 #[tauri::command]
 async fn get_image_counts(workspace: State<'_, WorkspaceState>) -> Result<(i32, i32), String> {
-    let conn = workspace.lock()
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     db.get_image_counts()
         .map_err(|e| format!("Failed to get image counts: {}", e))
 }
@@ -536,30 +768,35 @@ fn get_current_timestamp() -> String {
 fn save_movement_settings(
     state: State<AppState>,
     workspace: State<WorkspaceState>,
-    settings: MovementSettings
+    settings: MovementSettings,
 ) -> Result<(), String> {
     let image_id = settings.image_id.clone();
-    
-    let conn = workspace.lock()
+
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     db.save_movement_settings(&settings)
         .map_err(|e| format!("Failed to save movement settings: {}", e))?;
-    
+
     // イベントを発行
     emit_data_change(
         &state.app_handle,
         DataChangeEvent::AnimationSettingsChanged(AnimationSettingsChangedPayload { image_id }),
     )?;
-    
+
     Ok(())
 }
 
 // データベース操作: 動き設定の取得
 #[tauri::command]
-fn get_movement_settings(workspace: State<WorkspaceState>, image_id: String) -> Result<Option<MovementSettings>, String> {
-    let conn = workspace.lock()
+fn get_movement_settings(
+    workspace: State<WorkspaceState>,
+    image_id: String,
+) -> Result<Option<MovementSettings>, String> {
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
     db.get_movement_settings(&image_id)
@@ -568,11 +805,14 @@ fn get_movement_settings(workspace: State<WorkspaceState>, image_id: String) -> 
 
 // データベース操作: すべての動き設定の取得
 #[tauri::command]
-fn get_all_movement_settings(workspace: State<WorkspaceState>) -> Result<Vec<MovementSettings>, String> {
-    let conn = workspace.lock()
+fn get_all_movement_settings(
+    workspace: State<WorkspaceState>,
+) -> Result<Vec<MovementSettings>, String> {
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     db.get_all_movement_settings()
         .map_err(|e| format!("Failed to get all movement settings: {}", e))
 }
@@ -583,15 +823,16 @@ fn save_app_setting(
     state: State<AppState>,
     workspace: State<WorkspaceState>,
     key: String,
-    value: String
+    value: String,
 ) -> Result<(), String> {
-    let conn = workspace.lock()
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     db.save_app_setting(&key, &value)
         .map_err(|e| format!("Failed to save app setting: {}", e))?;
-    
+
     // 特定の設定項目の場合、専用のイベントを発行
     let event = match key.as_str() {
         "ground_position" => {
@@ -600,31 +841,41 @@ fn save_app_setting(
             } else {
                 DataChangeEvent::AppSettingChanged(AppSettingChangedPayload { key, value })
             }
-        },
-        "deletion_time" => DataChangeEvent::DeletionTimeChanged(DeletionTimeChangedPayload { time: value.clone() }),
+        }
+        "deletion_time" => DataChangeEvent::DeletionTimeChanged(DeletionTimeChangedPayload {
+            time: value.clone(),
+        }),
         _ => DataChangeEvent::AppSettingChanged(AppSettingChangedPayload { key, value }),
     };
-    
+
     emit_data_change(&state.app_handle, event)?;
-    
+
     Ok(())
 }
 
 // アプリケーション設定の取得
 #[tauri::command]
-fn get_app_setting(workspace: State<WorkspaceState>, key: String) -> Result<Option<String>, String> {
-    let conn = workspace.lock()
+fn get_app_setting(
+    workspace: State<WorkspaceState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
-    
+
     db.get_app_setting(&key)
         .map_err(|e| format!("Failed to get app setting: {}", e))
 }
 
 // 複数のアプリケーション設定の取得
 #[tauri::command]
-fn get_app_settings(workspace: State<WorkspaceState>, keys: Vec<String>) -> Result<std::collections::HashMap<String, String>, String> {
-    let conn = workspace.lock()
+fn get_app_settings(
+    workspace: State<WorkspaceState>,
+    keys: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
     let db = conn.get()?;
     let keys_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
@@ -637,30 +888,35 @@ fn get_app_settings(workspace: State<WorkspaceState>, keys: Vec<String>) -> Resu
 fn start_folder_watching(
     state: State<AppState>,
     workspace: State<WorkspaceState>,
-    watch_path: String
+    watch_path: String,
 ) -> Result<(), String> {
     // 現在のワークスペースパスを取得（絶対パス）
-    let conn = workspace.lock()
+    let conn = workspace
+        .lock()
         .map_err(|_| "ワークスペース接続のロックに失敗しました".to_string())?;
-    
-    println!("[Rust] start_folder_watching - current_path: {:?}", conn.current_path);
-    
-    let workspace_path = conn.current_path.as_ref()
+
+    println!(
+        "[Rust] start_folder_watching - current_path: {:?}",
+        conn.current_path
+    );
+
+    let workspace_path = conn
+        .current_path
+        .as_ref()
         .ok_or("ワークスペースが選択されていません".to_string())?
-        .parent()  // .nuriemonディレクトリの親を取得
-        .and_then(|p| p.parent())  // nuriemon.dbの親の親
+        .parent() // .nuriemonディレクトリの親を取得
+        .and_then(|p| p.parent()) // nuriemon.dbの親の親
         .ok_or("ワークスペースパスの取得に失敗しました".to_string())?
         .to_string_lossy()
         .to_string();
-    
+
     println!("[Rust] start_folder_watching - watch_path: {}", watch_path);
-    println!("[Rust] start_folder_watching - workspace_path: {}", workspace_path);
-    
-    file_watcher::start_folder_watching(
-        state.app_handle.clone(),
-        watch_path,
+    println!(
+        "[Rust] start_folder_watching - workspace_path: {}",
         workspace_path
-    )
+    );
+
+    file_watcher::start_folder_watching(state.app_handle.clone(), watch_path, workspace_path)
 }
 
 // フォルダ監視の停止
@@ -720,11 +976,12 @@ fn generate_qr_code(
     image_id: String,
     server_state: State<'_, ServerState>,
 ) -> Result<serde_json::Value, String> {
-    let qr_manager = server_state.get_qr_manager()
+    let qr_manager = server_state
+        .get_qr_manager()
         .ok_or("Webサーバーが起動していません".to_string())?;
-    
+
     let (session_id, qr_code) = qr_manager.create_session(&image_id);
-    
+
     Ok(serde_json::json!({
         "sessionId": session_id,
         "qrCode": qr_code,
@@ -738,9 +995,10 @@ fn get_qr_session_status(
     session_id: String,
     server_state: State<'_, ServerState>,
 ) -> Result<serde_json::Value, String> {
-    let qr_manager = server_state.get_qr_manager()
+    let qr_manager = server_state
+        .get_qr_manager()
         .ok_or("Webサーバーが起動していません".to_string())?;
-    
+
     if let Some((connected, remaining)) = qr_manager.get_session_status(&session_id) {
         Ok(serde_json::json!({
             "connected": connected,
@@ -754,8 +1012,8 @@ fn get_qr_session_status(
 // 任意文字列からQRコード（data URI）を生成（Relay用のURL等）
 #[tauri::command]
 fn generate_qr_from_text(text: String) -> Result<String, String> {
-    use qrcode::{QrCode, Color};
     use base64::{engine::general_purpose, Engine as _};
+    use qrcode::{Color, QrCode};
 
     let code = QrCode::new(text).map_err(|e| format!("QR_ENCODE_ERROR: {}", e))?;
     let size = code.width();
@@ -783,24 +1041,29 @@ fn generate_qr_from_text(text: String) -> Result<String, String> {
 async fn open_animation_window(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::webview::WebviewWindowBuilder;
     use tauri::WebviewUrl;
-    
+
     // すでにウィンドウが存在する場合は前面に表示
     if let Some(window) = app.get_webview_window("animation") {
-        window.show().map_err(|e| format!("ウィンドウの表示に失敗しました: {}", e))?;
-        window.set_focus().map_err(|e| format!("ウィンドウのフォーカスに失敗しました: {}", e))?;
+        window
+            .show()
+            .map_err(|e| format!("ウィンドウの表示に失敗しました: {}", e))?;
+        window
+            .set_focus()
+            .map_err(|e| format!("ウィンドウのフォーカスに失敗しました: {}", e))?;
         return Ok(());
     }
-    
+
     // 新しいウィンドウを作成
-    let _window = WebviewWindowBuilder::new(&app, "animation", WebviewUrl::App("#/animation".into()))
-        .inner_size(1024.0, 768.0)
-        .title("ぬりえもん - アニメーション")
-        .resizable(true)
-        .build()
-        .map_err(|e| format!("アニメーションウィンドウの作成に失敗しました: {}", e))?;
-    
+    let _window =
+        WebviewWindowBuilder::new(&app, "animation", WebviewUrl::App("#/animation".into()))
+            .inner_size(1024.0, 768.0)
+            .title("ぬりえもん - アニメーション")
+            .resizable(true)
+            .build()
+            .map_err(|e| format!("アニメーションウィンドウの作成に失敗しました: {}", e))?;
+
     // DevTools はデフォルトで開かない（ショートカットで開閉）
-    
+
     Ok(())
 }
 
@@ -808,28 +1071,26 @@ async fn open_animation_window(app: tauri::AppHandle) -> Result<(), String> {
 async fn open_qr_window(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::webview::WebviewWindowBuilder;
     use tauri::WebviewUrl;
-    
+
     // すでにウィンドウが存在する場合は前面に表示
     if let Some(window) = app.get_webview_window("qr-display") {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
-    
+
     // 新しいウィンドウを作成（SPAルート #/qr を表示）
-    let window = WebviewWindowBuilder::new(
-        &app,
-        "qr-display",
-        WebviewUrl::App("#/qr".into())
-    )
-    .title("QRコード - ぬりえもん")
-    .inner_size(900.0, 700.0)
-    .resizable(true)
-    .build()
-    .map_err(|e| format!("ウィンドウの作成に失敗しました: {}", e))?;
+    let window = WebviewWindowBuilder::new(&app, "qr-display", WebviewUrl::App("#/qr".into()))
+        .title("QRコード - ぬりえもん")
+        .inner_size(900.0, 700.0)
+        .resizable(true)
+        .build()
+        .map_err(|e| format!("ウィンドウの作成に失敗しました: {}", e))?;
     #[cfg(debug_assertions)]
-    { window.open_devtools(); }
-    
+    {
+        window.open_devtools();
+    }
+
     Ok(())
 }
 
@@ -877,13 +1138,13 @@ pub fn run() {
             let app_state = AppState {
                 app_handle: app.handle().clone(),
             };
-            
+
             // ワークスペース接続の初期化
             let workspace_connection = WorkspaceState::new(WorkspaceConnection::new());
-            
+
             // サーバー状態の初期化
             let server_state = ServerState::new();
-            
+
             app.manage(app_state);
             app.manage(workspace_connection);
             app.manage(server_state);
@@ -897,9 +1158,15 @@ pub fn run() {
             // Try to locate bundled sidecar binary in resource_dir and expose via env var for spawn_python_process.
             if let Ok(dir) = app.path().resource_dir() {
                 #[cfg(target_os = "windows")]
-                let candidates = [dir.join("python-sidecar.exe"), dir.join("sidecar").join("python-sidecar.exe")];
+                let candidates = [
+                    dir.join("python-sidecar.exe"),
+                    dir.join("sidecar").join("python-sidecar.exe"),
+                ];
                 #[cfg(not(target_os = "windows"))]
-                let candidates = [dir.join("python-sidecar"), dir.join("sidecar").join("python-sidecar")];
+                let candidates = [
+                    dir.join("python-sidecar"),
+                    dir.join("sidecar").join("python-sidecar"),
+                ];
                 for p in candidates.iter() {
                     if p.exists() && p.is_file() {
                         std::env::set_var("NURIEMON_SIDECAR", p.to_string_lossy().to_string());
@@ -927,7 +1194,8 @@ pub fn run() {
                         let target_h = current_h.min(mon_h * 0.9).round();
 
                         // サイズを設定（論理サイズ指定）
-                        let _ = main_win.set_size(Size::Logical(LogicalSize::new(target_w, target_h)));
+                        let _ =
+                            main_win.set_size(Size::Logical(LogicalSize::new(target_w, target_h)));
                         // 画面内に収まるように位置を計算（中央寄せしつつクランプ）
                         // 配置座標（論理）
                         // モニタの左上座標（論理）
@@ -944,18 +1212,19 @@ pub fn run() {
                         let max_y = mon_y + (mon_h - target_h).max(0.0);
                         let x = ideal_x.clamp(min_x, max_x);
                         let y = ideal_y.clamp(min_y, max_y);
-                        let _ = main_win.set_position(Position::Logical(LogicalPosition::new(x, y)));
+                        let _ =
+                            main_win.set_position(Position::Logical(LogicalPosition::new(x, y)));
                     }
                     _ => {
                         // モニタ取得に失敗した場合は既定の高さで幅のみ90%相当を推定しない（安全に何もしない）
                     }
                 }
             }
-            
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet, 
+            greet,
             process_image,
             warmup_python,
             ensure_directory,
@@ -1001,12 +1270,12 @@ pub fn run() {
             generate_qr_from_text,
             get_qr_session_status,
             open_qr_window,
-            open_animation_window
-            ,save_license_token
-            ,load_license_token
-            ,delete_license_token
-            ,open_devtools
-            ,toggle_devtools
+            open_animation_window,
+            save_license_token,
+            load_license_token,
+            delete_license_token,
+            open_devtools,
+            toggle_devtools
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1047,10 +1316,16 @@ fn read_bundle_global_settings(app: tauri::AppHandle) -> Result<Option<String>, 
 
 #[tauri::command]
 fn read_user_provisioning_settings(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    let dir = app.path().app_config_dir().map_err(|e| format!("app_config_dir error: {}", e))?;
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("app_config_dir error: {}", e))?;
     let path = dir.join("global_settings.json");
-    if !path.exists() { return Ok(None); }
-    let s = std::fs::read_to_string(&path).map_err(|e| format!("read provisioning failed: {}", e))?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let s =
+        std::fs::read_to_string(&path).map_err(|e| format!("read provisioning failed: {}", e))?;
     Ok(Some(s))
 }
 
@@ -1066,14 +1341,18 @@ fn set_user_event_id(app: tauri::AppHandle, event_id: String) -> Result<(), Stri
     let mut root: serde_json::Value = if path.exists() {
         let s = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());
         serde_json::from_str(&s).unwrap_or(serde_json::json!({}))
-    } else { serde_json::json!({}) };
+    } else {
+        serde_json::json!({})
+    };
     // relay オブジェクトを確保し、eventId を設定
     if !root.get("relay").is_some() || !root.get("relay").unwrap().is_object() {
         root["relay"] = serde_json::json!({});
     }
     root["relay"]["eventId"] = serde_json::Value::String(event_id.trim().to_string());
     // ディレクトリ作成
-    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| format!("create_dir_all error: {}", e))?; }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create_dir_all error: {}", e))?;
+    }
     // 保存（pretty）
     let pretty = serde_json::to_string_pretty(&root).map_err(|e| format!("json error: {}", e))?;
     std::fs::write(&path, pretty).map_err(|e| format!("write error: {}", e))?;
@@ -1085,7 +1364,8 @@ fn read_env_provisioning_settings() -> Result<Option<String>, String> {
     if let Ok(p) = std::env::var("NURIEMON_GLOBAL_SETTINGS_PATH") {
         let path = std::path::PathBuf::from(p);
         if path.exists() {
-            let s = std::fs::read_to_string(&path).map_err(|e| format!("read env provisioning failed: {}", e))?;
+            let s = std::fs::read_to_string(&path)
+                .map_err(|e| format!("read env provisioning failed: {}", e))?;
             return Ok(Some(s));
         }
     }
@@ -1109,7 +1389,9 @@ fn read_env_overrides() -> Result<Option<String>, String> {
         obj["defaults"]["operationMode"] = serde_json::Value::String(v);
     }
     let s = serde_json::to_string(&obj).map_err(|e| format!("json error: {}", e))?;
-    if s == "{}" { return Ok(None); }
+    if s == "{}" {
+        return Ok(None);
+    }
     Ok(Some(s))
 }
 
@@ -1126,7 +1408,8 @@ fn save_license_token(token: String) -> Result<(), String> {
 #[tauri::command]
 fn load_license_token() -> Result<Option<String>, String> {
     let (service, account) = license_token_account();
-    let entry = Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
+    let entry =
+        Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
     match entry.get_password() {
         Ok(pw) => Ok(Some(pw)),
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -1137,7 +1420,8 @@ fn load_license_token() -> Result<Option<String>, String> {
 #[tauri::command]
 fn delete_license_token() -> Result<(), String> {
     let (service, account) = license_token_account();
-    let entry = Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
+    let entry =
+        Entry::new(&service, &account).map_err(|e| format!("KEYCHAIN_INIT_ERROR: {}", e))?;
     match entry.delete_password() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(format!("KEYCHAIN_DELETE_ERROR: {}", e)),
@@ -1166,31 +1450,47 @@ fn migrate_case_variant_dir(target_dir: &std::path::Path) -> Result<(), String> 
     use std::fs;
     use std::path::PathBuf;
 
-    let Some(parent) = target_dir.parent() else { return Ok(()); };
-    let Some(target_name) = target_dir.file_name().and_then(|s| s.to_str()) else { return Ok(()); };
+    let Some(parent) = target_dir.parent() else {
+        return Ok(());
+    };
+    let Some(target_name) = target_dir.file_name().and_then(|s| s.to_str()) else {
+        return Ok(());
+    };
 
     // 探索: 親ディレクトリ配下で、大文字小文字のみ異なる候補を探す
     let mut legacy_dir: Option<PathBuf> = None;
     for entry in fs::read_dir(parent).map_err(|e| format!("read_dir error: {}", e))? {
         let entry = entry.map_err(|e| format!("read_dir entry error: {}", e))?;
-        if !entry.file_type().map_err(|e| format!("file_type error: {}", e))?.is_dir() {
+        if !entry
+            .file_type()
+            .map_err(|e| format!("file_type error: {}", e))?
+            .is_dir()
+        {
             continue;
         }
         let name_os = entry.file_name();
-        let Some(name) = name_os.to_str() else { continue; };
+        let Some(name) = name_os.to_str() else {
+            continue;
+        };
         if name.eq_ignore_ascii_case(target_name) && name != target_name {
             legacy_dir = Some(entry.path());
             break;
         }
     }
 
-    let Some(legacy_dir) = legacy_dir else { return Ok(()); };
+    let Some(legacy_dir) = legacy_dir else {
+        return Ok(());
+    };
     let legacy_file = legacy_dir.join("global_settings.json");
-    if !legacy_file.exists() { return Ok(()); }
+    if !legacy_file.exists() {
+        return Ok(());
+    }
 
     let target_file = target_dir.join("global_settings.json");
     // 既に新パスに存在するなら移行不要
-    if target_file.exists() { return Ok(()); }
+    if target_file.exists() {
+        return Ok(());
+    }
 
     // 新ディレクトリを作成
     if let Some(parent) = target_file.parent() {
@@ -1207,10 +1507,8 @@ fn migrate_case_variant_dir(target_dir: &std::path::Path) -> Result<(), String> 
         }
         Err(_e) => {
             // フォールバック: copy + remove_file
-            fs::copy(&legacy_file, &target_file)
-                .map_err(|e| format!("copy failed: {}", e))?;
-            fs::remove_file(&legacy_file)
-                .map_err(|e| format!("remove legacy failed: {}", e))?;
+            fs::copy(&legacy_file, &target_file).map_err(|e| format!("copy failed: {}", e))?;
+            fs::remove_file(&legacy_file).map_err(|e| format!("remove legacy failed: {}", e))?;
             eprintln!("[migration] copied {:?} -> {:?}", legacy_file, target_file);
             Ok(())
         }
@@ -1242,7 +1540,9 @@ fn toggle_devtools(window_label: Option<String>, app: tauri::AppHandle) -> Resul
     if let Some(win) = app.get_webview_window(&label) {
         #[cfg(debug_assertions)]
         {
-            let mut map = DEVTOOLS_OPEN.lock().map_err(|_| "devtools state lock".to_string())?;
+            let mut map = DEVTOOLS_OPEN
+                .lock()
+                .map_err(|_| "devtools state lock".to_string())?;
             let is_open = *map.get(&label).unwrap_or(&false);
             if is_open {
                 // 閉じる

@@ -1,10 +1,10 @@
+use crate::server_state::ServerState;
+use crate::web_server::WebServerState;
 use actix_web::{web, Error, HttpRequest, HttpResponse};
-use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use crate::web_server::WebServerState;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
-use crate::server_state::ServerState;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct WebSocketMessage {
@@ -25,10 +25,13 @@ pub async fn websocket_handler(
     data: web::Data<WebServerState>,
 ) -> Result<HttpResponse, Error> {
     let (res, mut session, stream) = actix_ws::handle(&req, stream)?;
-    
+
     let app_handle = data.app_handle.clone();
-    println!("[websocket] WS connection established from {:?}", req.peer_addr());
-    
+    println!(
+        "[websocket] WS connection established from {:?}",
+        req.peer_addr()
+    );
+
     actix_web::rt::spawn(async move {
         let mut stream = stream
             .aggregate_continuations()
@@ -46,7 +49,7 @@ pub async fn websocket_handler(
                         Ok(actix_ws::AggregatedMessage::Text(text)) => {
                             println!("[websocket] Received text: {}", text);
                             last_heartbeat = Instant::now();
-                            
+
                             // メッセージをパース
                             if let Ok(ws_msg) = serde_json::from_str::<WebSocketMessage>(&text) {
                                 handle_websocket_message(&app_handle, ws_msg, &mut session).await;
@@ -76,7 +79,7 @@ pub async fn websocket_handler(
                         println!("WebSocketクライアントがタイムアウトしました");
                         break;
                     }
-                    
+
                     if session.ping(b"ping").await.is_err() {
                         break;
                     }
@@ -106,70 +109,112 @@ async fn handle_websocket_message(
                         // imageId一致チェック（提供されている場合）
                         if let Some(img) = provided_image_id {
                             if img != valid_image_id {
-                                let _ = session.text(serde_json::json!({
-                                    "type": "error",
-                                    "message": "imageId mismatch"
-                                }).to_string()).await;
+                                let _ = session
+                                    .text(
+                                        serde_json::json!({
+                                            "type": "error",
+                                            "message": "imageId mismatch"
+                                        })
+                                        .to_string(),
+                                    )
+                                    .await;
                                 return;
                             }
                         }
 
                         // 接続完了通知（レガシー互換: connected）
-                        let _ = session.text(serde_json::json!({
-                            "type": "connected",
-                            "imageId": valid_image_id
-                        }).to_string()).await;
+                        let _ = session
+                            .text(
+                                serde_json::json!({
+                                    "type": "connected",
+                                    "imageId": valid_image_id
+                                })
+                                .to_string(),
+                            )
+                            .await;
 
                         // Tauriイベントを発火（QRウィンドウ等へ通知）
-                        let _ = app_handle.emit("mobile-connected", serde_json::json!({
-                            "sessionId": session_id,
-                            "imageId": valid_image_id,
-                        }));
+                        let _ = app_handle.emit(
+                            "mobile-connected",
+                            serde_json::json!({
+                                "sessionId": session_id,
+                                "imageId": valid_image_id,
+                            }),
+                        );
                     } else {
-                        let _ = session.text(serde_json::json!({
-                            "type": "error",
-                            "message": "invalid or expired session"
-                        }).to_string()).await;
+                        let _ = session
+                            .text(
+                                serde_json::json!({
+                                    "type": "error",
+                                    "message": "invalid or expired session"
+                                })
+                                .to_string(),
+                            )
+                            .await;
                     }
                 }
             }
         }
         "join" => {
             // Relay互換のハンドシェイク（ackを返す）
-            let sid_opt = msg.sid.as_deref().or_else(|| msg.payload.get("sid").and_then(|v| v.as_str()));
+            let sid_opt = msg
+                .sid
+                .as_deref()
+                .or_else(|| msg.payload.get("sid").and_then(|v| v.as_str()));
             if let Some(sid) = sid_opt {
-                let provided_image_id = msg.image_id_top.as_deref()
+                let provided_image_id = msg
+                    .image_id_top
+                    .as_deref()
                     .or_else(|| msg.payload.get("imageId").and_then(|v| v.as_str()));
                 let state: tauri::State<ServerState> = app_handle.state();
                 if let Some(qr_manager) = state.get_qr_manager() {
                     if let Some(valid_image_id) = qr_manager.validate_session(sid) {
                         if let Some(img) = provided_image_id {
                             if img != valid_image_id {
-                                let _ = session.text(serde_json::json!({
-                                    "type": "ack",
-                                    "ok": false,
-                                    "error": "imageId mismatch"
-                                }).to_string()).await; return;
+                                let _ = session
+                                    .text(
+                                        serde_json::json!({
+                                            "type": "ack",
+                                            "ok": false,
+                                            "error": "imageId mismatch"
+                                        })
+                                        .to_string(),
+                                    )
+                                    .await;
+                                return;
                             }
                         }
                         // ack
-                        let _ = session.text(serde_json::json!({
-                            "type": "ack",
-                            "ok": true
-                        }).to_string()).await;
+                        let _ = session
+                            .text(
+                                serde_json::json!({
+                                    "type": "ack",
+                                    "ok": true
+                                })
+                                .to_string(),
+                            )
+                            .await;
                         // 通知
-                        let _ = app_handle.emit("mobile-connected", serde_json::json!({
-                            "sessionId": sid,
-                            "imageId": valid_image_id,
-                        }));
+                        let _ = app_handle.emit(
+                            "mobile-connected",
+                            serde_json::json!({
+                                "sessionId": sid,
+                                "imageId": valid_image_id,
+                            }),
+                        );
                         return;
                     }
                 }
-                let _ = session.text(serde_json::json!({
-                    "type": "ack",
-                    "ok": false,
-                    "error": "invalid or expired session"
-                }).to_string()).await;
+                let _ = session
+                    .text(
+                        serde_json::json!({
+                            "type": "ack",
+                            "ok": false,
+                            "error": "invalid or expired session"
+                        })
+                        .to_string(),
+                    )
+                    .await;
             }
         }
         "cmd" => {
@@ -181,33 +226,56 @@ async fn handle_websocket_message(
         "evt" => {
             // さらにレガシー: { type: 'evt', echo: { type: 'cmd', payload: { cmd } } }
             if let Some(echo) = msg.payload.get("echo") {
-                let cmd = echo.get("payload").and_then(|p| p.get("cmd")).and_then(|v| v.as_str());
+                let cmd = echo
+                    .get("payload")
+                    .and_then(|p| p.get("cmd"))
+                    .and_then(|v| v.as_str());
                 if let Some(c) = cmd {
-                    handle_cmd_string(app_handle, session, c, echo.get("payload").and_then(|p| p.get("imageId"))).await;
+                    handle_cmd_string(
+                        app_handle,
+                        session,
+                        c,
+                        echo.get("payload").and_then(|p| p.get("imageId")),
+                    )
+                    .await;
                 }
             }
         }
         "move" => {
             // 移動コマンドの処理
             if let Some(direction) = msg.payload.get("direction").and_then(|v| v.as_str()) {
-                let action = msg.payload.get("action").and_then(|v| v.as_str()).unwrap_or("pulse");
-                let _ = app_handle.emit("mobile-control", serde_json::json!({
-                    "type": "move",
-                    "direction": direction,
-                    "action": action,
-                    "imageId": msg.payload.get("imageId"),
-                }));
+                let action = msg
+                    .payload
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("pulse");
+                let _ = app_handle.emit(
+                    "mobile-control",
+                    serde_json::json!({
+                        "type": "move",
+                        "direction": direction,
+                        "action": action,
+                        "imageId": msg.payload.get("imageId"),
+                    }),
+                );
             }
         }
         "action" => {
             // アクションコマンドの処理
             if let Some(action_type) = msg.payload.get("actionType").and_then(|v| v.as_str()) {
-                println!("[websocket] action received: {:?} for imageId={:?}", action_type, msg.payload.get("imageId"));
-                let _ = app_handle.emit("mobile-control", serde_json::json!({
-                    "type": "action",
-                    "actionType": action_type,
-                    "imageId": msg.payload.get("imageId"),
-                }));
+                println!(
+                    "[websocket] action received: {:?} for imageId={:?}",
+                    action_type,
+                    msg.payload.get("imageId")
+                );
+                let _ = app_handle.emit(
+                    "mobile-control",
+                    serde_json::json!({
+                        "type": "action",
+                        "actionType": action_type,
+                        "imageId": msg.payload.get("imageId"),
+                    }),
+                );
             }
         }
         "emote" => {
@@ -223,12 +291,19 @@ async fn handle_websocket_message(
                     "paper" | "hand" | "pa" | "🖐" => "🖐",
                     _ => emote_type,
                 };
-                println!("[websocket] emote received: {:?} for imageId={:?}", emote_type, msg.payload.get("imageId"));
-                let _ = app_handle.emit("mobile-control", serde_json::json!({
-                    "type": "emote",
-                    "emoteType": emote_type,
-                    "imageId": msg.payload.get("imageId"),
-                }));
+                println!(
+                    "[websocket] emote received: {:?} for imageId={:?}",
+                    emote_type,
+                    msg.payload.get("imageId")
+                );
+                let _ = app_handle.emit(
+                    "mobile-control",
+                    serde_json::json!({
+                        "type": "emote",
+                        "emoteType": emote_type,
+                        "imageId": msg.payload.get("imageId"),
+                    }),
+                );
             }
         }
         "keepalive" => {
@@ -253,11 +328,14 @@ async fn handle_cmd_string(
 ) {
     // cmd 例: 'jump', 'left', 'move/start/right', 'emote:happy'
     if let Some(rest) = cmd.strip_prefix("emote:") {
-        let _ = app_handle.emit("mobile-control", serde_json::json!({
-            "type": "emote",
-            "emoteType": rest,
-            "imageId": image_id_val,
-        }));
+        let _ = app_handle.emit(
+            "mobile-control",
+            serde_json::json!({
+                "type": "emote",
+                "emoteType": rest,
+                "imageId": image_id_val,
+            }),
+        );
         return;
     }
 
@@ -271,32 +349,41 @@ async fn handle_cmd_string(
                 "stop" | "end" => "stop",
                 other => other,
             };
-            let _ = app_handle.emit("mobile-control", serde_json::json!({
-                "type": "move",
-                "direction": direction,
-                "action": normalized_action,
-                "imageId": image_id_val,
-            }));
+            let _ = app_handle.emit(
+                "mobile-control",
+                serde_json::json!({
+                    "type": "move",
+                    "direction": direction,
+                    "action": normalized_action,
+                    "imageId": image_id_val,
+                }),
+            );
             return;
         }
     }
 
     match cmd {
         "left" | "right" | "up" | "down" => {
-            let _ = app_handle.emit("mobile-control", serde_json::json!({
-                "type": "move",
-                "direction": cmd,
-                "action": "pulse",
-                "imageId": image_id_val,
-            }));
+            let _ = app_handle.emit(
+                "mobile-control",
+                serde_json::json!({
+                    "type": "move",
+                    "direction": cmd,
+                    "action": "pulse",
+                    "imageId": image_id_val,
+                }),
+            );
         }
         // その他はアクション扱い
         other => {
-            let _ = app_handle.emit("mobile-control", serde_json::json!({
-                "type": "action",
-                "actionType": other,
-                "imageId": image_id_val,
-            }));
+            let _ = app_handle.emit(
+                "mobile-control",
+                serde_json::json!({
+                    "type": "action",
+                    "actionType": other,
+                    "imageId": image_id_val,
+                }),
+            );
         }
     }
 }

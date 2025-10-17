@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
-use tauri::{AppHandle, Manager, Emitter};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::ImageMetadata;
 
@@ -95,9 +95,14 @@ pub fn emit_data_change(app_handle: &AppHandle, event: DataChangeEvent) -> Resul
 
 // 特定のウィンドウにイベントを送信
 #[allow(dead_code)]
-pub fn emit_to_window(app_handle: &AppHandle, window_label: &str, event: DataChangeEvent) -> Result<(), String> {
+pub fn emit_to_window(
+    app_handle: &AppHandle,
+    window_label: &str,
+    event: DataChangeEvent,
+) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window(window_label) {
-        window.emit("data-changed", &event)
+        window
+            .emit("data-changed", &event)
             .map_err(|e| format!("Failed to emit event to window: {}", e))
     } else {
         Err(format!("Window '{}' not found", window_label))

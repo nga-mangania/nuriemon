@@ -354,8 +354,10 @@
 │   │   ├── global_settings.studio.json
 │   │   ├── ja.lproj
 │   │   │   └── InfoPlist.strings
-│   │   └── python-sidecar
-│   │       └── README.txt
+│   │   ├── python-sidecar-fallback
+│   │   │   └── README.txt
+│   │   └── python-sidecar-models
+│   │       └── u2net.onnx
 │   ├── src
 │   │   ├── db.rs
 │   │   ├── events.rs
@@ -1067,3 +1069,10 @@ async function sendMailViaMailchannels(from: string, to: string, subject: string
 # 2025/09/24 追記
 なるべく開発環境と本番で異なる挙動にならないように注意する。
 (開発ではライセンスコード不要で、本番は必要など)
+
+
+ビルド方法
+1
+export APPLE_DEVELOPER_ID="Developer ID Application: NGA, Inc. (87KUWA497A)"
+2
+./scripts/build-macos-dmg.sh

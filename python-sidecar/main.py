@@ -3,10 +3,45 @@ import sys
 import json
 import base64
 import io
+import os
+from pathlib import Path
+from typing import Optional
 from rembg import remove, new_session
 from PIL import Image, ImageEnhance
 import cv2
 import numpy as np
+
+
+def configure_model_home() -> Optional[Path]:
+    candidates = []
+    for env_key in ("U2NET_HOME", "RMBG_SESSION_PATH"):
+        env_val = os.environ.get(env_key)
+        if env_val:
+            candidates.append(Path(env_val))
+
+    if hasattr(sys, "_MEIPASS"):
+        base = Path(getattr(sys, "_MEIPASS"))
+        candidates.append(base / "python-sidecar-models")
+        candidates.append(base / "models")
+
+    script_dir = Path(__file__).resolve().parent
+    candidates.append(script_dir / "models")
+    candidates.append(script_dir / "python-sidecar-models")
+    candidates.append((script_dir / "../python-sidecar-models").resolve())
+    candidates.append((script_dir / "../models").resolve())
+
+    for cand in candidates:
+        try:
+            if cand and cand.exists():
+                os.environ["U2NET_HOME"] = str(cand)
+                os.environ["RMBG_SESSION_PATH"] = str(cand)
+                return cand
+        except Exception:
+            continue
+    return None
+
+
+MODEL_HOME = configure_model_home()
 
 # セッションを初期化（起動時に一度だけ）
 session = new_session("u2net")

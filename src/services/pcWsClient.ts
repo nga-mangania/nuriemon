@@ -1,5 +1,6 @@
 import { emit } from '@tauri-apps/api/event';
 import { loadDeviceToken } from './licenseClient';
+import { GlobalSettingsService } from './globalSettings';
 import { resolveBaseUrl, registerPc, retryWithBackoff } from './relayClient';
 import { loadImage } from './imageStorage';
 import { DatabaseService } from './database';
@@ -26,10 +27,40 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
       return;
     }
 
+    let eventId = params.eventId;
+    if (!eventId) {
+      eventId = await GlobalSettingsService.ensureEventId();
+      params.eventId = eventId;
+    } else {
+      const storedEventId = await GlobalSettingsService.get('relay_event_id');
+      if (!storedEventId) {
+        try {
+          await GlobalSettingsService.save('relay_event_id', eventId);
+          GlobalSettingsService.reset();
+          await GlobalSettingsService.loadEffective();
+        } catch {}
+      }
+    }
+
+    if (!params.pcid) {
+      const eff = GlobalSettingsService.getEffective() || await GlobalSettingsService.loadEffective();
+      params.pcid = eff?.relay?.pcId || (await GlobalSettingsService.get('pcid')) || params.pcid;
+      if (!params.pcid) {
+        await GlobalSettingsService.ensureEventId();
+        const refreshed = GlobalSettingsService.getEffective() || await GlobalSettingsService.loadEffective();
+        params.pcid = refreshed?.relay?.pcId || params.pcid;
+      }
+    }
+    const pcid = params.pcid;
+    if (!pcid) {
+      emit('pc-bridge-status', { state: 'error', detail: 'pcid missing' });
+      return;
+    }
+
     const base = await resolveBaseUrl();
     // 事前にPCを登録（リージョンピン/整合のため）
     try {
-      const res = await retryWithBackoff(() => registerPc({ eventId: params.eventId, pcid: params.pcid }));
+      const res = await retryWithBackoff(() => registerPc({ eventId, pcid }));
       if (!res.ok) {
         emit('pc-bridge-status', { state: 'error', detail: 'register-pc failed', res });
       } else {
@@ -38,7 +69,7 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
     } catch (e) {
       emit('pc-bridge-status', { state: 'error', detail: 'register-pc exception', e: String(e) });
     }
-    const url = base.replace(/^http/i, 'ws') + `/e/${encodeURIComponent(params.eventId)}/ws`;
+    const url = base.replace(/^http/i, 'ws') + `/e/${encodeURIComponent(eventId)}/ws`;
     try {
       const protocols = [`bearer.${bearer}`, 'v1'];
       ws = new WebSocket(url, protocols as any);
@@ -51,7 +82,7 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
       console.log('[pcWsClient] ws open:', url, 'protocol=', ws?.protocol);
       emit('pc-bridge-status', { state: 'open', url });
       try {
-        const authMsg = { v: 1, type: 'pc-auth', op: 'ws-auth-bearer', token: bearer, pcid: params.pcid };
+        const authMsg = { v: 1, type: 'pc-auth', op: 'ws-auth-bearer', token: bearer, pcid };
         ws!.send(JSON.stringify(authMsg));
         console.log('[pcWsClient] pc-auth (jwt) sent');
         emit('pc-bridge-status', { state: 'auth-sent', mode: 'jwt' });
@@ -60,7 +91,7 @@ export function createPcWsClient(params: { eventId: string; pcid: string }): PcW
           try {
             if (!connected && ws && ws.readyState === ws.OPEN) {
               console.warn('[pcWsClient] pc-ack timeout, sending fallback pc-hello');
-              ws.send(JSON.stringify({ type: 'pc-hello', v: 1, pcid: params.pcid }));
+              ws.send(JSON.stringify({ type: 'pc-hello', v: 1, pcid }));
             }
           } catch {}
         }, 1500);

@@ -1,10 +1,10 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Error, middleware, HttpRequest};
 use actix_web::http::header;
+use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer};
+use local_ip_address::local_ip;
 use rust_embed::RustEmbed;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
-use local_ip_address::local_ip;
-use std::path::{Path, PathBuf};
 
 use crate::workspace::WorkspaceState;
 
@@ -17,21 +17,23 @@ pub struct WebServerState {
     pub port: u16,
 }
 
-pub async fn start_web_server(app_handle: AppHandle) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn start_web_server(
+    app_handle: AppHandle,
+) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
     let app_handle = Arc::new(app_handle);
-    
+
     // ポートを自動選択（8080-8090の範囲で利用可能なポートを探す）
     let mut last_error = None;
-    
+
     for port in 8080..=8090 {
         let app_handle_clone = app_handle.clone();
-        
+
         let server = HttpServer::new(move || {
             let state = WebServerState {
                 app_handle: app_handle_clone.clone(),
                 port,
             };
-            
+
             App::new()
                 .app_data(web::Data::new(state))
                 .wrap(middleware::Logger::default())
@@ -40,19 +42,21 @@ pub async fn start_web_server(app_handle: AppHandle) -> Result<u16, Box<dyn std:
                 .service(web::resource("/app").route(web::get().to(serve_mobile)))
                 .service(web::resource("/image/{id}").route(web::get().to(serve_image_by_id)))
                 .service(web::resource("/api/connect").route(web::post().to(handle_connect)))
-                .service(web::resource("/ws").route(web::get().to(crate::websocket::websocket_handler)))
+                .service(
+                    web::resource("/ws").route(web::get().to(crate::websocket::websocket_handler)),
+                )
                 .default_service(web::route().to(serve_static))
         })
         .bind(("0.0.0.0", port));
-        
+
         match server {
             Ok(server) => {
                 println!("Webサーバーを起動しました: http://{}:{}", local_ip()?, port);
-                
+
                 // Tauriのランタイム上でサーバーを起動
                 let server_handle = server.run();
                 tauri::async_runtime::spawn(server_handle);
-                
+
                 return Ok(port);
             }
             Err(e) => {
@@ -61,7 +65,7 @@ pub async fn start_web_server(app_handle: AppHandle) -> Result<u16, Box<dyn std:
             }
         }
     }
-    
+
     Err(format!("利用可能なポートが見つかりません: {:?}", last_error).into())
 }
 
@@ -82,7 +86,7 @@ async fn serve_static(req: HttpRequest, path: web::Path<String>) -> Result<HttpR
 
 fn serve_embedded_file(path: &str) -> Result<HttpResponse, Error> {
     let path = path.trim_start_matches('/');
-    
+
     // プレフィックス有無の両方を試す（後方互換）
     let asset = MobileAssets::get(path).or_else(|| MobileAssets::get(&format!("/{}", path)));
 
@@ -96,9 +100,7 @@ fn serve_embedded_file(path: &str) -> Result<HttpResponse, Error> {
                     .insert_header((header::CONTENT_TYPE, "text/html; charset=utf-8"))
                     .body(body))
             } else {
-                Ok(HttpResponse::Ok()
-                    .content_type(mime.to_string())
-                    .body(body))
+                Ok(HttpResponse::Ok().content_type(mime.to_string()).body(body))
             }
         }
         None => Ok(HttpResponse::NotFound()
@@ -117,9 +119,9 @@ async fn serve_image_by_id(
 
     // ワークスペースDBにアクセスしてメタデータを取得
     let state: tauri::State<WorkspaceState> = data.app_handle.state();
-    let conn = state
-        .lock()
-        .map_err(|_| actix_web::error::ErrorInternalServerError("ワークスペース接続のロックに失敗"))?;
+    let conn = state.lock().map_err(|_| {
+        actix_web::error::ErrorInternalServerError("ワークスペース接続のロックに失敗")
+    })?;
     let db = conn
         .get()
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
@@ -167,19 +169,26 @@ async fn handle_connect(
 ) -> Result<HttpResponse, Error> {
     println!("[web_server] POST /api/connect body={}", body);
     // 接続リクエストの処理
-    let session_id = body.get("sessionId")
+    let session_id = body
+        .get("sessionId")
         .and_then(|v| v.as_str())
         .ok_or_else(|| actix_web::error::ErrorBadRequest("sessionIdが必要です"))?;
-    
-    let image_id = body.get("imageId")
+
+    let image_id = body
+        .get("imageId")
         .and_then(|v| v.as_str())
         .ok_or_else(|| actix_web::error::ErrorBadRequest("imageIdが必要です"))?;
 
     // Tauriイベントを発行して接続を通知
-    data.app_handle.emit("mobile-connected", serde_json::json!({
-        "sessionId": session_id,
-        "imageId": image_id,
-    })).map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+    data.app_handle
+        .emit(
+            "mobile-connected",
+            serde_json::json!({
+                "sessionId": session_id,
+                "imageId": image_id,
+            }),
+        )
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "success": true,
