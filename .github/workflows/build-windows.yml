@@ -75,7 +75,7 @@ jobs:
                   raise SystemExit('u2net model not found after download')
 
           run([sys.executable, '-m', 'PyInstaller', '--clean', '--onefile', '-n', 'python-sidecar', 'python-sidecar/main.py'])
-          shutil.copy2('python-sidecar/dist/python-sidecar.exe', 'python-sidecar/python-sidecar.exe')
+          shutil.copy2('dist/python-sidecar.exe', 'python-sidecar/python-sidecar.exe')
 
       - name: Install npm dependencies
         run: npm ci
