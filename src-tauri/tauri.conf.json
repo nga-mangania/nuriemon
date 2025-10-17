@@ -51,6 +51,11 @@
     "externalBin": [
       "../python-sidecar/python-sidecar"
     ],
+    "externalBinTargets": {
+      "x86_64-pc-windows-msvc": [
+        "../python-sidecar/python-sidecar.exe"
+      ]
+    },
 
     "icon": [
       "icons/32x32.png",
