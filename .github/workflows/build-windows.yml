@@ -61,15 +61,18 @@ jobs:
 
           model_dir = os.path.join('python-sidecar', 'models')
           os.makedirs(model_dir, exist_ok=True)
+          os.environ.setdefault('U2NET_HOME', model_dir)
+          os.environ.setdefault('RMBG_SESSION_PATH', model_dir)
 
           session = new_session('u2net')
-          model_path = getattr(session, 'model_path', None)
-          if not model_path or not os.path.exists(model_path):
-              raise SystemExit('u2net model not found after download')
 
           target = os.path.join(model_dir, 'u2net.onnx')
-          if os.path.abspath(model_path) != os.path.abspath(target):
-              shutil.copy2(model_path, target)
+          if not os.path.exists(target):
+              default_home = os.path.join(os.path.expanduser('~'), '.u2net', 'u2net.onnx')
+              if os.path.exists(default_home):
+                  shutil.copy2(default_home, target)
+              else:
+                  raise SystemExit('u2net model not found after download')
 
           run([sys.executable, '-m', 'PyInstaller', '--clean', '--onefile', '-n', 'python-sidecar', 'python-sidecar/main.py'])
           shutil.copy2('python-sidecar/dist/python-sidecar.exe', 'python-sidecar/python-sidecar.exe')
