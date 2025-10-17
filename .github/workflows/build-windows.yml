@@ -55,7 +55,7 @@ jobs:
               subprocess.check_call(cmd)
 
           run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'])
-          run([sys.executable, '-m', 'pip', 'install', 'pyinstaller', 'rembg', 'pillow', 'opencv-python-headless', 'numpy'])
+          run([sys.executable, '-m', 'pip', 'install', 'pyinstaller', 'rembg', 'pillow', 'opencv-python-headless', 'numpy', 'onnxruntime'])
 
           from rembg.session_factory import new_session
 
