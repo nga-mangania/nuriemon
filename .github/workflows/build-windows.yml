@@ -76,6 +76,7 @@ jobs:
 
           run([sys.executable, '-m', 'PyInstaller', '--clean', '--onefile', '-n', 'python-sidecar', 'python-sidecar/main.py'])
           shutil.copy2('dist/python-sidecar.exe', 'python-sidecar/python-sidecar.exe')
+          shutil.copy2('dist/python-sidecar.exe', 'python-sidecar/python-sidecar-x86_64-pc-windows-msvc.exe')
 
       - name: Install npm dependencies
         run: npm ci
