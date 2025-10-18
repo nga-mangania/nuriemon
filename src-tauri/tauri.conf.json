@@ -64,9 +64,6 @@
       "entitlements": "macos/entitlements.plist",
       "exceptionDomain": "nuriemon.jp",
       "signingIdentity": "Developer ID Application: NGA, Inc. (87KUWA497A)"
-    },
-    "windows": {
-      "sidecarFromResources": false
     }
   },
   "plugins": {}
