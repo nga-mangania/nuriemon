@@ -48,18 +48,8 @@
       "../python-sidecar/models/u2net.onnx": "python-sidecar-models/u2net.onnx"
     },
     "externalBin": [
-      {
-        "path": "../python-sidecar/python-sidecar",
-        "targets": [
-          "aarch64-apple-darwin"
-        ]
-      },
-      {
-        "path": "../python-sidecar/python-sidecar.exe",
-        "targets": [
-          "x86_64-pc-windows-msvc"
-        ]
-      }
+      "../python-sidecar/python-sidecar",
+      "../python-sidecar/python-sidecar.exe"
     ],
     "icon": [
       "icons/32x32.png",
@@ -74,6 +64,9 @@
       "entitlements": "macos/entitlements.plist",
       "exceptionDomain": "nuriemon.jp",
       "signingIdentity": "Developer ID Application: NGA, Inc. (87KUWA497A)"
+    },
+    "windows": {
+      "sidecarFromResources": false
     }
   },
   "plugins": {}
